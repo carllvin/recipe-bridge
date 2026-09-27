@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import uuid
 from urllib.parse import urljoin, urlparse
 
@@ -33,6 +34,21 @@ MAX_TEXT_CHARS = 30000
 
 class UrlImportError(Exception):
     pass
+
+
+MAX_LINKS = 50
+_URL_RE = re.compile(r"https?://[^\s<>\"'\])]+")
+
+
+def links_from_text(text: str) -> list[str]:
+    """Every http(s) link in a text file (one per line, or anywhere in the
+    text), without duplicates, in their order, at most MAX_LINKS."""
+    links = []
+    for match in _URL_RE.findall(text or ""):
+        url = match.rstrip(".,;:!?")
+        if url not in links:
+            links.append(url)
+    return links[:MAX_LINKS]
 
 
 def validate_url(url: str) -> str:
