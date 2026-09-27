@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="pageTitle">Tandoor Helper</title>
   <link rel="stylesheet" href="/style.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#1c211d" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 </head>
 <body>
   <div class="app">
@@ -29,6 +33,7 @@
       <p class="lede" data-i18n="inboxLede">All suggestions waiting for your approval - from automatic runs, post-processing after imports and tools you started.</p>
       <div id="inbox-running" class="inbox-running"></div>
       <div id="inbox-queue" class="inbox-running inbox-queue hidden"></div>
+      <div id="inbox-imports"></div>
       <div id="inbox-groups"></div>
       <details id="history" class="history">
         <summary data-i18n="historyTitle">Recently applied</summary>
@@ -46,6 +51,7 @@
     <div id="area-plan" class="area-screen hidden">
       <h1 data-i18n="toolMealPlanTitle">Meal plan &amp; shopping list</h1>
       <p class="lede" data-i18n="toolMealPlanDesc">Picks one of your recipes per day.</p>
+      <p id="season-now" class="season-now hidden"></p>
       <section id="cooked-card" class="tool-card cooked-card hidden">
         <h3 data-i18n="cookedTitle">How was it?</h3>
         <p class="settings-hint" data-i18n="cookedHint">Rate what you cooked – Tandoor keeps it as a cook log, and the weekly plan prefers well-rated recipes you haven't had for a while.</p>
@@ -238,6 +244,10 @@
             <input id="url-input" type="url" inputmode="url" placeholder="https://…" required />
             <button class="btn" type="submit" data-i18n="urlImportBtn">Import</button>
           </div>
+          <p class="bookmarklet-hint">
+            <a id="bookmarklet" class="bookmarklet" href="#" draggable="true" data-i18n="bookmarkletLabel">📥 Send to Tandoor Helper</a>
+            <span data-i18n="bookmarkletHint">Drag this button to your bookmarks bar – clicking it on a recipe page sends the page here.</span>
+          </p>
         </form>
         <form id="scan-form" class="url-form import-pane hidden" data-pane="scan">
           <span class="url-form-or" data-i18n="scanHint">Finds the recipes on a site (homepage or a category page) – you pick which to import.</span>

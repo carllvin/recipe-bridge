@@ -75,6 +75,7 @@ class Job(BaseModel):
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
+    source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
 
 
 class ToolSuggestion(BaseModel):

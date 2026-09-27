@@ -1233,7 +1233,7 @@ function showArea(area) {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.area === area));
   if (area === 'import') loadRecentImports();
   if (area === 'inbox') loadInbox();
-  if (area === 'plan') { openPlanArea(); loadCooked(); }
+  if (area === 'plan') { openPlanArea(); loadCooked(); loadSeason(); }
   if (area === 'maintain') {
     loadNewRecipesStatus();
     loadUsage();
@@ -1259,6 +1259,8 @@ const TOOL_TITLE_KEYS = {
   tags_suggest_more: 'toolTagsSuggestMoreTitle',
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
+  recipes_servings: 'toolRecipesServingsTitle',
+  recipes_images: 'toolRecipesImagesTitle',
 };
 
 function toolTitle(tool) {
@@ -1329,6 +1331,8 @@ async function loadInbox(schedule = true) {
   try {
     const data = await (await fetch('/api/inbox')).json();
     inboxState.items = data.items;
+    inboxState.imports = data.imports || [];
+    renderInboxImports();
     const keys = new Set(data.items.map(itemKey));
     inboxState.selected.forEach((k) => { if (!keys.has(k)) inboxState.selected.delete(k); });
     el('inbox-running').innerHTML = data.running.map((r) => `
@@ -1343,10 +1347,44 @@ async function loadInbox(schedule = true) {
     if (!historyState.busy) loadHistory();
     if (!schedule) return;
     clearTimeout(inboxState.timer);
-    if ((data.running.length || data.queued) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
+    if ((data.running.length || data.queued || (data.imports || []).some((i) => i.status === 'processing')) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
   } catch (e) {
     el('inbox-groups').innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
   }
+}
+
+// Imports that came in from the phone's share menu or the watched folder.
+function renderInboxImports() {
+  const imports = inboxState.imports || [];
+  el('inbox-imports').innerHTML = !imports.length ? '' : `
+    <section class="inbox-group inbox-imports">
+      <div class="inbox-group-head"><h2>📥 ${t('inboxImportsTitle')} <span class="inbox-count">${imports.length}</span></h2></div>
+      <div class="tools-suggestions-list">${imports.map((i) => `
+        <div class="tool-suggestion-row ${i.status === 'error' ? 'error' : ''}">
+          <div class="suggestion-text">
+            <div>${i.source === 'folder' ? '📂' : '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
+            <div class="inbox-source">${escapeHtml(t(i.source === 'folder' ? 'inboxImportFolder' : 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
+            <div class="suggestion-preview">${i.status === 'processing'
+              ? `<span class="spinner small"></span> ${t('inboxImportProcessing')}`
+              : i.status === 'error' ? `<span class="inbox-error">${escapeHtml(i.error || '')}</span>`
+              : escapeHtml(tf('inboxImportRecipes', { n: i.recipes })) + (i.titles.length ? ': ' + escapeHtml(i.titles.join(', ')) : '')}</div>
+          </div>
+          <div class="suggestion-actions">
+            <button class="btn secondary inbox-import-dismiss" type="button" data-job="${i.job_id}">${t('inboxDismissBtn')}</button>
+            <button class="btn inbox-import-open" type="button" data-job="${i.job_id}" ${i.status !== 'ready' ? 'disabled' : ''}>${t('inboxImportOpen')}</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    </section>`;
+  el('inbox-imports').querySelectorAll('.inbox-import-open').forEach((b) => b.addEventListener('click', () => {
+    showArea('import');
+    openImportJob(b.dataset.job);
+  }));
+  el('inbox-imports').querySelectorAll('.inbox-import-dismiss').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    await fetch(`/api/jobs/${b.dataset.job}/dismiss`, { method: 'POST' }).catch(() => {});
+    loadInbox(false);
+  }));
 }
 
 function renderInbox() {
@@ -1354,7 +1392,7 @@ function renderInbox() {
   inboxState.items.forEach((i) => groups.find((g) => g.match(i)).items.push(i));
   const visible = groups.filter((g) => g.items.length);
   if (!visible.length) {
-    el('inbox-groups').innerHTML = `<p class="inbox-empty">${t('inboxEmpty')}</p>`;
+    el('inbox-groups').innerHTML = (inboxState.imports || []).length ? '' : `<p class="inbox-empty">${t('inboxEmpty')}</p>`;
     return;
   }
   el('inbox-groups').innerHTML = visible.map((g) => {
@@ -1666,6 +1704,8 @@ const HEALTH_METRICS = [
   { key: 'recipes_need_restructure', tool: 'recipes_restructure', endpoint: '/api/tools/recipes/restructure' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
+  { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
+  { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
 ];
 
 const healthState = { open: null, data: null };
@@ -1689,12 +1729,15 @@ function renderHealth(data) {
       : '';
     const fixBtn = pending
       ? `<button class="btn secondary health-open-run" type="button" data-job="${pending.job_id}" data-tool="${m.tool}">${pending.scanning ? t('healthOpenRun') : t('healthReviewRun')}</button>`
+      : value && m.needsImageGen && !APP_CONFIG.image_gen_available
+        ? `<button class="btn secondary health-fix" type="button" disabled title="${escapeHtml(t('healthImageGenOff'))}">${t('healthFix')}</button>`
       : value ? `<button class="btn secondary health-fix" type="button" data-metric="${m.key}">${t('healthFix')}</button>` : '';
     return `<div class="health-tile ${value ? 'todo' : 'ok'} ${healthState.open === m.key ? 'open' : ''} ${running ? 'refreshing' : ''}">
       <div class="health-value">${value ? value.toLocaleString() : '✓'}</div>
       <div class="health-label">${t('health_' + m.key)}</div>
       ${ignoredCount ? `<div class="health-ignored-count">${tf('healthIgnoredCount', { n: ignoredCount })}</div>` : ''}
       ${pendingHtml}
+      ${value && m.needsImageGen && !APP_CONFIG.image_gen_available ? `<div class="health-ignored-count">${t('healthImageGenOff')}</div>` : ''}
       <div class="health-tile-actions">
         ${fixBtn}
         ${value || ignoredCount ? `<button class="btn secondary health-entries" type="button" data-metric="${m.key}">${t('healthEntries')}</button>` : ''}
@@ -1833,6 +1876,16 @@ function nextMonday() {
   return d.toISOString().slice(0, 10);
 }
 
+// ---------- In season now ----------
+
+async function loadSeason() {
+  try {
+    const data = await (await fetch('/api/season')).json();
+    el('season-now').textContent = `🌱 ${t('seasonNow')}: ${data.produce.join(', ')}`;
+    el('season-now').classList.toggle('hidden', !data.produce.length);
+  } catch (e) { /* optional */ }
+}
+
 // ---------- How was it? (cook log) ----------
 
 async function loadCooked() {
@@ -1895,6 +1948,7 @@ async function searchCookToday() {
         `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
         r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
         r.minutes ? `${r.minutes} min` : '',
+        r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',
       ].filter(Boolean).join(' · ');
       return `<div class="ct-row">
@@ -2412,10 +2466,36 @@ async function runBulkAction(action) {
 
 // ---------- Init ----------
 
+// Bookmarklet: opens this app with ?import=<page address> in a new tab.
+el('bookmarklet').href = `javascript:(()=>{window.open(${JSON.stringify(location.origin + '/?import=')}+encodeURIComponent(location.href),'_blank')})()`;
+el('bookmarklet').addEventListener('click', (e) => { e.preventDefault(); showUploadError(t('bookmarkletClick')); });
+
+// Imports handed over in the address: ?import=<url> (bookmarklet),
+// ?text=<recipe text>, ?error=<message> (a failed share from the phone).
+function handleIncomingParams() {
+  const url = new URL(window.location);
+  const importUrl = url.searchParams.get('import');
+  const text = url.searchParams.get('text');
+  const error = url.searchParams.get('error');
+  ['import', 'text', 'error'].forEach((k) => url.searchParams.delete(k));
+  window.history.replaceState({}, '', url);
+  if (error) showUploadError(error);
+  if (importUrl && /^https?:\/\//i.test(importUrl)) {
+    startImportRequest('/api/import-url', { url: importUrl }, t('urlImportLoading'));
+  } else if (text && text.trim()) {
+    startImportRequest('/api/import-text', { text }, t('textImportLoading'));
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 (async function init() {
   await initI18n();
   await tryRestoreJobFromUrl();
   showArea('import');
+  if (!state.jobId) handleIncomingParams();
   checkTandoor();
   setInterval(checkTandoor, 15000);
   updateInboxBadge();

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 
-from . import ignored, llm_provider, tandoor_client, tool_jobs
+from . import ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
 from .config import settings, get_language_code
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, fetch_all_recipes_full, find_recipes_by_filter, format_cost_estimate, resolve_name_collisions, validate_actions
@@ -343,11 +344,10 @@ def run_season_scan(job_id: str) -> None:
             return
 
         with tandoor_client.get_client() as client:
-            job.progress_label = "Scanning every recipe's full detail..."
+            job.progress_label = "Looking for recipes without a season tag..."
             tool_jobs.save_tool_job(job)
-            recipes = fetch_all_recipes_full(client)
-            skip = ignored.keys("recipes_without_season")
-            missing = [r for r in recipes if str(r["id"]) not in skip and not has_season_tag(r)]
+            missing = recipe_scope.recipes_for(client, "recipes_without_season", lambda r: not has_season_tag(r),
+                                               ignored.keys("recipes_without_season"), job)
             job.progress_total = len(missing)
             job.cost_estimate = format_cost_estimate(len(missing), "batched_season")
             tool_jobs.save_tool_job(job)
@@ -398,15 +398,15 @@ def apply_season_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
 
 SUGGEST_MORE_SYSTEM_PROMPT = """You suggest additional DESCRIPTIVE tags for recipes
 in a database whose target language is {language}. You will receive a JSON
-object: {"vocabulary": [string], "recipes": [{"id": integer, "title": string,
-"description": string|null, "ingredients": [string], "existing_tags": [string]}, ...]}.
+object: {"vocabulary": [string], "diet_tags": [string], "recipes": [{"id": integer,
+"title": string, "description": string|null, "ingredients": [string],
+"ingredients_complete": bool, "existing_tags": [string]}, ...]}.
 
 Good tags describe the dish, e.g.:
 - cuisine / origin: amerikanisch, italienisch, asiatisch
 - taste / character: süß, herzhaft, scharf, fruchtig
 - cooking method: backen, grillen, schmoren, ohne Kochen
 - course / meal: Frühstück, Hauptgericht, Beilage, Dessert, Snack
-- diet: vegetarisch, vegan, glutenfrei
 - occasion / effort: Party, Weihnachten, schnell, einfach, Meal Prep
 
 NEVER suggest an ingredient as a tag (no "Blumenkohl", "Hähnchen",
@@ -421,9 +421,63 @@ useful descriptive tag is missing from the vocabulary - in the same style
 For each recipe suggest at most 3 tags that are genuinely obvious, not a
 stretch; an empty list is fine.
 
+Separately, "diet": which of "diet_tags" (diet / allergen tags: vegetarian,
+vegan, gluten-free, lactose-free, nut-free - in exactly the given spelling)
+apply. Only when you are CERTAIN from the ingredient list - one doubtful
+ingredient (e.g. "Brühe" could be meat stock, "Brot" contains gluten,
+"Pesto" often has cheese and nuts, "Worcestershiresauce" contains fish)
+means the tag does not apply. When "ingredients_complete" is false, give no
+"free of" tags (gluten-free, lactose-free, nut-free). Never repeat
+"existing_tags".
+
 Respond with ONLY a JSON array (no explanation, no markdown fence), one
-element per recipe: {"id": <id>, "tags": [string, ...]}.
+element per recipe: {"id": <id>, "tags": [string, ...], "diet": [string, ...]}.
 """
+
+# Diet / allergen tags per UI language, in the order vegetarian, vegan,
+# gluten-free, lactose-free, nut-free. They're offered to the AI in exactly
+# this spelling (or the collection's own spelling of the same tag).
+DIET_TAGS = {
+    "de": ["vegetarisch", "vegan", "glutenfrei", "laktosefrei", "nussfrei"],
+    "en": ["vegetarian", "vegan", "gluten-free", "lactose-free", "nut-free"],
+    "fr": ["végétarien", "végan", "sans gluten", "sans lactose", "sans fruits à coque"],
+    "it": ["vegetariano", "vegano", "senza glutine", "senza lattosio", "senza frutta a guscio"],
+    "es": ["vegetariano", "vegano", "sin gluten", "sin lactosa", "sin frutos secos"],
+}
+
+
+def diet_tags(vocabulary=()) -> list[str]:
+    """The diet tags for OUTPUT_LANGUAGE, spelled like the collection's own
+    tag when it already has one (e.g. "Vegetarisch")."""
+    names = DIET_TAGS.get(get_language_code(settings.output_language) or "en", DIET_TAGS["en"])
+    known = {v.strip().casefold(): v for v in vocabulary}
+    return [known.get(n.casefold(), n) for n in names]
+
+
+def has_diet_tag(recipe, tags) -> bool:
+    wanted = {t.casefold() for t in tags}
+    return any(kw["name"].strip().casefold() in wanted for kw in recipe.get("keywords", []))
+
+
+def _diet_checked_path() -> str:
+    return os.path.join(settings.data_dir, "diet_checked.json")
+
+
+def diet_checked() -> set[int]:
+    """Recipes whose diet tags were already judged once (so tagged recipes
+    aren't sent again just for that)."""
+    try:
+        with open(_diet_checked_path(), encoding="utf-8") as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def mark_diet_checked(recipe_ids) -> None:
+    ids = diet_checked() | set(recipe_ids)
+    os.makedirs(settings.data_dir, exist_ok=True)
+    with open(_diet_checked_path(), "w", encoding="utf-8") as f:
+        json.dump(sorted(ids), f)
 
 MIN_TAGS_DEFAULT = 5
 # Recipes per AI call. The prompt and the tag vocabulary (the bulk of the
@@ -431,7 +485,7 @@ MIN_TAGS_DEFAULT = 5
 SUGGEST_MORE_BATCH_SIZE = 20
 MAX_VOCABULARY = 200
 MAX_DESCRIPTION_CHARS = 200
-MAX_INGREDIENTS = 20
+MAX_INGREDIENTS = 40
 
 
 def _compact_recipe(recipe):
@@ -449,6 +503,7 @@ def _compact_recipe(recipe):
         "title": recipe.get("name", ""),
         "description": description[:MAX_DESCRIPTION_CHARS] or None,
         "ingredients": ingredients[:MAX_INGREDIENTS],
+        "ingredients_complete": len(ingredients) <= MAX_INGREDIENTS,
         "existing_tags": [kw["name"] for kw in recipe.get("keywords", [])],
     }
 
@@ -489,6 +544,8 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
     `job`, stops early on cancel. Shared by the "Tags: suggest more" tool and
     the new-recipes workflow."""
     system_prompt = SUGGEST_MORE_SYSTEM_PROMPT.replace("{language}", settings.output_language)
+    diets = diet_tags(vocabulary)
+    diet_by_key = {d.casefold(): d for d in diets}
     by_id = {r["id"]: r for r in recipes}
     # casefold, not lower: "SÜSS" must match an existing "süß"
     known = {v.strip().casefold(): v for v in vocabulary}
@@ -502,12 +559,14 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
         try:
             answers = _complete_json(
                 job, system_prompt,
-                {"vocabulary": vocabulary, "recipes": [_compact_recipe(r) for r in batch]},
-                max_tokens=60 * len(batch) + 200,
+                {"vocabulary": vocabulary, "diet_tags": diets, "recipes": [_compact_recipe(r) for r in batch]},
+                max_tokens=80 * len(batch) + 200,
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("Suggest-more batch %d failed: %s", i, exc)
             answers = []
+        else:
+            mark_diet_checked(r["id"] for r in batch)
 
         for answer in answers:
             recipe = by_id.get(answer.get("id")) if isinstance(answer, dict) else None
@@ -519,7 +578,17 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
             # Reuse the vocabulary's exact spelling when the AI changed case.
             tags = [known.get(t.casefold(), t) for t in tags]
             tags = [t for t in dict.fromkeys(tags)
-                    if t.casefold() not in existing and not _is_ingredient_tag(t, ingredients, food_names)][:3]
+                    if t.casefold() not in existing and t.casefold() not in diet_by_key
+                    and not _is_ingredient_tag(t, ingredients, food_names)][:3]
+            # Diet / allergen tags on top of the 3 descriptive ones; vegan
+            # implies vegetarian.
+            diet = [diet_by_key[d.strip().casefold()] for d in answer.get("diet") or []
+                    if isinstance(d, str) and d.strip().casefold() in diet_by_key]
+            if diets[1] in diet and diets[0] not in diet:
+                diet.insert(0, diets[0])
+            if not _compact_recipe(recipe)["ingredients_complete"]:
+                diet = [d for d in diet if d in diets[:2]]
+            tags += [d for d in dict.fromkeys(diet) if d.casefold() not in existing and d not in tags]
             if not tags:
                 continue
             labels = ", ".join(t if t.casefold() in known else f"{t} (new)" for t in tags)
@@ -554,11 +623,16 @@ def run_suggest_more_scan(job_id: str) -> None:
             # Only descriptive tags count - five ingredient tags ("Blumenkohl")
             # still leave a recipe under-tagged.
             skip = ignored.keys("recipes_few_tags")
-            under_tagged = [
-                r for r in recipes
-                if str(r["id"]) not in skip
-                and sum(1 for kw in r.get("keywords", []) if kw["name"].strip().casefold() not in food_names) < MIN_TAGS_DEFAULT
-            ]
+            checked = diet_checked()
+            diets = diet_tags(tag_vocabulary(all_tags, recipes, food_names))
+
+            def needs_tags(r):
+                if str(r["id"]) in skip:
+                    return False
+                descriptive = sum(1 for kw in r.get("keywords", []) if kw["name"].strip().casefold() not in food_names)
+                # Every recipe also gets its diet / allergen tags judged once.
+                return descriptive < MIN_TAGS_DEFAULT or (r["id"] not in checked and not has_diet_tag(r, diets))
+            under_tagged = [r for r in recipes if needs_tags(r)]
             job.progress_total = len(under_tagged)
             job.cost_estimate = format_cost_estimate(len(under_tagged), "batched_suggest_tags")
             tool_jobs.save_tool_job(job)

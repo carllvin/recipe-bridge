@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, ignored, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -152,16 +152,21 @@ def _compute() -> None:
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),
+            "recipes_without_servings": recipe_items(tools_recipe_details.lacks_servings),
+            "recipes_without_image": recipe_items(tools_recipe_details.lacks_image),
             "recipes_few_tags": recipe_items(
                 lambda r: sum(1 for kw in r.get("keywords", []) if kw["name"].strip().casefold() not in food_names)
                 < tools_tags.MIN_TAGS_DEFAULT
             ),
         }
         metrics = {"recipes_total": len(recipes), "foods_used": len(used_foods)}
+        # lets the recipe tools read only what changed since (recipe_scope.py)
+        recipe_versions = {str(r["id"]): r.get("updated_at") for r in recipes}
         os.makedirs(settings.data_dir, exist_ok=True)
         tmp = _path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"computed_at": started, "metrics": metrics, "items": item_lists}, f, ensure_ascii=False)
+            json.dump({"computed_at": started, "metrics": metrics, "items": item_lists,
+                       "recipe_versions": recipe_versions}, f, ensure_ascii=False)
         os.replace(tmp, _path())
     except Exception as exc:  # noqa: BLE001
         log.exception("Health overview failed")

@@ -14,7 +14,7 @@ import json
 import logging
 import uuid
 
-from . import llm_provider, tandoor_client, tool_jobs
+from . import cook_today, llm_provider, seasonal, tandoor_client, tool_jobs
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
@@ -26,14 +26,16 @@ RECENTLY_COOKED_DAYS = 14
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
 collection. Language for "reason": {language}. You will receive a JSON
 object: {"today": "YYYY-MM-DD", "meal": string, "days": ["YYYY-MM-DD (weekday)", ...],
-"wishes": string, "recipes": ["<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>", ...]}
+"wishes": string, "in_season": [string], "recipes": ["<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>", ...]}
 
 Pick exactly one recipe per day for that meal:
 - follow the wishes (e.g. "2x vegetarian", "quick on weekdays")
 - prefer well-rated recipes (4-5) and ones not cooked for a long time;
   avoid recipes rated 1-2 unless the wishes ask for them; mix in one or
   two never-cooked recipes so new ones get tried
-- prefer recipes that fit the current season
+- prefer recipes that fit the current season - especially ones using the
+  produce that is in season now ("in_season"; the last field of a recipe
+  lists its in-season ingredients)
 - vary it: no recipe twice, don't repeat the same kind of dish on
   consecutive days
 - quicker recipes on weekdays, more elaborate ones on weekends, unless the
@@ -100,11 +102,14 @@ def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSu
     meal_type = params["meal_type"]
     pool = [r for r in candidates if r["id"] not in exclude_ids]
     by_id = {r["id"]: r for r in pool}
+    in_season = cook_today.seasonal_by_recipe()
+
     def line(r):
         tags = ",".join(k.get("label") or k.get("name", "") for k in r.get("keywords") or [])
         rating = f"{r['rating']:g}" if r.get("rating") else "-"
         days = _days_since_cooked(r)
-        return f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
+        return (f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
+                f"|{','.join(in_season.get(r['id'], []))}")
     lines = [line(r) for r in pool]
     text_out, usage = llm_provider.complete_tool_text(
         SYSTEM_PROMPT.replace("{language}", settings.output_language),
@@ -113,6 +118,7 @@ def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSu
             "meal": meal_type["name"],
             "days": [f"{d.isoformat()} ({d.strftime('%A')})" for d in days],
             "wishes": params.get("wishes") or "",
+            "in_season": seasonal.display_names(seasonal.in_season()),
             "recipes": lines,
         }, ensure_ascii=False),
         max_tokens=60 * len(days) + 200,
