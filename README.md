@@ -7,22 +7,28 @@ and adjust them in a web UI, and import the selected ones into
 
 The web UI has four areas:
 
-- **📥 Import** – a cookbook (PDF/EPUB), photos of pages, or a single recipe
-  from a web page; reviewed before it goes into Tandoor, and post-processed
+- **📥 Import** – a cookbook (PDF/EPUB), photos of pages (collected and
+  ordered first, optionally as one single recipe), or a single recipe from a
+  web page; reviewed before it goes into Tandoor, and post-processed
   automatically afterwards.
 - **✅ Review** – one inbox for every suggestion waiting for approval
   (merges, ingredient details, conversions, recipe revisions, tags, meal
-  plan), grouped by kind.
-- **📅 Plan** – a weekly meal plan from your own recipes, added to Tandoor's
-  meal plan and shopping list.
+  plan), grouped by kind. Selected suggestions are applied in the
+  background (closing the page doesn't stop it); failed ones can be retried,
+  and applied changes can be undone for 14 days.
+- **📅 Plan** – "What can I cook today?" from the ingredients you have, a
+  weekly meal plan from your own recipes (using ratings and cooking history)
+  added to Tandoor's meal plan and shopping list, and "How was it?" to rate
+  what you cooked.
 - **🔧 Maintain** – a health overview of the collection (likely duplicate
   ingredients/units, missing nutrition/categories/conversions, untranslated
   or unstructured recipes, missing season/tags): each tile starts the tool
   that fixes it, and single entries can be ignored. Tools without a count
   (full ingredient/unit review, tag translate & simplify) are under "More
-  tools". Plus the AI token usage of the last 30 days. A few destructive operations are
-  standalone scripts that intentionally require a terminal - see
-  [`backend/scripts/`](backend/scripts/).
+  tools". Automatic maintenance on a schedule and a monthly AI token budget
+  are set up there too, next to the AI usage of the last 30 days. A few
+  destructive operations are standalone scripts that intentionally require
+  a terminal - see [`backend/scripts/`](backend/scripts/).
 
 <p align="center">
   <img src="screenshots/main_page.png" alt="Main page" width="85%">
