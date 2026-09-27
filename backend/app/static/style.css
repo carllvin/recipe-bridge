@@ -1046,3 +1046,6 @@ a { color: inherit; }
 .bookmarklet-hint { font-size: 0.8rem; color: #8f9689; text-align: center; margin: 4px 0 0; line-height: 1.5; }
 .bookmarklet { display: inline-block; padding: 2px 10px; margin-right: 6px; border: 1px dashed #c9a45c; border-radius: 999px;
   color: #c9a45c; text-decoration: none; cursor: grab; white-space: nowrap; }
+.tools-skipped-note { font-size: 0.85rem; color: #b9bdb3; border: 1px solid #3a4038; border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+.tools-skipped-note p { margin: 4px 0; }
+.tools-skipped-note ul { margin: 4px 0; padding-left: 18px; }

@@ -22,7 +22,8 @@ def _detect_source_language(pages: list[dict]) -> Optional[str]:
     if len(sample) < 50:
         return None
     try:
-        from langdetect import detect, LangDetectException
+        from langdetect import DetectorFactory, detect, LangDetectException
+        DetectorFactory.seed = 0  # same answer every time
         try:
             return detect(sample)
         except LangDetectException:

@@ -2256,6 +2256,7 @@ function resetToolRunView(title) {
   el('tools-run-usage').classList.add('hidden');
   el('tools-run-error').classList.add('hidden');
   el('tools-cancelled-note').classList.add('hidden');
+  el('tools-skipped-note').classList.add('hidden');
   el('tools-cancel-btn').disabled = false;
   el('tools-cancel-btn').textContent = t('toolCancelBtn');
   el('tools-suggestions-list').innerHTML = '';
@@ -2342,6 +2343,22 @@ function renderToolUsage(job) {
 // bar above the list applies/skips all checked ones. They're sent one after
 // another (not in parallel) - merges touch shared recipes, and running them
 // sequentially keeps the same order and safety as clicking them one by one.
+// Recipes a run looked at but made no suggestion for - with the reason, so
+// a recipe listed in a tile doesn't silently disappear.
+function renderToolSkipped(job) {
+  const skipped = (job.meta && job.meta.skipped) || [];
+  const box = el('tools-skipped-note');
+  box.classList.toggle('hidden', !skipped.length);
+  if (!skipped.length) { box.innerHTML = ''; return; }
+  const unchanged = skipped.filter((s) => s.reason === 'unchanged');
+  const failed = skipped.filter((s) => s.reason === 'failed');
+  box.innerHTML = [
+    unchanged.length ? `<p>${escapeHtml(tf('toolSkippedUnchanged', { names: unchanged.map((s) => s.name).join(', ') }))}</p>` : '',
+    failed.length ? `<p>${escapeHtml(t('toolSkippedFailed'))}</p><ul>${failed.map((s) =>
+      `<li><strong>${escapeHtml(s.name)}</strong>: ${escapeHtml(s.error || '')}</li>`).join('')}</ul>` : '',
+  ].join('');
+}
+
 function renderToolSuggestions(job) {
   toolsState.job = job;
   const list = el('tools-suggestions-list');
@@ -2349,6 +2366,7 @@ function renderToolSuggestions(job) {
   // Drop selections that are no longer pending (applied/skipped/failed).
   toolsState.selected.forEach((id) => { if (!pendingIds.has(id)) toolsState.selected.delete(id); });
 
+  renderToolSkipped(job);
   if (job.suggestions.length === 0) {
     el('tools-bulk-bar').classList.add('hidden');
     list.innerHTML = `<p style="color:#8f9689;">${t('toolNoSuggestions')}</p>`;
