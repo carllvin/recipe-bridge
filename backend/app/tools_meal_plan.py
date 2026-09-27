@@ -204,6 +204,35 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
     return job
 
 
+def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
+    """Creates one entry in Tandoor's meal plan with the recipe's own
+    servings - so the shopping list gets exactly the amounts written in the
+    recipe. Returns the created entry."""
+    resp = client.get(f"/recipe/{recipe['id']}/")
+    resp.raise_for_status()
+    payload = {
+        "title": "",
+        "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
+        "servings": resp.json().get("servings") or 1,
+        "note": "",
+        "from_date": date,
+        "to_date": date,
+        "meal_type": meal_type,
+        "shared": [],
+        # Tandoor adds the recipe's ingredients to the shopping list when a
+        # plan entry is created with this flag.
+        "addshopping": add_to_shopping,
+    }
+    resp = client.post("/meal-plan/", json=payload)
+    if resp.status_code == 400 and "date" in resp.text.lower():
+        # Newer Tandoor versions store plan dates as date-times.
+        payload["from_date"] = payload["to_date"] = f"{date}T00:00:00"
+        resp = client.post("/meal-plan/", json=payload)
+    if resp.status_code not in (200, 201):
+        raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
+    return resp.json()
+
+
 def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
@@ -215,33 +244,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
         return suggestion
 
     d = suggestion.detail
-    payload = {
-        "title": "",
-        "recipe": d["recipe"],
-        "servings": 1,  # replaced below by the recipe's own servings
-        "note": "",
-        "from_date": d["date"],
-        "to_date": d["date"],
-        "meal_type": d["meal_type"],
-        "shared": [],
-        # Tandoor adds the recipe's ingredients to the shopping list when a
-        # plan entry is created with this flag.
-        "addshopping": d["add_to_shopping"],
-    }
     try:
         with tandoor_client.get_client() as client:
-            # The recipe's own servings - so the shopping list gets exactly
-            # the amounts written in the recipe.
-            resp = client.get(f"/recipe/{d['recipe']['id']}/")
-            resp.raise_for_status()
-            payload["servings"] = resp.json().get("servings") or 1
-            resp = client.post("/meal-plan/", json=payload)
-            if resp.status_code == 400 and "date" in resp.text.lower():
-                # Newer Tandoor versions store plan dates as date-times.
-                payload["from_date"] = payload["to_date"] = f"{d['date']}T00:00:00"
-                resp = client.post("/meal-plan/", json=payload)
-            if resp.status_code not in (200, 201):
-                raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
+            create_plan_entry(client, d["recipe"], d["date"], d["meal_type"], d["add_to_shopping"])
         suggestion.status = "applied"
     except Exception as exc:  # noqa: BLE001
         suggestion.status = "error"

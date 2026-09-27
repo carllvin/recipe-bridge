@@ -1584,6 +1584,60 @@ function nextMonday() {
   return d.toISOString().slice(0, 10);
 }
 
+// ---------- What can I cook today? ----------
+
+async function searchCookToday() {
+  const have = el('ct-have').value.trim();
+  if (!have) return;
+  el('ct-status').textContent = t('cookTodaySearching');
+  try {
+    const params = new URLSearchParams({ have, staples: el('ct-staples').checked });
+    const data = await (await fetch(`/api/cook-today?${params}`)).json();
+    if (data.building && !data.results.length && !data.built_at) {
+      // First use: the ingredient index is being built from every recipe.
+      el('ct-status').textContent = t('cookTodayBuilding');
+      clearTimeout(searchCookToday.timer);
+      searchCookToday.timer = setTimeout(searchCookToday, 4000);
+      return;
+    }
+    el('ct-status').textContent = data.results.length ? '' : t('cookTodayNone');
+    el('ct-results').innerHTML = data.results.map((r) => {
+      const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
+      const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
+      const meta = [
+        `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
+        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
+        r.minutes ? `${r.minutes} min` : '',
+        r.rating ? '★'.repeat(Math.round(r.rating)) : '',
+      ].filter(Boolean).join(' · ');
+      return `<div class="ct-row">
+        <div class="ct-score">${r.matched.length}/${r.needed}</div>
+        <div class="ct-main"><div class="ct-name">${name}</div><div class="ct-meta">${meta}</div></div>
+        <button class="btn secondary ct-plan" type="button" data-id="${r.id}" data-name="${escapeHtml(r.name)}">${t('cookTodayPlanBtn')}</button>
+      </div>`;
+    }).join('');
+    el('ct-results').querySelectorAll('.ct-plan').forEach((b) => b.addEventListener('click', async () => {
+      const meal = el('mp-meal');
+      if (!meal.value) { el('ct-status').textContent = t('mealPlanNoMealTypes'); return; }
+      b.disabled = true;
+      const res = await fetch('/api/cook-today/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipe: { id: Number(b.dataset.id), name: b.dataset.name },
+          meal_type: { id: Number(meal.value), name: meal.options[meal.selectedIndex].text },
+          add_to_shopping: el('mp-shopping').checked,
+        }),
+      });
+      b.textContent = res.ok ? `✓ ${tf('cookTodayPlanned', { meal: meal.options[meal.selectedIndex].text })}` : t('toolStatusError');
+      if (!res.ok) b.disabled = false;
+    }));
+  } catch (e) {
+    el('ct-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+  }
+}
+
+el('cook-today-form').addEventListener('submit', (e) => { e.preventDefault(); searchCookToday(); });
+
 async function loadMealPlanOptions() {
   if (!el('mp-start').value) el('mp-start').value = nextMonday();
   const select = el('mp-meal');

@@ -971,3 +971,19 @@ a { color: inherit; }
 .budget-bar div.over { background: #c0634f; }
 .usage-budget { font-size: 0.8rem; color: var(--gold); margin: 4px 0; }
 .usage-budget.over { color: #e08a78; }
+.cook-today-card { margin-bottom: 20px; }
+.cook-today-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.cook-today-form input[type="text"] {
+  flex: 1; min-width: 200px; background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a;
+  border-radius: var(--radius); color: var(--paper); padding: 8px 10px; font-size: 0.9rem;
+}
+.cook-today-form .mp-check { flex-basis: 100%; font-size: 0.8rem; display: flex; gap: 8px; align-items: center; }
+.ct-results { display: flex; flex-direction: column; gap: 8px; }
+.ct-row { display: flex; gap: 12px; align-items: center; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
+.ct-main { flex: 1; min-width: 0; }
+.ct-name { font-weight: 600; }
+.ct-name a { color: inherit; }
+.ct-meta { font-size: 0.78rem; color: #8a9186; overflow-wrap: anywhere; }
+.ct-meta .ct-have { color: #8fb996; }
+.ct-score { font-family: 'Fraunces', serif; font-size: 1.1rem; min-width: 44px; text-align: center; }
+.ct-row .btn { padding: 4px 10px; font-size: 0.75rem; flex-shrink: 0; }

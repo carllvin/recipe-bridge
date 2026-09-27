@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_today, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -746,6 +746,30 @@ async def start_units_review(body: dict | None = Body(None)):
 @app.post("/api/tools/recipes/translate")
 async def start_recipes_translate():
     return _start_tool_job("recipes_translate")
+
+
+@app.get("/api/cook-today")
+async def cook_today_search(have: str = "", staples: bool = True):
+    return await asyncio.to_thread(cook_today.suggest, have, staples)
+
+
+@app.post("/api/cook-today/plan")
+async def cook_today_plan(body: dict = Body(...)):
+    """{"recipe": {"id", "name"}, "meal_type": {"id", "name"}, "date"?, "add_to_shopping"?} -
+    puts the recipe on today's (or the given day's) meal plan."""
+    recipe, meal_type = body.get("recipe") or {}, body.get("meal_type") or {}
+    if not recipe.get("id") or not meal_type.get("id"):
+        raise HTTPException(400, "Recipe and meal type are required.")
+    date = body.get("date") or time.strftime("%Y-%m-%d")
+
+    def create():
+        with tandoor_client.get_client() as client:
+            return tools_meal_plan.create_plan_entry(client, recipe, date, meal_type, bool(body.get("add_to_shopping")))
+    try:
+        await asyncio.to_thread(create)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+    return {"ok": True, "date": date}
 
 
 @app.get("/api/tools/meal-plan/options")

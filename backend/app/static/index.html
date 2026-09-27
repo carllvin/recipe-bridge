@@ -46,6 +46,17 @@
     <div id="area-plan" class="area-screen hidden">
       <h1 data-i18n="toolMealPlanTitle">Meal plan &amp; shopping list</h1>
       <p class="lede" data-i18n="toolMealPlanDesc">Picks one of your recipes per day.</p>
+      <section class="tool-card cook-today-card">
+        <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
+        <p class="settings-hint" data-i18n="cookTodayHint">Type what you have at home – finds matching recipes in your collection (no AI).</p>
+        <form id="cook-today-form" class="cook-today-form">
+          <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
+          <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
+          <label class="mp-check"><input id="ct-staples" type="checkbox" checked /> <span data-i18n="cookTodayStaples">Salt, pepper, oil, sugar, flour, butter, vinegar are at home</span></label>
+        </form>
+        <p id="ct-status" class="settings-hint"></p>
+        <div id="ct-results" class="ct-results"></div>
+      </section>
       <div class="tool-card plan-form-card">
         <form id="meal-plan-form" class="meal-plan-form">
           <label><span data-i18n="mealPlanStart">Start</span><input id="mp-start" type="date" required /></label>
