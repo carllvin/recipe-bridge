@@ -274,3 +274,19 @@ enough; restarting the container loses any job that hasn't been imported yet.
   AI-generated recipe images when the source has none — each is a large
   enough subsystem (new dependencies: Tesseract, ebooklib, an image-gen API,
   OpenCV/PIL-based image processing) to warrant its own dedicated pass
+
+
+## Tests
+
+The tricky parts (merging and undo against an in-memory fake Tandoor, the
+background queue, duplicate detection, plural filter, "what can I cook
+today?", budget and schedule, the review inbox) have automated tests. They
+need no Tandoor and no AI key and run in a few seconds:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+GitHub runs them on every pull request (`.github/workflows/tests.yml`).
