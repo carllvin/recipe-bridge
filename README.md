@@ -16,10 +16,6 @@ The web UI has four areas:
   plan), grouped by kind. Selected suggestions are applied in the
   background (closing the page doesn't stop it); failed ones can be retried,
   and applied changes can be undone for 14 days.
-- **📅 Plan** – "What can I cook today?" from the ingredients you have, a
-  weekly meal plan from your own recipes (using ratings and cooking history)
-  added to Tandoor's meal plan and shopping list, and "How was it?" to rate
-  what you cooked.
 - **🔧 Maintain** – a health overview of the collection (likely duplicate
   ingredients/units, missing nutrition/categories/conversions, untranslated
   or unstructured recipes, missing season/tags): each tile starts the tool
@@ -29,6 +25,10 @@ The web UI has four areas:
   are set up there too, next to the AI usage of the last 30 days. A few
   destructive operations are standalone scripts that intentionally require
   a terminal - see [`backend/scripts/`](backend/scripts/).
+- **📅 Plan** – "What can I cook today?" from the ingredients you have, a
+  weekly meal plan from your own recipes (using ratings and cooking history)
+  added to Tandoor's meal plan and shopping list, and "How was it?" to rate
+  what you cooked.
 
 <p align="center">
   <img src="screenshots/main_page.png" alt="Main page" width="85%">
