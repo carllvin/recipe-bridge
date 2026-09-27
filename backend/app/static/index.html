@@ -77,10 +77,13 @@
         <div class="status-text" data-i18n="planRunning">Planning …</div>
       </div>
       <div id="plan-error" class="error-banner hidden"></div>
-      <div id="plan-week" class="plan-week"></div>
-      <div id="plan-actions" class="plan-actions hidden">
-        <span id="plan-status" class="tools-bulk-status"></span>
-        <button id="plan-apply-btn" class="btn" type="button"></button>
+      <!-- The action bar sticks to the bottom only while the week is in view. -->
+      <div class="plan-week-wrap">
+        <div id="plan-week" class="plan-week"></div>
+        <div id="plan-actions" class="plan-actions hidden">
+          <span id="plan-status" class="tools-bulk-status"></span>
+          <button id="plan-apply-btn" class="btn" type="button"></button>
+        </div>
       </div>
     </div>
 
