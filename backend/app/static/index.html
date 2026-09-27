@@ -88,6 +88,7 @@
             <div class="tool-card-icon">📊</div>
             <h3 data-i18n="usageTitle">AI usage (30 days)</h3>
             <p id="usage-total" class="new-recipes-status"></p>
+            <p id="usage-budget" class="usage-budget hidden"></p>
             <div id="usage-by-source" class="usage-by-source"></div>
           </div>
         </div>
@@ -99,6 +100,38 @@
           </div>
           <div id="health-grid" class="health-grid"></div>
           <div id="health-detail" class="health-detail hidden"></div>
+        </section>
+        <section class="tool-card settings-card">
+          <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+          <div class="settings-grid">
+            <div class="settings-block">
+              <h4 data-i18n="maintTitle">Automatic maintenance</h4>
+              <p class="settings-hint" data-i18n="maintHint">Recounts the overview and prepares suggestions for the selected tiles. Nothing is changed before you review it.</p>
+              <label class="settings-check"><input type="checkbox" id="set-maint-enabled"> <span data-i18n="maintEnabled">Active</span></label>
+              <div class="settings-row">
+                <label><span data-i18n="maintHour">Time</span> <select id="set-maint-hour"></select></label>
+                <label><span data-i18n="maintEvery">Every</span> <select id="set-maint-days">
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="7">7</option><option value="14">14</option>
+                </select> <span data-i18n="maintDays">days</span></label>
+              </div>
+              <div id="set-maint-metrics" class="settings-metrics"></div>
+              <p id="set-maint-status" class="settings-hint"></p>
+              <button id="set-maint-run" class="btn secondary" type="button" data-i18n="maintRunNow">Run now</button>
+            </div>
+            <div class="settings-block">
+              <h4 data-i18n="budgetTitle">Monthly AI budget</h4>
+              <label class="settings-field"><span data-i18n="budgetLimit">Limit (tokens per month, 0 = off)</span>
+                <input type="number" id="set-budget-limit" min="0" step="100000" /></label>
+              <label class="settings-check"><input type="checkbox" id="set-budget-block"> <span data-i18n="budgetBlock">Also block manual starts and imports once reached</span></label>
+              <div class="budget-bar"><div id="budget-fill"></div></div>
+              <p id="budget-text" class="settings-hint"></p>
+              <p class="settings-hint" data-i18n="budgetHint">Once reached, automatic runs (new recipes, post-processing after imports, automatic maintenance) no longer start.</p>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button id="settings-save" class="btn" type="button" data-i18n="settingsSave">Save</button>
+            <span id="settings-saved" class="settings-hint"></span>
+          </div>
         </section>
         <details class="more-tools">
           <summary data-i18n="moreToolsTitle">More tools</summary>

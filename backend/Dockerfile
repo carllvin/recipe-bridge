@@ -9,6 +9,7 @@ WORKDIR /app
 #   OCR_LANGUAGES in .env if your cookbooks are in other languages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
+    tzdata \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-deu \

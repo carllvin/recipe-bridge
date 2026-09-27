@@ -989,6 +989,7 @@ function showArea(area) {
     loadNewRecipesStatus();
     loadUsage();
     loadHealth();
+    loadSettings();
   }
   window.scrollTo(0, 0);
 }
@@ -1320,6 +1321,7 @@ async function loadUsage() {
   try {
     const data = await (await fetch('/api/usage?days=30')).json();
     const total = data.total.input_tokens + data.total.output_tokens;
+    if (data.budget) renderBudget(data.budget);
     el('usage-total').textContent = total
       ? tf('usageLine', { input: data.total.input_tokens.toLocaleString(), output: data.total.output_tokens.toLocaleString() })
       : t('usageNone');
@@ -1331,6 +1333,78 @@ async function loadUsage() {
     el('usage-total').textContent = '';
   }
 }
+
+// ---------- Automation & budget settings ----------
+
+function renderBudget(budget) {
+  const pct = budget.limit ? Math.min(100, Math.round((budget.used / budget.limit) * 100)) : 0;
+  el('budget-fill').style.width = `${pct}%`;
+  el('budget-fill').classList.toggle('over', budget.exceeded);
+  el('budget-text').textContent = budget.limit
+    ? tf('budgetUsed', { used: budget.used.toLocaleString(), limit: budget.limit.toLocaleString(), pct })
+    : tf('budgetUsedNoLimit', { used: budget.used.toLocaleString() });
+  const line = el('usage-budget');
+  line.classList.toggle('hidden', !budget.warn);
+  line.classList.toggle('over', budget.exceeded);
+  line.textContent = budget.exceeded ? t('budgetExceeded') : budget.warn ? tf('budgetWarn', { pct }) : '';
+}
+
+function renderMaintStatus(st) {
+  const parts = [];
+  if (st.running) parts.push(t('maintRunning'));
+  else if (st.next_run_at) parts.push(tf('maintNext', { when: new Date(st.next_run_at * 1000).toLocaleString([], { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }));
+  if (st.last_run_at) {
+    const r = st.last_result || {};
+    const started = (r.started || []).map(toolTitle).join(', ') || t('maintNothing');
+    parts.push(tf('maintLast', { when: shortWhen(st.last_run_at), tools: started }) + (r.budget_stop ? ` ${t('maintBudgetStop')}` : ''));
+  }
+  el('set-maint-status').textContent = parts.join(' · ');
+  el('set-maint-run').disabled = st.running;
+}
+
+async function loadSettings() {
+  try {
+    const data = await (await fetch('/api/settings')).json();
+    const m = data.maintenance;
+    if (!el('set-maint-hour').options.length) {
+      el('set-maint-hour').innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`).join('');
+    }
+    el('set-maint-enabled').checked = m.enabled;
+    el('set-maint-hour').value = String(m.hour);
+    el('set-maint-days').value = String(m.every_days);
+    el('set-maint-metrics').innerHTML = data.metrics.map((k) => `
+      <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('health_' + k))}</label>`).join('');
+    el('set-budget-limit').value = data.budget.monthly_tokens;
+    el('set-budget-block').checked = data.budget.block_manual;
+    renderBudget(data.budget_status);
+    renderMaintStatus(data.maintenance_status);
+    clearTimeout(loadSettings.timer);
+    if (data.maintenance_status.running && currentArea === 'maintain') loadSettings.timer = setTimeout(loadSettings, 5000);
+  } catch (e) { /* optional panel */ }
+}
+
+el('settings-save').addEventListener('click', async () => {
+  const body = {
+    maintenance: {
+      enabled: el('set-maint-enabled').checked,
+      hour: Number(el('set-maint-hour').value),
+      every_days: Number(el('set-maint-days').value),
+      metrics: [...el('set-maint-metrics').querySelectorAll('input:checked')].map((c) => c.value),
+    },
+    budget: { monthly_tokens: Number(el('set-budget-limit').value) || 0, block_manual: el('set-budget-block').checked },
+  };
+  const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  el('settings-saved').textContent = res.ok ? t('settingsSaved') : `${t('toolStatusError')}: HTTP ${res.status}`;
+  setTimeout(() => { el('settings-saved').textContent = ''; }, 3000);
+  loadSettings();
+});
+
+el('set-maint-run').addEventListener('click', async () => {
+  el('set-maint-run').disabled = true;
+  await fetch('/api/maintenance/run', { method: 'POST' });
+  loadSettings();
+  loadHealth();
+});
 
 // metric -> the tool that fixes it (endpoint + optional request body)
 const HEALTH_METRICS = [
@@ -1758,7 +1832,11 @@ async function startTool(endpoint, title, body) {
     const res = await fetch(endpoint, body
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : { method: 'POST' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).detail || ''; } catch (e) { /* not JSON */ }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     toolsState.jobId = data.job_id;
     pollToolJob();

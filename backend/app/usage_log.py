@@ -52,3 +52,43 @@ def summary(days: int = 30) -> dict:
     except FileNotFoundError:
         pass
     return {"days": days, "total": total, "by_source": by_source}
+
+
+def month_total() -> int:
+    """Input + output tokens used since the start of the current calendar
+    month (local time)."""
+    now = time.localtime()
+    start = time.mktime((now.tm_year, now.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+    total = 0
+    try:
+        with open(_path(), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("ts", 0) >= start:
+                    total += entry.get("in", 0) + entry.get("out", 0)
+    except FileNotFoundError:
+        pass
+    return total
+
+
+def budget_status() -> dict:
+    """{"limit", "used", "exceeded", "warn", "block_manual"} for the monthly
+    token budget from the UI settings (limit 0 = no budget)."""
+    from . import app_settings  # late import: app_settings is independent of this module
+
+    budget = app_settings.get()["budget"]
+    limit, used = budget["monthly_tokens"], month_total()
+    return {"limit": limit, "used": used, "exceeded": bool(limit) and used >= limit,
+            "warn": bool(limit) and used >= 0.8 * limit, "block_manual": budget["block_manual"]}
+
+
+def automatic_runs_allowed() -> bool:
+    return not budget_status()["exceeded"]
+
+
+def manual_runs_allowed() -> bool:
+    status = budget_status()
+    return not (status["exceeded"] and status["block_manual"])

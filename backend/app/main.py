@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import apply_queue, health, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -223,6 +223,7 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 @app.post("/api/upload")
 async def upload_files(files: list[UploadFile] = File(...)):
+    _check_budget()
     filenames = [f.filename or "" for f in files]
     doc_type, error = _classify_upload(filenames)
     if error:
@@ -260,6 +261,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
 async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
     and import flow as an uploaded document (see url_processor)."""
+    _check_budget()
     try:
         url = validate_url(body.get("url", ""))
     except UrlImportError as exc:
@@ -287,7 +289,29 @@ async def list_import_jobs():
 
 @app.get("/api/usage")
 async def token_usage(days: int = 30):
-    return usage_log.summary(max(1, min(days, 365)))
+    return {**usage_log.summary(max(1, min(days, 365))), "budget": usage_log.budget_status()}
+
+
+@app.get("/api/settings")
+async def get_app_settings():
+    return {**app_settings.get(), "budget_status": usage_log.budget_status(),
+            "maintenance_status": maintenance.status(), "metrics": app_settings.MAINTENANCE_METRICS}
+
+
+@app.put("/api/settings")
+async def put_app_settings(body: dict = Body(...)):
+    try:
+        app_settings.update(body)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Invalid settings: {exc}")
+    return await get_app_settings()
+
+
+@app.post("/api/maintenance/run")
+async def run_maintenance_now():
+    if not maintenance.start_now():
+        raise HTTPException(409, "A maintenance run is already going.")
+    return maintenance.status()
 
 
 @app.get("/api/inbox")
@@ -656,7 +680,15 @@ _TOOL_APPLY = {
 }
 
 
+def _check_budget() -> None:
+    """Refuses a manual start when the monthly AI budget is used up and the
+    settings say manual starts are blocked too."""
+    if not usage_log.manual_runs_allowed():
+        raise HTTPException(409, "The monthly AI budget is used up (see Maintain → Automation & budget).")
+
+
 def _start_tool_job(tool: str, meta: dict | None = None):
+    _check_budget()
     job = tool_jobs.create_tool_job(tool)
     if meta:
         job.meta.update(meta)
@@ -729,6 +761,7 @@ async def start_meal_plan(body: dict = Body(...)):
     meal_type = body.get("meal_type") or {}
     if not meal_type.get("id"):
         raise HTTPException(400, "Please choose a meal type.")
+    _check_budget()
     job = tool_jobs.create_tool_job("meal_plan")
     job.meta["params"] = {
         "start_date": body.get("start_date"),
@@ -985,6 +1018,8 @@ async def on_startup() -> None:
     tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()
+    maintenance.configure(_TOOL_SCANS)
+    asyncio.create_task(maintenance.loop())
     if settings.auto_process_interval_hours > 0:
         asyncio.create_task(tools_new_recipes.auto_run_loop())
 

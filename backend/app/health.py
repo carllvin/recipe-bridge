@@ -84,6 +84,20 @@ def items(metric: str) -> dict:
     return {"items": listed, "ignored": sorted(ignored_items, key=lambda i: i["name"].casefold())}
 
 
+def compute_now() -> None:
+    """Blocking refresh (for the maintenance run); waits for one that's
+    already going instead of starting a second."""
+    with _lock:
+        busy = _state["running"]
+        if not busy:
+            _state["running"], _state["error"] = True, None
+    if not busy:
+        _compute()
+        return
+    while _state["running"]:
+        time.sleep(2)
+
+
 def start_refresh() -> bool:
     with _lock:
         if _state["running"]:
