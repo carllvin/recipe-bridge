@@ -30,6 +30,8 @@ METRIC_TOOLS = {
     "recipes_need_restructure": ("recipes_restructure", {}),
     "recipes_without_season": ("tags_season", {}),
     "recipes_few_tags": ("tags_suggest_more", {}),
+    "recipes_without_servings": ("recipes_servings", {}),
+    "recipes_without_image": ("recipes_images", {}),  # costs per image only when applied
 }
 
 _scans: dict = {}

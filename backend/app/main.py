@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, site_scan, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -832,6 +832,8 @@ _TOOL_SCANS = {
     "conversions": tools_conversions.run_scan,
     "recipes_restructure": recipe_restructure.run_scan,
     "meal_plan": tools_meal_plan.run_scan,
+    "recipes_servings": tools_recipe_details.run_servings_scan,
+    "recipes_images": tools_recipe_details.run_images_scan,
 }
 
 # tool name -> the apply_suggestion(job_id, suggestion_id) function for that tool
@@ -849,6 +851,8 @@ _TOOL_APPLY = {
     "conversions": tools_conversions.apply_suggestion,
     "recipes_restructure": recipe_restructure.apply_suggestion,
     "meal_plan": tools_meal_plan.apply_suggestion,
+    "recipes_servings": tools_recipe_details.apply_servings_suggestion,
+    "recipes_images": tools_recipe_details.apply_image_suggestion,
 }
 
 
@@ -913,6 +917,16 @@ async def start_units_review(body: dict | None = Body(None)):
     listed in the health overview instead of every entry."""
     focus = (body or {}).get("focus")
     return _start_tool_job("units_review", {"focus": focus} if focus == "duplicates" else None)
+
+
+@app.post("/api/tools/recipes/servings")
+async def start_recipes_servings():
+    return _start_tool_job("recipes_servings")
+
+
+@app.post("/api/tools/recipes/images")
+async def start_recipes_images():
+    return _start_tool_job("recipes_images")
 
 
 @app.post("/api/tools/recipes/translate")

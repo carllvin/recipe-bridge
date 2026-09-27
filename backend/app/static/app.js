@@ -1259,6 +1259,8 @@ const TOOL_TITLE_KEYS = {
   tags_suggest_more: 'toolTagsSuggestMoreTitle',
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
+  recipes_servings: 'toolRecipesServingsTitle',
+  recipes_images: 'toolRecipesImagesTitle',
 };
 
 function toolTitle(tool) {
@@ -1666,6 +1668,8 @@ const HEALTH_METRICS = [
   { key: 'recipes_need_restructure', tool: 'recipes_restructure', endpoint: '/api/tools/recipes/restructure' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
+  { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
+  { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
 ];
 
 const healthState = { open: null, data: null };
@@ -1689,12 +1693,15 @@ function renderHealth(data) {
       : '';
     const fixBtn = pending
       ? `<button class="btn secondary health-open-run" type="button" data-job="${pending.job_id}" data-tool="${m.tool}">${pending.scanning ? t('healthOpenRun') : t('healthReviewRun')}</button>`
+      : value && m.needsImageGen && !APP_CONFIG.image_gen_available
+        ? `<button class="btn secondary health-fix" type="button" disabled title="${escapeHtml(t('healthImageGenOff'))}">${t('healthFix')}</button>`
       : value ? `<button class="btn secondary health-fix" type="button" data-metric="${m.key}">${t('healthFix')}</button>` : '';
     return `<div class="health-tile ${value ? 'todo' : 'ok'} ${healthState.open === m.key ? 'open' : ''} ${running ? 'refreshing' : ''}">
       <div class="health-value">${value ? value.toLocaleString() : '✓'}</div>
       <div class="health-label">${t('health_' + m.key)}</div>
       ${ignoredCount ? `<div class="health-ignored-count">${tf('healthIgnoredCount', { n: ignoredCount })}</div>` : ''}
       ${pendingHtml}
+      ${value && m.needsImageGen && !APP_CONFIG.image_gen_available ? `<div class="health-ignored-count">${t('healthImageGenOff')}</div>` : ''}
       <div class="health-tile-actions">
         ${fixBtn}
         ${value || ignoredCount ? `<button class="btn secondary health-entries" type="button" data-metric="${m.key}">${t('healthEntries')}</button>` : ''}
