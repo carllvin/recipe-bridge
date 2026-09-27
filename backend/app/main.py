@@ -11,7 +11,7 @@ import time
 import uuid
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -110,7 +110,15 @@ def _fetch_existing_tags() -> list[str] | None:
         return None
 
 
-def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False) -> None:
+SINGLE_RECIPE_NOTE = (
+    "NOTE FROM THE USER: the following {n} page(s) are photos of ONE single recipe that continues "
+    "across the pages (e.g. the ingredients on one photo and the method on the next). Return exactly "
+    "one recipe spanning all of them.\n\n"
+)
+
+
+def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
+                    single_recipe: bool = False) -> None:
     job = jobs.get_job(job_id)
     if job is None:
         return
@@ -152,6 +160,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
 
         existing_tags = _fetch_existing_tags()
         toc_pages = result.get("toc_pages") if settings.toc_aware_chunking else None
+        if single_recipe and result["pages"]:
+            first = result["pages"][0]
+            first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
         recipes: list[ExtractedRecipe]
         recipes, usage = extract_recipes_from_pages(
@@ -222,7 +233,9 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 
 @app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
+async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False)):
+    """single_recipe: the uploaded photos all show one recipe (e.g. across a
+    double page) - the AI is told to return exactly one."""
     _check_budget()
     filenames = [f.filename or "" for f in files]
     doc_type, error = _classify_upload(filenames)
@@ -252,7 +265,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
         source_paths.append(dest_path)
 
     jobs.save_job(job)
-    threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr), daemon=True).start()
+    threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr,
+                                                    single_recipe and doc_type == "images"), daemon=True).start()
 
     return {"job_id": job.id}
 

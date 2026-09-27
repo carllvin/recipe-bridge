@@ -203,6 +203,22 @@
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
         <input id="file-input" type="file" accept=".pdf,.epub,.jpg,.jpeg,.png,.heic,.heif" multiple />
       </label>
+      <div class="photo-actions">
+        <label class="btn secondary"><span data-i18n="photoTakeBtn">📷 Take photo</span>
+          <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden /></label>
+        <label class="btn secondary"><span data-i18n="photoPickBtn">🖼️ Add photos</span>
+          <input id="photo-pick" type="file" accept=".jpg,.jpeg,.png,.heic,.heif,image/*" multiple hidden /></label>
+      </div>
+      <section id="photo-collector" class="photo-collector hidden">
+        <h3 data-i18n="photoCollectorTitle">Photos for this import</h3>
+        <p class="settings-hint" data-i18n="photoCollectorHint">Order = page order. Take or add more photos, then import them together.</p>
+        <div id="photo-thumbs" class="photo-thumbs"></div>
+        <label class="settings-check"><input id="photo-single" type="checkbox" /> <span data-i18n="photoSingle">All photos show one single recipe (e.g. ingredients and method on different pages)</span></label>
+        <div class="photo-collector-actions">
+          <button id="photo-clear" class="btn secondary" type="button" data-i18n="photoClear">Discard</button>
+          <button id="photo-import" class="btn" type="button"></button>
+        </div>
+      </section>
       <form id="url-form" class="url-form">
         <span class="url-form-or" data-i18n="urlImportOr">or import a single recipe from a website</span>
         <div class="url-form-row">

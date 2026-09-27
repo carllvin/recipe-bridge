@@ -158,14 +158,85 @@ function classifyFiles(files) {
 );
 dropzone.addEventListener('drop', (e) => {
   const files = Array.from(e.dataTransfer.files || []);
-  if (files.length) uploadFiles(files);
+  if (files.length) handleChosenFiles(files);
 });
 fileInput.addEventListener('change', () => {
   const files = Array.from(fileInput.files || []);
-  if (files.length) uploadFiles(files);
+  fileInput.value = '';
+  if (files.length) handleChosenFiles(files);
 });
 
-async function uploadFiles(files) {
+// ---------- Photo collector ----------
+// Photos are gathered first (camera one at a time, or several from the
+// gallery), can be reordered/removed, and are then imported together - each
+// photo is one page, in this order.
+
+const photoState = { files: [] };
+
+function isImageFile(f) {
+  return (APP_CONFIG.image_extensions || FALLBACK_IMAGE_EXTENSIONS).includes(extOf(f.name)) || (f.type || '').startsWith('image/');
+}
+
+function handleChosenFiles(files) {
+  if (files.every(isImageFile)) { addPhotos(files); return; }
+  uploadFiles(files);
+}
+
+function addPhotos(files) {
+  el('upload-error').classList.add('hidden');
+  files.filter(isImageFile).forEach((f) => photoState.files.push({ file: f, url: URL.createObjectURL(f) }));
+  renderPhotos();
+  el('photo-collector').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderPhotos() {
+  const list = photoState.files;
+  el('photo-collector').classList.toggle('hidden', !list.length);
+  el('photo-thumbs').innerHTML = list.map((p, i) => `
+    <div class="photo-thumb">
+      <img src="${p.url}" alt="">
+      <span class="photo-no">${i + 1}</span>
+      <div class="photo-btns">
+        <button type="button" data-move="-1" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="${escapeHtml(t('photoMoveLeft'))}">←</button>
+        <button type="button" data-remove="${i}" aria-label="${escapeHtml(t('photoRemove'))}">✕</button>
+        <button type="button" data-move="1" data-i="${i}" ${i === list.length - 1 ? 'disabled' : ''} aria-label="${escapeHtml(t('photoMoveRight'))}">→</button>
+      </div>
+    </div>`).join('');
+  el('photo-import').textContent = tf('photoImportBtn', { n: list.length });
+  el('photo-thumbs').querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => {
+    const i = Number(b.dataset.i), j = i + Number(b.dataset.move);
+    [list[i], list[j]] = [list[j], list[i]];
+    renderPhotos();
+  }));
+  el('photo-thumbs').querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', () => {
+    const [removed] = list.splice(Number(b.dataset.remove), 1);
+    URL.revokeObjectURL(removed.url);
+    renderPhotos();
+  }));
+}
+
+function clearPhotos() {
+  photoState.files.forEach((p) => URL.revokeObjectURL(p.url));
+  photoState.files = [];
+  el('photo-single').checked = false;
+  renderPhotos();
+}
+
+['photo-camera', 'photo-pick'].forEach((id) => el(id).addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';  // so the same photo can be taken/picked again
+  if (files.length) addPhotos(files);
+}));
+el('photo-clear').addEventListener('click', clearPhotos);
+el('photo-import').addEventListener('click', () => {
+  const files = photoState.files.map((p) => p.file);
+  if (!files.length) return;
+  const single = el('photo-single').checked;
+  clearPhotos();
+  uploadFiles(files, { singleRecipe: single });
+});
+
+async function uploadFiles(files, options = {}) {
   el('upload-error').classList.add('hidden');
   requestNotificationPermission();
 
@@ -177,6 +248,7 @@ async function uploadFiles(files) {
 
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
+  if (options.singleRecipe) formData.append('single_recipe', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
