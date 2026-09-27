@@ -7,15 +7,16 @@ import logging
 import os
 import shutil
 import threading
+import time
 import uuid
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import apply_queue, health, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -109,7 +110,15 @@ def _fetch_existing_tags() -> list[str] | None:
         return None
 
 
-def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False) -> None:
+SINGLE_RECIPE_NOTE = (
+    "NOTE FROM THE USER: the following {n} page(s) are photos of ONE single recipe that continues "
+    "across the pages (e.g. the ingredients on one photo and the method on the next). Return exactly "
+    "one recipe spanning all of them.\n\n"
+)
+
+
+def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
+                    single_recipe: bool = False) -> None:
     job = jobs.get_job(job_id)
     if job is None:
         return
@@ -151,6 +160,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
 
         existing_tags = _fetch_existing_tags()
         toc_pages = result.get("toc_pages") if settings.toc_aware_chunking else None
+        if single_recipe and result["pages"]:
+            first = result["pages"][0]
+            first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
         recipes: list[ExtractedRecipe]
         recipes, usage = extract_recipes_from_pages(
@@ -221,7 +233,10 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 
 @app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
+async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False)):
+    """single_recipe: the uploaded photos all show one recipe (e.g. across a
+    double page) - the AI is told to return exactly one."""
+    _check_budget()
     filenames = [f.filename or "" for f in files]
     doc_type, error = _classify_upload(filenames)
     if error:
@@ -250,7 +265,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
         source_paths.append(dest_path)
 
     jobs.save_job(job)
-    threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr), daemon=True).start()
+    threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr,
+                                                    single_recipe and doc_type == "images"), daemon=True).start()
 
     return {"job_id": job.id}
 
@@ -259,6 +275,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
 async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
     and import flow as an uploaded document (see url_processor)."""
+    _check_budget()
     try:
         url = validate_url(body.get("url", ""))
     except UrlImportError as exc:
@@ -286,7 +303,29 @@ async def list_import_jobs():
 
 @app.get("/api/usage")
 async def token_usage(days: int = 30):
-    return usage_log.summary(max(1, min(days, 365)))
+    return {**usage_log.summary(max(1, min(days, 365))), "budget": usage_log.budget_status()}
+
+
+@app.get("/api/settings")
+async def get_app_settings():
+    return {**app_settings.get(), "budget_status": usage_log.budget_status(),
+            "maintenance_status": maintenance.status(), "metrics": app_settings.MAINTENANCE_METRICS}
+
+
+@app.put("/api/settings")
+async def put_app_settings(body: dict = Body(...)):
+    try:
+        app_settings.update(body)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Invalid settings: {exc}")
+    return await get_app_settings()
+
+
+@app.post("/api/maintenance/run")
+async def run_maintenance_now():
+    if not maintenance.start_now():
+        raise HTTPException(409, "A maintenance run is already going.")
+    return maintenance.status()
 
 
 @app.get("/api/inbox")
@@ -301,15 +340,24 @@ async def inbox():
                             "label": job.progress_label, "trigger": job.meta.get("trigger")})
             continue
         for s in job.suggestions:
-            if s.status != "pending":
+            if s.status not in ("pending", "error"):
                 continue
             items.append({
                 "job_id": job.id, "tool": job.tool, "job_created_at": job.created_at,
                 "trigger": job.meta.get("trigger"), "auto": bool(job.meta.get("auto")),
                 "id": s.id, "kind": s.kind, "entity": s.detail.get("entity"),
                 "summary": s.summary, "preview": s.preview, "queued": (job.id, s.id) in queued,
+                # Failed ones stay visible until retried or dismissed.
+                "failed": s.status == "error", "error": s.error,
+                "retryable": s.status == "error" and _retryable(job, s),
             })
     return {"items": items, "running": running, "count": len(items), "queued": len(queued)}
+
+
+def _retryable(job, suggestion) -> bool:
+    # The new-recipes run translates right away - there's no apply step to
+    # repeat for a failed translation (the next run tries again).
+    return not (job.tool == "new_recipes" and suggestion.kind == "translate_recipe")
 
 
 @app.get("/api/health")
@@ -352,7 +400,7 @@ async def health_unignore(body: dict = Body(...)):
 async def inbox_count():
     count = sum(
         1 for job in tool_jobs.list_all_tool_jobs() if job.status != "scanning"
-        for s in job.suggestions if s.status == "pending"
+        for s in job.suggestions if s.status in ("pending", "error")
     )
     running = sum(1 for job in tool_jobs.list_all_tool_jobs() if job.status == "scanning")
     return {"count": count, "running": running}
@@ -646,7 +694,15 @@ _TOOL_APPLY = {
 }
 
 
+def _check_budget() -> None:
+    """Refuses a manual start when the monthly AI budget is used up and the
+    settings say manual starts are blocked too."""
+    if not usage_log.manual_runs_allowed():
+        raise HTTPException(409, "The monthly AI budget is used up (see Maintain → Automation & budget).")
+
+
 def _start_tool_job(tool: str, meta: dict | None = None):
+    _check_budget()
     job = tool_jobs.create_tool_job(tool)
     if meta:
         job.meta.update(meta)
@@ -706,6 +762,52 @@ async def start_recipes_translate():
     return _start_tool_job("recipes_translate")
 
 
+@app.get("/api/cook-today")
+async def cook_today_search(have: str = "", staples: bool = True):
+    return await asyncio.to_thread(cook_today.suggest, have, staples)
+
+
+@app.post("/api/cook-today/plan")
+async def cook_today_plan(body: dict = Body(...)):
+    """{"recipe": {"id", "name"}, "meal_type": {"id", "name"}, "date"?, "add_to_shopping"?} -
+    puts the recipe on today's (or the given day's) meal plan."""
+    recipe, meal_type = body.get("recipe") or {}, body.get("meal_type") or {}
+    if not recipe.get("id") or not meal_type.get("id"):
+        raise HTTPException(400, "Recipe and meal type are required.")
+    date = body.get("date") or time.strftime("%Y-%m-%d")
+
+    def create():
+        with tandoor_client.get_client() as client:
+            return tools_meal_plan.create_plan_entry(client, recipe, date, meal_type, bool(body.get("add_to_shopping")))
+    try:
+        await asyncio.to_thread(create)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+    return {"ok": True, "date": date}
+
+
+@app.get("/api/cooked/pending")
+async def cooked_pending():
+    try:
+        return {"items": await asyncio.to_thread(cook_feedback.pending)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/cooked")
+async def cooked_answer(body: dict = Body(...)):
+    """{"plan_id", "recipe_id", "date", "servings", "rating": 1-5 | null (not cooked)}"""
+    try:
+        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], int(body["recipe_id"]), body["date"],
+                                body.get("servings"), body.get("rating"))
+    except KeyError as exc:
+        raise HTTPException(400, f"Missing field {exc}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+    health.mark_changed()
+    return {"ok": True}
+
+
 @app.get("/api/tools/meal-plan/options")
 async def meal_plan_options():
     try:
@@ -719,6 +821,7 @@ async def start_meal_plan(body: dict = Body(...)):
     meal_type = body.get("meal_type") or {}
     if not meal_type.get("id"):
         raise HTTPException(400, "Please choose a meal type.")
+    _check_budget()
     job = tool_jobs.create_tool_job("meal_plan")
     job.meta["params"] = {
         "start_date": body.get("start_date"),
@@ -815,21 +918,62 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
         raise LookupError("Tool job not found.")
+    if action == "retry":
+        # A failed suggestion goes back to pending and is applied again.
+        suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
+        if suggestion is None:
+            raise LookupError("Suggestion not found.")
+        if suggestion.status == "error" and _retryable(job, suggestion):
+            suggestion.status, suggestion.error = "pending", None
+            tool_jobs.save_tool_job(job)
+        action = "apply"
     if action == "apply":
         apply_fn = _TOOL_APPLY.get(job.tool)
         if apply_fn is None:
             raise LookupError(f"Unknown tool: {job.tool}")
-        suggestion = apply_fn(job_id, suggestion_id)
-        if suggestion.status == "applied":
+        before = next((s.status for s in job.suggestions if s.id == suggestion_id), None)
+        with undo.recording() as journal:
+            suggestion = apply_fn(job_id, suggestion_id)
+        if suggestion.status == "applied" and before != "applied":
+            _remember_applied(job, suggestion, journal)
             health.mark_changed()
         return suggestion
+    if action == "undo":
+        return _undo_suggestion(job, suggestion_id)
     suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
     if suggestion is None:
         raise LookupError("Suggestion not found.")
-    if suggestion.status == "pending":
+    if suggestion.status in ("pending", "error"):  # also dismisses a failed one
         suggestion.status = "skipped"
         tool_jobs.save_tool_job(job)
         tools_new_recipes.after_action(job)
+    return suggestion
+
+
+def _remember_applied(job, suggestion, journal) -> None:
+    suggestion.applied_at = time.time()
+    if journal:
+        undo.save(job.id, suggestion.id, journal)
+        suggestion.undoable = True
+    tool_jobs.save_tool_job(job)
+
+
+def _undo_suggestion(job, suggestion_id):
+    suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
+    if suggestion is None:
+        raise LookupError("Suggestion not found.")
+    if suggestion.status != "applied" or not suggestion.undoable:
+        return suggestion
+    try:
+        with tandoor_client.get_client() as client:
+            undo.revert(client, job.id, suggestion.id)
+    except Exception as exc:  # noqa: BLE001
+        suggestion.error = f"Undo failed: {exc}"
+        tool_jobs.save_tool_job(job)
+        raise
+    suggestion.status, suggestion.undoable, suggestion.error = "undone", False, None
+    tool_jobs.save_tool_job(job)
+    health.mark_changed()
     return suggestion
 
 
@@ -852,6 +996,21 @@ async def skip_tool_suggestion(job_id: str, suggestion_id: str):
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     return suggestion.model_dump()
+
+
+@app.get("/api/history")
+async def applied_history():
+    """Applied changes that can still be undone, newest first."""
+    queued = apply_queue.queued_keys()
+    items = [
+        {"job_id": job.id, "tool": job.tool, "id": s.id, "kind": s.kind, "summary": s.summary,
+         "applied_at": s.applied_at, "error": s.error, "queued": (job.id, s.id) in queued}
+        for job in tool_jobs.list_all_tool_jobs()
+        for s in job.suggestions
+        if s.status == "applied" and s.undoable and undo.exists(job.id, s.id)
+    ]
+    items.sort(key=lambda i: -(i["applied_at"] or 0))
+    return {"items": items[:300], "retention_days": undo.RETENTION_DAYS}
 
 
 @app.post("/api/tools/actions")
@@ -902,6 +1061,7 @@ async def _cleanup_loop() -> None:
         try:
             jobs.cleanup_old_jobs(settings.data_dir, settings.job_retention_hours)
             tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
+            undo.cleanup({job.id for job in tool_jobs.list_all_tool_jobs()})
         except Exception:  # noqa: BLE001
             log.exception("Background cleanup failed")
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
@@ -918,6 +1078,8 @@ async def on_startup() -> None:
     tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()
+    maintenance.configure(_TOOL_SCANS)
+    asyncio.create_task(maintenance.loop())
     if settings.auto_process_interval_hours > 0:
         asyncio.create_task(tools_new_recipes.auto_run_loop())
 

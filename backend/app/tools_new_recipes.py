@@ -30,7 +30,7 @@ import threading
 import time
 import uuid
 
-from . import llm_provider, nutrition_properties, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units
+from . import llm_provider, nutrition_properties, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import find_recipes_by_filter, resolve_name_collisions
@@ -145,6 +145,9 @@ def auto_run_once() -> str | None:
     page once, there's no "since" to compare against."""
     if not llm_provider.is_configured() or _load_store() is None:
         return None
+    if not usage_log.automatic_runs_allowed():
+        log.info("Automatic new-recipes run skipped - monthly AI budget reached")
+        return None
     if any(job.status == "scanning" for job in open_jobs()):
         return None  # one run at a time
     with tandoor_client.get_client() as client:
@@ -165,6 +168,9 @@ def start_after_import(imported_recipe_ids) -> str | None:
     now - from every recipe EXCEPT the ones just imported, so those still
     count as new."""
     if not imported_recipe_ids or not llm_provider.is_configured():
+        return None
+    if not usage_log.automatic_runs_allowed():
+        log.info("Post-processing after import skipped - monthly AI budget reached")
         return None
     imported = set(imported_recipe_ids)
     with _store_lock:
@@ -405,10 +411,15 @@ def run_scan(job_id: str) -> None:
                     job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
                     suggestion.summary = f"recipe: translated {recipe.get('name', '')!r} -> {translated['title']!r}"
                     suggestion.preview = tools_recipes.describe_changes(recipe, translated)
-                    resp = client.patch(f"/recipe/{recipe['id']}/", json=tools_recipes.build_update_payload(recipe, translated))
+                    with undo.recording() as journal:  # auto-applied, but undoable like the others
+                        resp = client.patch(f"/recipe/{recipe['id']}/", json=tools_recipes.build_update_payload(recipe, translated))
                     if resp.status_code not in (200, 201):
                         raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
                     suggestion.status = "applied"
+                    suggestion.applied_at = time.time()
+                    if journal:
+                        undo.save(job.id, suggestion.id, journal)
+                        suggestion.undoable = True
                     fresh = client.get(f"/recipe/{recipe['id']}/")
                     if fresh.status_code == 200:
                         recipes[i] = fresh.json()

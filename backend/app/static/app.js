@@ -158,14 +158,85 @@ function classifyFiles(files) {
 );
 dropzone.addEventListener('drop', (e) => {
   const files = Array.from(e.dataTransfer.files || []);
-  if (files.length) uploadFiles(files);
+  if (files.length) handleChosenFiles(files);
 });
 fileInput.addEventListener('change', () => {
   const files = Array.from(fileInput.files || []);
-  if (files.length) uploadFiles(files);
+  fileInput.value = '';
+  if (files.length) handleChosenFiles(files);
 });
 
-async function uploadFiles(files) {
+// ---------- Photo collector ----------
+// Photos are gathered first (camera one at a time, or several from the
+// gallery), can be reordered/removed, and are then imported together - each
+// photo is one page, in this order.
+
+const photoState = { files: [] };
+
+function isImageFile(f) {
+  return (APP_CONFIG.image_extensions || FALLBACK_IMAGE_EXTENSIONS).includes(extOf(f.name)) || (f.type || '').startsWith('image/');
+}
+
+function handleChosenFiles(files) {
+  if (files.every(isImageFile)) { addPhotos(files); return; }
+  uploadFiles(files);
+}
+
+function addPhotos(files) {
+  el('upload-error').classList.add('hidden');
+  files.filter(isImageFile).forEach((f) => photoState.files.push({ file: f, url: URL.createObjectURL(f) }));
+  renderPhotos();
+  el('photo-collector').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderPhotos() {
+  const list = photoState.files;
+  el('photo-collector').classList.toggle('hidden', !list.length);
+  el('photo-thumbs').innerHTML = list.map((p, i) => `
+    <div class="photo-thumb">
+      <img src="${p.url}" alt="">
+      <span class="photo-no">${i + 1}</span>
+      <div class="photo-btns">
+        <button type="button" data-move="-1" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="${escapeHtml(t('photoMoveLeft'))}">←</button>
+        <button type="button" data-remove="${i}" aria-label="${escapeHtml(t('photoRemove'))}">✕</button>
+        <button type="button" data-move="1" data-i="${i}" ${i === list.length - 1 ? 'disabled' : ''} aria-label="${escapeHtml(t('photoMoveRight'))}">→</button>
+      </div>
+    </div>`).join('');
+  el('photo-import').textContent = tf('photoImportBtn', { n: list.length });
+  el('photo-thumbs').querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => {
+    const i = Number(b.dataset.i), j = i + Number(b.dataset.move);
+    [list[i], list[j]] = [list[j], list[i]];
+    renderPhotos();
+  }));
+  el('photo-thumbs').querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', () => {
+    const [removed] = list.splice(Number(b.dataset.remove), 1);
+    URL.revokeObjectURL(removed.url);
+    renderPhotos();
+  }));
+}
+
+function clearPhotos() {
+  photoState.files.forEach((p) => URL.revokeObjectURL(p.url));
+  photoState.files = [];
+  el('photo-single').checked = false;
+  renderPhotos();
+}
+
+['photo-camera', 'photo-pick'].forEach((id) => el(id).addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';  // so the same photo can be taken/picked again
+  if (files.length) addPhotos(files);
+}));
+el('photo-clear').addEventListener('click', clearPhotos);
+el('photo-import').addEventListener('click', () => {
+  const files = photoState.files.map((p) => p.file);
+  if (!files.length) return;
+  const single = el('photo-single').checked;
+  clearPhotos();
+  uploadFiles(files, { singleRecipe: single });
+});
+
+async function uploadFiles(files, options = {}) {
   el('upload-error').classList.add('hidden');
   requestNotificationPermission();
 
@@ -177,6 +248,7 @@ async function uploadFiles(files) {
 
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
+  if (options.singleRecipe) formData.append('single_recipe', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
@@ -984,11 +1056,12 @@ function showArea(area) {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.area === area));
   if (area === 'import') loadRecentImports();
   if (area === 'inbox') loadInbox();
-  if (area === 'plan') openPlanArea();
+  if (area === 'plan') { openPlanArea(); loadCooked(); }
   if (area === 'maintain') {
     loadNewRecipesStatus();
     loadUsage();
     loadHealth();
+    loadSettings();
   }
   window.scrollTo(0, 0);
 }
@@ -1053,6 +1126,7 @@ async function openImportJob(jobId) {
 // Order matters: merges first, so ingredient details and conversions are
 // applied to the entries that remain.
 const INBOX_GROUPS = [
+  { key: 'failed', icon: '⚠️', match: (i) => i.failed },
   { key: 'merges', icon: '🔀', match: (i) => i.entity || i.kind === 'merge' || i.kind === 'rename' },
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
@@ -1089,6 +1163,7 @@ async function loadInbox(schedule = true) {
       ? `<span class="spinner small"></span> ${escapeHtml(tf('queueRunning', { n: data.queued }))}` : '';
     renderInbox();
     updateInboxBadge();
+    if (!historyState.busy) loadHistory();
     if (!schedule) return;
     clearTimeout(inboxState.timer);
     if ((data.running.length || data.queued) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
@@ -1108,6 +1183,7 @@ function renderInbox() {
   el('inbox-groups').innerHTML = visible.map((g) => {
     const selected = g.items.filter((i) => inboxState.selected.has(itemKey(i))).length;
     const selectable = g.items.filter((i) => !i.queued).length;
+    const selectedRetryable = g.items.filter((i) => inboxState.selected.has(itemKey(i)) && i.retryable).length;
     const busy = inboxState.busyGroup === g.key;
     const collapsed = inboxState.collapsed.has(g.key);
     return `
@@ -1119,10 +1195,11 @@ function renderInbox() {
           ${selectable && selected === selectable ? 'checked' : ''} ${busy || !selectable ? 'disabled' : ''}> <span>${t('toolSelectAll')}</span></label>
         <span class="tools-bulk-status" id="inbox-status-${g.key}">${escapeHtml(inboxState.results[g.key] || '')}</span>
         <div class="tools-bulk-actions">
-          <button class="btn secondary inbox-skip" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t('toolSkipBtn')} (${selected})</button>
-          <button class="btn inbox-apply" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t('toolApplyBtn')} (${selected})</button>
+          <button class="btn secondary inbox-skip" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t(g.key === 'failed' ? 'inboxDismissBtn' : 'toolSkipBtn')} (${selected})</button>
+          <button class="btn inbox-apply" type="button" data-group="${g.key}" ${!selected || busy || (g.key === 'failed' && !selectedRetryable) ? 'disabled' : ''}>${t(g.key === 'failed' ? 'inboxRetryBtn' : 'toolApplyBtn')} (${g.key === 'failed' ? selectedRetryable : selected})</button>
         </div>
       </div>
+      ${g.key === 'failed' ? `<p class="inbox-hint">${t('inboxFailedHint')}</p>` : ''}
       ${g.key === 'merges' ? `<p class="inbox-hint">${t('inboxMergesHint')}</p>` : ''}
       <div class="tools-suggestions-list ${collapsed ? 'hidden' : ''}">
         ${g.items.map((i) => `
@@ -1130,6 +1207,7 @@ function renderInbox() {
             <input type="checkbox" class="suggestion-check" ${inboxState.selected.has(itemKey(i)) ? 'checked' : ''} ${busy || i.queued ? 'disabled' : ''}>
             <div class="suggestion-text">
               ${i.queued ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(i.summary)}
+              ${i.failed ? `<div class="inbox-error">${escapeHtml(i.error || t('toolStatusError'))}</div>` : ''}
               <div class="inbox-source">${escapeHtml(i.trigger === 'import' ? t('triggerImport') : toolTitle(i.tool))} · ${escapeHtml(shortWhen(i.job_created_at))}</div>
               ${i.preview ? `<details class="suggestion-preview"><summary>${t('toolShowPreview')}</summary><pre>${escapeHtml(i.preview)}</pre></details>` : ''}
             </div>
@@ -1164,9 +1242,87 @@ function renderInbox() {
     });
   });
   el('inbox-groups').querySelectorAll('.inbox-apply, .inbox-skip').forEach((b) => b.addEventListener('click', () => {
-    runInboxAction(b.dataset.group, b.classList.contains('inbox-apply') ? 'apply' : 'skip', groupItems(b.dataset.group));
+    const apply = b.classList.contains('inbox-apply');
+    const action = b.dataset.group === 'failed' ? (apply ? 'retry' : 'skip') : (apply ? 'apply' : 'skip');
+    const items = groupItems(b.dataset.group).filter((i) => action !== 'retry' || i.retryable);
+    runInboxAction(b.dataset.group, action, items);
   }));
 }
+
+// ---------- Recently applied (undo) ----------
+
+const historyState = { items: [], selected: new Set(), busy: false };
+
+async function loadHistory() {
+  if (!el('history').open) return;
+  try {
+    const data = await (await fetch('/api/history')).json();
+    historyState.items = data.items;
+    el('history-hint').textContent = tf('historyHint', { days: data.retention_days });
+    const keys = new Set(data.items.map(itemKey));
+    historyState.selected.forEach((k) => { if (!keys.has(k)) historyState.selected.delete(k); });
+    renderHistory();
+  } catch (e) { /* optional */ }
+}
+
+function renderHistory() {
+  const items = historyState.items;
+  el('history-list').innerHTML = items.length ? items.map((i) => `
+    <div class="tool-suggestion-row applied ${i.queued ? 'queued' : ''}" data-key="${itemKey(i)}">
+      <input type="checkbox" class="suggestion-check" ${historyState.selected.has(itemKey(i)) ? 'checked' : ''} ${historyState.busy || i.queued ? 'disabled' : ''}>
+      <div class="suggestion-text">
+        ${i.queued ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(i.summary)}
+        <div class="inbox-source">${escapeHtml(toolTitle(i.tool))} · ${escapeHtml(shortWhen(i.applied_at))}</div>
+        ${i.error ? `<div class="inbox-error">${escapeHtml(i.error)}</div>` : ''}
+      </div>
+    </div>`).join('') : `<p class="inbox-empty">${t('historyEmpty')}</p>`;
+  const n = historyState.selected.size;
+  const selectable = items.filter((i) => !i.queued).length;
+  el('history-undo-btn').textContent = tf('historyUndoBtn', { count: n });
+  el('history-undo-btn').disabled = historyState.busy || !n;
+  el('history-select-all').checked = selectable > 0 && n === selectable;
+  el('history-select-all').disabled = historyState.busy || !selectable;
+  el('history-list').querySelectorAll('.tool-suggestion-row').forEach((row) => {
+    const box = row.querySelector('.suggestion-check');
+    const toggle = () => {
+      if (box.checked) historyState.selected.add(row.dataset.key); else historyState.selected.delete(row.dataset.key);
+      renderHistory();
+    };
+    box.addEventListener('change', toggle);
+    row.addEventListener('click', (e) => {
+      if (box.disabled || e.target === box) return;
+      box.checked = !box.checked;
+      toggle();
+    });
+  });
+}
+
+el('history').addEventListener('toggle', loadHistory);
+el('history-select-all').addEventListener('change', (e) => {
+  historyState.selected = new Set(e.target.checked ? historyState.items.filter((i) => !i.queued).map(itemKey) : []);
+  renderHistory();
+});
+el('history-undo-btn').addEventListener('click', async () => {
+  // Newest first - later changes are taken back before the ones they built on.
+  const todo = historyState.items.filter((i) => historyState.selected.has(itemKey(i)));
+  if (!todo.length || historyState.busy) return;
+  historyState.busy = true;
+  el('history-status').textContent = '';
+  try {
+    const batchId = await queueActions('undo', todo);
+    historyState.selected.clear();
+    const batch = await watchBatch(batchId, async (b) => {
+      el('history-status').textContent = b.done < b.total ? tf('historyUndoing', { current: Math.min(b.done + 1, b.total), total: b.total }) : '';
+      await loadHistory();
+    }, () => currentArea === 'inbox');
+    el('history-status').textContent = batchResultText(batch);
+  } catch (e) {
+    el('history-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+  }
+  historyState.busy = false;
+  await loadHistory();
+  loadInbox();
+});
 
 // ---------- Background apply/skip ----------
 // Selected suggestions are handed to the server's queue, which applies them
@@ -1197,17 +1353,12 @@ async function watchBatch(batchId, onTick, stillWatching = () => true) {
 }
 
 function batchProgressText(action, batch, withHint = true) {
-  return tf(action === 'apply' ? 'toolApplyingProgress' : 'toolSkippingProgress', { current: Math.min(batch.done + 1, batch.total), total: batch.total })
+  return tf(action === 'skip' ? 'toolSkippingProgress' : 'toolApplyingProgress', { current: Math.min(batch.done + 1, batch.total), total: batch.total })
     + (withHint ? ' · ' + t('queueBackgroundHint') : '');
 }
 
-// withDetail: name the first error too - for the inbox, where failed
-// suggestions drop out of the list instead of showing their error.
-function batchResultText(batch, withDetail = false) {
-  if (!batch || !batch.failed) return '';
-  const first = batch.errors[0];
-  if (!withDetail || !first) return tf('toolBulkFailed', { count: batch.failed });
-  return tf('inboxBulkFailed', { count: batch.failed }) + ` ${first.summary ? first.summary + ': ' : ''}${first.error}`;
+function batchResultText(batch) {
+  return batch && batch.failed ? tf('toolBulkFailed', { count: batch.failed }) : '';
 }
 
 async function runInboxAction(groupKey, action, items) {
@@ -1231,9 +1382,8 @@ async function runInboxAction(groupKey, action, items) {
     await loadInbox(false);
   }, () => currentArea === 'inbox');
   inboxState.busyGroup = null;
-  // Failed items drop out of the list (their run keeps the error) - the
-  // group's status line says what went wrong.
-  inboxState.results[groupKey] = batchResultText(batch, true);
+  // Failed items move to the "failed" group with their error.
+  inboxState.results[groupKey] = batchResultText(batch);
   await loadInbox();
 }
 
@@ -1243,6 +1393,7 @@ async function loadUsage() {
   try {
     const data = await (await fetch('/api/usage?days=30')).json();
     const total = data.total.input_tokens + data.total.output_tokens;
+    if (data.budget) renderBudget(data.budget);
     el('usage-total').textContent = total
       ? tf('usageLine', { input: data.total.input_tokens.toLocaleString(), output: data.total.output_tokens.toLocaleString() })
       : t('usageNone');
@@ -1254,6 +1405,78 @@ async function loadUsage() {
     el('usage-total').textContent = '';
   }
 }
+
+// ---------- Automation & budget settings ----------
+
+function renderBudget(budget) {
+  const pct = budget.limit ? Math.min(100, Math.round((budget.used / budget.limit) * 100)) : 0;
+  el('budget-fill').style.width = `${pct}%`;
+  el('budget-fill').classList.toggle('over', budget.exceeded);
+  el('budget-text').textContent = budget.limit
+    ? tf('budgetUsed', { used: budget.used.toLocaleString(), limit: budget.limit.toLocaleString(), pct })
+    : tf('budgetUsedNoLimit', { used: budget.used.toLocaleString() });
+  const line = el('usage-budget');
+  line.classList.toggle('hidden', !budget.warn);
+  line.classList.toggle('over', budget.exceeded);
+  line.textContent = budget.exceeded ? t('budgetExceeded') : budget.warn ? tf('budgetWarn', { pct }) : '';
+}
+
+function renderMaintStatus(st) {
+  const parts = [];
+  if (st.running) parts.push(t('maintRunning'));
+  else if (st.next_run_at) parts.push(tf('maintNext', { when: new Date(st.next_run_at * 1000).toLocaleString([], { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }));
+  if (st.last_run_at) {
+    const r = st.last_result || {};
+    const started = (r.started || []).map(toolTitle).join(', ') || t('maintNothing');
+    parts.push(tf('maintLast', { when: shortWhen(st.last_run_at), tools: started }) + (r.budget_stop ? ` ${t('maintBudgetStop')}` : ''));
+  }
+  el('set-maint-status').textContent = parts.join(' · ');
+  el('set-maint-run').disabled = st.running;
+}
+
+async function loadSettings() {
+  try {
+    const data = await (await fetch('/api/settings')).json();
+    const m = data.maintenance;
+    if (!el('set-maint-hour').options.length) {
+      el('set-maint-hour').innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`).join('');
+    }
+    el('set-maint-enabled').checked = m.enabled;
+    el('set-maint-hour').value = String(m.hour);
+    el('set-maint-days').value = String(m.every_days);
+    el('set-maint-metrics').innerHTML = data.metrics.map((k) => `
+      <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('health_' + k))}</label>`).join('');
+    el('set-budget-limit').value = data.budget.monthly_tokens;
+    el('set-budget-block').checked = data.budget.block_manual;
+    renderBudget(data.budget_status);
+    renderMaintStatus(data.maintenance_status);
+    clearTimeout(loadSettings.timer);
+    if (data.maintenance_status.running && currentArea === 'maintain') loadSettings.timer = setTimeout(loadSettings, 5000);
+  } catch (e) { /* optional panel */ }
+}
+
+el('settings-save').addEventListener('click', async () => {
+  const body = {
+    maintenance: {
+      enabled: el('set-maint-enabled').checked,
+      hour: Number(el('set-maint-hour').value),
+      every_days: Number(el('set-maint-days').value),
+      metrics: [...el('set-maint-metrics').querySelectorAll('input:checked')].map((c) => c.value),
+    },
+    budget: { monthly_tokens: Number(el('set-budget-limit').value) || 0, block_manual: el('set-budget-block').checked },
+  };
+  const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  el('settings-saved').textContent = res.ok ? t('settingsSaved') : `${t('toolStatusError')}: HTTP ${res.status}`;
+  setTimeout(() => { el('settings-saved').textContent = ''; }, 3000);
+  loadSettings();
+});
+
+el('set-maint-run').addEventListener('click', async () => {
+  el('set-maint-run').disabled = true;
+  await fetch('/api/maintenance/run', { method: 'POST' });
+  loadSettings();
+  loadHealth();
+});
 
 // metric -> the tool that fixes it (endpoint + optional request body)
 const HEALTH_METRICS = [
@@ -1432,6 +1655,98 @@ function nextMonday() {
   d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
   return d.toISOString().slice(0, 10);
 }
+
+// ---------- How was it? (cook log) ----------
+
+async function loadCooked() {
+  try {
+    const res = await fetch('/api/cooked/pending');
+    if (!res.ok) throw new Error();
+    const items = (await res.json()).items;
+    el('cooked-card').classList.toggle('hidden', !items.length);
+    el('cooked-list').innerHTML = items.map((i) => `
+      <div class="cooked-row" data-plan="${i.plan_id}" data-recipe="${i.recipe.id}" data-date="${i.date}" data-servings="${i.servings}">
+        <div class="ct-main"><div class="ct-name">${escapeHtml(i.recipe.name)}</div>
+          <div class="ct-meta">${escapeHtml(new Date(i.date + 'T12:00').toLocaleDateString([], { weekday: 'short', day: '2-digit', month: '2-digit' }))}${i.meal_type ? ' · ' + escapeHtml(i.meal_type) : ''}</div></div>
+        <div class="cooked-stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-rating="${n}" aria-label="${n}">★</button>`).join('')}</div>
+        <button class="btn secondary cooked-skip" type="button">${t('cookedNotCooked')}</button>
+      </div>`).join('');
+    el('cooked-list').querySelectorAll('.cooked-row').forEach((row) => {
+      const send = async (rating) => {
+        row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        const res2 = await fetch('/api/cooked', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: Number(row.dataset.plan), recipe_id: Number(row.dataset.recipe), date: row.dataset.date,
+            servings: Number(row.dataset.servings), rating }),
+        });
+        if (res2.ok) {
+          row.classList.add('done');
+          row.querySelector('.cooked-skip').textContent = rating ? `✓ ${'★'.repeat(rating)}` : t('cookedSkipped');
+        } else {
+          row.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        }
+      };
+      row.querySelectorAll('[data-rating]').forEach((b) => b.addEventListener('click', () => send(Number(b.dataset.rating))));
+      row.querySelector('.cooked-skip').addEventListener('click', () => send(null));
+    });
+  } catch (e) {
+    el('cooked-card').classList.add('hidden');
+  }
+}
+
+// ---------- What can I cook today? ----------
+
+async function searchCookToday() {
+  const have = el('ct-have').value.trim();
+  if (!have) return;
+  el('ct-status').textContent = t('cookTodaySearching');
+  try {
+    const params = new URLSearchParams({ have, staples: el('ct-staples').checked });
+    const data = await (await fetch(`/api/cook-today?${params}`)).json();
+    if (data.building && !data.results.length && !data.built_at) {
+      // First use: the ingredient index is being built from every recipe.
+      el('ct-status').textContent = t('cookTodayBuilding');
+      clearTimeout(searchCookToday.timer);
+      searchCookToday.timer = setTimeout(searchCookToday, 4000);
+      return;
+    }
+    el('ct-status').textContent = data.results.length ? '' : t('cookTodayNone');
+    el('ct-results').innerHTML = data.results.map((r) => {
+      const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
+      const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
+      const meta = [
+        `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
+        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
+        r.minutes ? `${r.minutes} min` : '',
+        r.rating ? '★'.repeat(Math.round(r.rating)) : '',
+      ].filter(Boolean).join(' · ');
+      return `<div class="ct-row">
+        <div class="ct-score">${r.matched.length}/${r.needed}</div>
+        <div class="ct-main"><div class="ct-name">${name}</div><div class="ct-meta">${meta}</div></div>
+        <button class="btn secondary ct-plan" type="button" data-id="${r.id}" data-name="${escapeHtml(r.name)}">${t('cookTodayPlanBtn')}</button>
+      </div>`;
+    }).join('');
+    el('ct-results').querySelectorAll('.ct-plan').forEach((b) => b.addEventListener('click', async () => {
+      const meal = el('mp-meal');
+      if (!meal.value) { el('ct-status').textContent = t('mealPlanNoMealTypes'); return; }
+      b.disabled = true;
+      const res = await fetch('/api/cook-today/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipe: { id: Number(b.dataset.id), name: b.dataset.name },
+          meal_type: { id: Number(meal.value), name: meal.options[meal.selectedIndex].text },
+          add_to_shopping: el('mp-shopping').checked,
+        }),
+      });
+      b.textContent = res.ok ? `✓ ${tf('cookTodayPlanned', { meal: meal.options[meal.selectedIndex].text })}` : t('toolStatusError');
+      if (!res.ok) b.disabled = false;
+    }));
+  } catch (e) {
+    el('ct-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+  }
+}
+
+el('cook-today-form').addEventListener('submit', (e) => { e.preventDefault(); searchCookToday(); });
 
 async function loadMealPlanOptions() {
   if (!el('mp-start').value) el('mp-start').value = nextMonday();
@@ -1681,7 +1996,11 @@ async function startTool(endpoint, title, body) {
     const res = await fetch(endpoint, body
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : { method: 'POST' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).detail || ''; } catch (e) { /* not JSON */ }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     toolsState.jobId = data.job_id;
     pollToolJob();
@@ -1816,10 +2135,24 @@ function renderToolSuggestions(job) {
         ${queued.has(s.id) ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(s.summary)}
         ${s.preview ? `<details class="suggestion-preview"><summary>${t('toolShowPreview')}</summary><pre>${escapeHtml(s.preview)}</pre></details>` : ''}
       </div>
-      ${s.status === 'pending' ? '' : `<span class="suggestion-status-label">${s.status === 'applied' ? t('toolStatusApplied') : s.status === 'skipped' ? t('toolStatusSkipped') : escapeHtml(s.error || t('toolStatusError'))}</span>`}
+      ${s.status === 'pending' ? '' : `<span class="suggestion-status-label">${s.status === 'applied' ? t('toolStatusApplied') : s.status === 'skipped' ? t('toolStatusSkipped') : s.status === 'undone' ? t('toolStatusUndone') : escapeHtml(s.error || t('toolStatusError'))}</span>`}
+      ${s.status === 'applied' && s.undoable && !queued.has(s.id) ? `<button class="btn secondary suggestion-undo" type="button" data-id="${s.id}">${t('undoBtn')}</button>` : ''}
     </div>
   `).join('');
 
+  list.querySelectorAll('.suggestion-undo').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const jobId = toolsState.jobId;
+    try {
+      const batchId = await queueActions('undo', [{ job_id: jobId, id: b.dataset.id }]);
+      const batch = await watchBatch(batchId, () => {}, () => toolsState.jobId === jobId);
+      el('tools-bulk-status').textContent = batchResultText(batch);
+    } catch (e) {
+      el('tools-bulk-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+    }
+    const res = await fetch(`/api/tools/jobs/${jobId}`);
+    if (res.ok && toolsState.jobId === jobId) renderToolSuggestions(await res.json());
+  }));
   list.querySelectorAll('.tool-suggestion-row.pending').forEach((row) => {
     const box = row.querySelector('.suggestion-check');
     const toggle = (checked) => {

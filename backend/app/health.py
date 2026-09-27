@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import duplicates, ignored, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, ignored, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -84,6 +84,20 @@ def items(metric: str) -> dict:
     return {"items": listed, "ignored": sorted(ignored_items, key=lambda i: i["name"].casefold())}
 
 
+def compute_now() -> None:
+    """Blocking refresh (for the maintenance run); waits for one that's
+    already going instead of starting a second."""
+    with _lock:
+        busy = _state["running"]
+        if not busy:
+            _state["running"], _state["error"] = True, None
+    if not busy:
+        _compute()
+        return
+    while _state["running"]:
+        time.sleep(2)
+
+
 def start_refresh() -> bool:
     with _lock:
         if _state["running"]:
@@ -106,6 +120,7 @@ def _compute() -> None:
                 for r in recipes for step in r.get("steps", []) for ing in step.get("ingredients", [])
             } - {None}
             units = tools_conversions._fetch_all(client, "unit")
+            cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
             general, to_estimate = tools_conversions.find_missing(
                 client, tools_conversions.recipe_pairs(recipes), respect_ignored=False)
 

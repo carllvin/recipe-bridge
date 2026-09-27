@@ -7,22 +7,28 @@ and adjust them in a web UI, and import the selected ones into
 
 The web UI has four areas:
 
-- **📥 Import** – a cookbook (PDF/EPUB), photos of pages, or a single recipe
-  from a web page; reviewed before it goes into Tandoor, and post-processed
+- **📥 Import** – a cookbook (PDF/EPUB), photos of pages (collected and
+  ordered first, optionally as one single recipe), or a single recipe from a
+  web page; reviewed before it goes into Tandoor, and post-processed
   automatically afterwards.
 - **✅ Review** – one inbox for every suggestion waiting for approval
   (merges, ingredient details, conversions, recipe revisions, tags, meal
-  plan), grouped by kind.
-- **📅 Plan** – a weekly meal plan from your own recipes, added to Tandoor's
-  meal plan and shopping list.
+  plan), grouped by kind. Selected suggestions are applied in the
+  background (closing the page doesn't stop it); failed ones can be retried,
+  and applied changes can be undone for 14 days.
+- **📅 Plan** – "What can I cook today?" from the ingredients you have, a
+  weekly meal plan from your own recipes (using ratings and cooking history)
+  added to Tandoor's meal plan and shopping list, and "How was it?" to rate
+  what you cooked.
 - **🔧 Maintain** – a health overview of the collection (likely duplicate
   ingredients/units, missing nutrition/categories/conversions, untranslated
   or unstructured recipes, missing season/tags): each tile starts the tool
   that fixes it, and single entries can be ignored. Tools without a count
   (full ingredient/unit review, tag translate & simplify) are under "More
-  tools". Plus the AI token usage of the last 30 days. A few destructive operations are
-  standalone scripts that intentionally require a terminal - see
-  [`backend/scripts/`](backend/scripts/).
+  tools". Automatic maintenance on a schedule and a monthly AI token budget
+  are set up there too, next to the AI usage of the last 30 days. A few
+  destructive operations are standalone scripts that intentionally require
+  a terminal - see [`backend/scripts/`](backend/scripts/).
 
 <p align="center">
   <img src="screenshots/main_page.png" alt="Main page" width="85%">
@@ -268,3 +274,19 @@ enough; restarting the container loses any job that hasn't been imported yet.
   AI-generated recipe images when the source has none — each is a large
   enough subsystem (new dependencies: Tesseract, ebooklib, an image-gen API,
   OpenCV/PIL-based image processing) to warrant its own dedicated pass
+
+
+## Tests
+
+The tricky parts (merging and undo against an in-memory fake Tandoor, the
+background queue, duplicate detection, plural filter, "what can I cook
+today?", budget and schedule, the review inbox) have automated tests. They
+need no Tandoor and no AI key and run in a few seconds:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+GitHub runs them on every pull request (`.github/workflows/tests.yml`).

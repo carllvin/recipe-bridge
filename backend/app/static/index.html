@@ -30,12 +30,38 @@
       <div id="inbox-running" class="inbox-running"></div>
       <div id="inbox-queue" class="inbox-running inbox-queue hidden"></div>
       <div id="inbox-groups"></div>
+      <details id="history" class="history">
+        <summary data-i18n="historyTitle">Recently applied</summary>
+        <p class="inbox-hint" id="history-hint"></p>
+        <div class="tools-bulk-bar history-bar">
+          <label class="tools-select-all"><input type="checkbox" id="history-select-all"> <span data-i18n="toolSelectAll">Select all</span></label>
+          <span class="tools-bulk-status" id="history-status"></span>
+          <div class="tools-bulk-actions"><button class="btn secondary" id="history-undo-btn" type="button" disabled></button></div>
+        </div>
+        <div id="history-list" class="tools-suggestions-list"></div>
+      </details>
     </div>
 
     <!-- Meal plan -->
     <div id="area-plan" class="area-screen hidden">
       <h1 data-i18n="toolMealPlanTitle">Meal plan &amp; shopping list</h1>
       <p class="lede" data-i18n="toolMealPlanDesc">Picks one of your recipes per day.</p>
+      <section id="cooked-card" class="tool-card cooked-card hidden">
+        <h3 data-i18n="cookedTitle">How was it?</h3>
+        <p class="settings-hint" data-i18n="cookedHint">Rate what you cooked – Tandoor keeps it as a cook log, and the weekly plan prefers well-rated recipes you haven't had for a while.</p>
+        <div id="cooked-list" class="cooked-list"></div>
+      </section>
+      <section class="tool-card cook-today-card">
+        <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
+        <p class="settings-hint" data-i18n="cookTodayHint">Type what you have at home – finds matching recipes in your collection (no AI).</p>
+        <form id="cook-today-form" class="cook-today-form">
+          <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
+          <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
+          <label class="mp-check"><input id="ct-staples" type="checkbox" checked /> <span data-i18n="cookTodayStaples">Salt, pepper, oil, sugar, flour, butter, vinegar are at home</span></label>
+        </form>
+        <p id="ct-status" class="settings-hint"></p>
+        <div id="ct-results" class="ct-results"></div>
+      </section>
       <div class="tool-card plan-form-card">
         <form id="meal-plan-form" class="meal-plan-form">
           <label><span data-i18n="mealPlanStart">Start</span><input id="mp-start" type="date" required /></label>
@@ -78,6 +104,7 @@
             <div class="tool-card-icon">📊</div>
             <h3 data-i18n="usageTitle">AI usage (30 days)</h3>
             <p id="usage-total" class="new-recipes-status"></p>
+            <p id="usage-budget" class="usage-budget hidden"></p>
             <div id="usage-by-source" class="usage-by-source"></div>
           </div>
         </div>
@@ -89,6 +116,38 @@
           </div>
           <div id="health-grid" class="health-grid"></div>
           <div id="health-detail" class="health-detail hidden"></div>
+        </section>
+        <section class="tool-card settings-card">
+          <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+          <div class="settings-grid">
+            <div class="settings-block">
+              <h4 data-i18n="maintTitle">Automatic maintenance</h4>
+              <p class="settings-hint" data-i18n="maintHint">Recounts the overview and prepares suggestions for the selected tiles. Nothing is changed before you review it.</p>
+              <label class="settings-check"><input type="checkbox" id="set-maint-enabled"> <span data-i18n="maintEnabled">Active</span></label>
+              <div class="settings-row">
+                <label><span data-i18n="maintHour">Time</span> <select id="set-maint-hour"></select></label>
+                <label><span data-i18n="maintEvery">Every</span> <select id="set-maint-days">
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="7">7</option><option value="14">14</option>
+                </select> <span data-i18n="maintDays">days</span></label>
+              </div>
+              <div id="set-maint-metrics" class="settings-metrics"></div>
+              <p id="set-maint-status" class="settings-hint"></p>
+              <button id="set-maint-run" class="btn secondary" type="button" data-i18n="maintRunNow">Run now</button>
+            </div>
+            <div class="settings-block">
+              <h4 data-i18n="budgetTitle">Monthly AI budget</h4>
+              <label class="settings-field"><span data-i18n="budgetLimit">Limit (tokens per month, 0 = off)</span>
+                <input type="number" id="set-budget-limit" min="0" step="100000" /></label>
+              <label class="settings-check"><input type="checkbox" id="set-budget-block"> <span data-i18n="budgetBlock">Also block manual starts and imports once reached</span></label>
+              <div class="budget-bar"><div id="budget-fill"></div></div>
+              <p id="budget-text" class="settings-hint"></p>
+              <p class="settings-hint" data-i18n="budgetHint">Once reached, automatic runs (new recipes, post-processing after imports, automatic maintenance) no longer start.</p>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button id="settings-save" class="btn" type="button" data-i18n="settingsSave">Save</button>
+            <span id="settings-saved" class="settings-hint"></span>
+          </div>
         </section>
         <details class="more-tools">
           <summary data-i18n="moreToolsTitle">More tools</summary>
@@ -149,6 +208,22 @@
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
         <input id="file-input" type="file" accept=".pdf,.epub,.jpg,.jpeg,.png,.heic,.heif" multiple />
       </label>
+      <div class="photo-actions">
+        <label class="btn secondary"><span data-i18n="photoTakeBtn">📷 Take photo</span>
+          <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden /></label>
+        <label class="btn secondary"><span data-i18n="photoPickBtn">🖼️ Add photos</span>
+          <input id="photo-pick" type="file" accept=".jpg,.jpeg,.png,.heic,.heif,image/*" multiple hidden /></label>
+      </div>
+      <section id="photo-collector" class="photo-collector hidden">
+        <h3 data-i18n="photoCollectorTitle">Photos for this import</h3>
+        <p class="settings-hint" data-i18n="photoCollectorHint">Order = page order. Take or add more photos, then import them together.</p>
+        <div id="photo-thumbs" class="photo-thumbs"></div>
+        <label class="settings-check"><input id="photo-single" type="checkbox" /> <span data-i18n="photoSingle">All photos show one single recipe (e.g. ingredients and method on different pages)</span></label>
+        <div class="photo-collector-actions">
+          <button id="photo-clear" class="btn secondary" type="button" data-i18n="photoClear">Discard</button>
+          <button id="photo-import" class="btn" type="button"></button>
+        </div>
+      </section>
       <form id="url-form" class="url-form">
         <span class="url-form-or" data-i18n="urlImportOr">or import a single recipe from a website</span>
         <div class="url-form-row">

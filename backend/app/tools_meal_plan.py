@@ -26,10 +26,13 @@ RECENTLY_COOKED_DAYS = 14
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
 collection. Language for "reason": {language}. You will receive a JSON
 object: {"today": "YYYY-MM-DD", "meal": string, "days": ["YYYY-MM-DD (weekday)", ...],
-"wishes": string, "recipes": ["<id>|<title>|<tags>|<minutes>", ...]}
+"wishes": string, "recipes": ["<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>", ...]}
 
 Pick exactly one recipe per day for that meal:
 - follow the wishes (e.g. "2x vegetarian", "quick on weekdays")
+- prefer well-rated recipes (4-5) and ones not cooked for a long time;
+  avoid recipes rated 1-2 unless the wishes ask for them; mix in one or
+  two never-cooked recipes so new ones get tried
 - prefer recipes that fit the current season
 - vary it: no recipe twice, don't repeat the same kind of dish on
   consecutive days
@@ -80,8 +83,15 @@ def _candidates(client) -> list[dict]:
     cutoff = dt.date.today() - dt.timedelta(days=RECENTLY_COOKED_DAYS)
     recipes = [r for r in _fetch_all(client, "recipe")
                if not (_date(r.get("last_cooked")) and _date(r.get("last_cooked")) >= cutoff)]
-    recipes.sort(key=lambda r: -(r.get("rating") or 0))
+    # Well rated and long not cooked first (unrated counts as average); the
+    # AI weighs it again, this only decides who makes the capped list.
+    recipes.sort(key=lambda r: -((r.get("rating") or 3) + min(_days_since_cooked(r) or 60, 180) / 60))
     return recipes[:MAX_CANDIDATES]
+
+
+def _days_since_cooked(recipe) -> int | None:
+    cooked = _date(recipe.get("last_cooked"))
+    return (dt.date.today() - cooked).days if cooked else None
 
 
 def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSuggestion]:
@@ -90,10 +100,12 @@ def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSu
     meal_type = params["meal_type"]
     pool = [r for r in candidates if r["id"] not in exclude_ids]
     by_id = {r["id"]: r for r in pool}
-    lines = [
-        f"{r['id']}|{r.get('name', '')}|{','.join(k.get('label') or k.get('name', '') for k in r.get('keywords') or [])}|{_minutes(r) or '?'}"
-        for r in pool
-    ]
+    def line(r):
+        tags = ",".join(k.get("label") or k.get("name", "") for k in r.get("keywords") or [])
+        rating = f"{r['rating']:g}" if r.get("rating") else "-"
+        days = _days_since_cooked(r)
+        return f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
+    lines = [line(r) for r in pool]
     text_out, usage = llm_provider.complete_tool_text(
         SYSTEM_PROMPT.replace("{language}", settings.output_language),
         json.dumps({
@@ -204,6 +216,35 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
     return job
 
 
+def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
+    """Creates one entry in Tandoor's meal plan with the recipe's own
+    servings - so the shopping list gets exactly the amounts written in the
+    recipe. Returns the created entry."""
+    resp = client.get(f"/recipe/{recipe['id']}/")
+    resp.raise_for_status()
+    payload = {
+        "title": "",
+        "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
+        "servings": resp.json().get("servings") or 1,
+        "note": "",
+        "from_date": date,
+        "to_date": date,
+        "meal_type": meal_type,
+        "shared": [],
+        # Tandoor adds the recipe's ingredients to the shopping list when a
+        # plan entry is created with this flag.
+        "addshopping": add_to_shopping,
+    }
+    resp = client.post("/meal-plan/", json=payload)
+    if resp.status_code == 400 and "date" in resp.text.lower():
+        # Newer Tandoor versions store plan dates as date-times.
+        payload["from_date"] = payload["to_date"] = f"{date}T00:00:00"
+        resp = client.post("/meal-plan/", json=payload)
+    if resp.status_code not in (200, 201):
+        raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
+    return resp.json()
+
+
 def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
@@ -215,33 +256,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
         return suggestion
 
     d = suggestion.detail
-    payload = {
-        "title": "",
-        "recipe": d["recipe"],
-        "servings": 1,  # replaced below by the recipe's own servings
-        "note": "",
-        "from_date": d["date"],
-        "to_date": d["date"],
-        "meal_type": d["meal_type"],
-        "shared": [],
-        # Tandoor adds the recipe's ingredients to the shopping list when a
-        # plan entry is created with this flag.
-        "addshopping": d["add_to_shopping"],
-    }
     try:
         with tandoor_client.get_client() as client:
-            # The recipe's own servings - so the shopping list gets exactly
-            # the amounts written in the recipe.
-            resp = client.get(f"/recipe/{d['recipe']['id']}/")
-            resp.raise_for_status()
-            payload["servings"] = resp.json().get("servings") or 1
-            resp = client.post("/meal-plan/", json=payload)
-            if resp.status_code == 400 and "date" in resp.text.lower():
-                # Newer Tandoor versions store plan dates as date-times.
-                payload["from_date"] = payload["to_date"] = f"{d['date']}T00:00:00"
-                resp = client.post("/meal-plan/", json=payload)
-            if resp.status_code not in (200, 201):
-                raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
+            create_plan_entry(client, d["recipe"], d["date"], d["meal_type"], d["add_to_shopping"])
         suggestion.status = "applied"
     except Exception as exc:  # noqa: BLE001
         suggestion.status = "error"

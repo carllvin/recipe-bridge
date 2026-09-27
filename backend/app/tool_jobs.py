@@ -21,6 +21,7 @@ _last_written: dict[str, float] = {}
 
 WRITE_INTERVAL_WHILE_SCANNING = 5.0  # seconds - progress updates are frequent, disk writes needn't be
 PENDING_RETENTION_DAYS = 30          # runs with unreviewed suggestions are kept this long
+UNDO_RETENTION_DAYS = 14             # keep in sync with undo.RETENTION_DAYS
 
 
 def _dir() -> str:
@@ -117,7 +118,10 @@ def cleanup_old_tool_jobs(retention_hours: int) -> int:
             if job.status != "scanning" and (
                 job.created_at < now - PENDING_RETENTION_DAYS * 86400
                 or (job.created_at < now - retention_hours * 3600
-                    and not any(s.status == "pending" for s in job.suggestions))
+                    and not any(s.status in ("pending", "error") for s in job.suggestions)
+                    # applied changes stay undoable for undo.RETENTION_DAYS
+                    and not any(s.undoable and (s.applied_at or 0) > now - UNDO_RETENTION_DAYS * 86400
+                                for s in job.suggestions))
             )
         ]
         for jid in stale_ids:
