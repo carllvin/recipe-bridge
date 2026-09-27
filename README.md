@@ -1,7 +1,9 @@
 # Tandoor Helper
 
 A companion web app for [Tandoor Recipes](https://tandoor.dev/). It **imports
-whole cookbooks** (PDF, EPUB, phone photos, web pages, lists of links) with the help of an AI
+recipes from almost anywhere** – cookbooks (PDF, EPUB, Word), phone photos,
+web pages, whole recipe websites, browser bookmarks, pasted text – with the
+help of an AI
 (Claude, ChatGPT or Gemini), **keeps your collection tidy** (duplicates,
 translations, nutrition, unit conversions, tags …) and **helps you plan
 meals** from your own recipes. It never changes anything behind your back:
@@ -29,23 +31,52 @@ bar).
 
 ### 📥 Import
 
-- **Cookbooks as PDF or EPUB** – the AI reads every page (in overlapping
-  chunks, so books with hundreds of pages work), finds each recipe with its
-  page range, ingredients, steps, times, servings, tags and photo.
+**Files** – drop them on the import area or click to choose:
+
+- **Cookbooks as PDF, EPUB or Word (.docx)** – the AI reads every page (in
+  overlapping chunks, so books with hundreds of pages work), finds each
+  recipe with its page range, ingredients, steps, times, servings, tags and
+  photo. Pictures embedded in a Word document become photo candidates.
 - **Photos of cookbook pages** – drop them in or, on the phone, take them one
   by one with the camera. They are collected first, can be reordered and
   removed, and are imported together; tick *"all photos show one single
   recipe"* when ingredients and method are on different pages. Scans and
   photos go through OCR (Tesseract) with deskewing, cropping and two-page
   spread detection.
-- **Recipes from web pages** – paste a URL, or drop a **`.txt` file with a
-  list of links** (one per line, or any text containing links; up to 50).
-  Each page is read on its own – its schema.org recipe data is used when
-  present – and the link is kept as the recipe's source in Tandoor. Links
-  that can't be loaded or contain no recipe are skipped and listed in the
-  review.
-- Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
-  **converted to metric** on the way.
+- **A `.txt` file** – either a **list of recipe links** (one per line, or any
+  text containing links; up to 50) or **recipe text**; the app tells them
+  apart by the content. Markdown files (`.md`) are read as text.
+- **Browser bookmarks** – the HTML export of Chrome, Firefox, Safari or Edge
+  opens a pick list with the bookmark folders as a filter.
+
+**From the web and the clipboard** – three tabs below the import area:
+
+- **🔗 Link** – a single recipe page.
+- **🌐 Scan a website** – enter a food blog's homepage or a category page.
+  The app looks for recipe pages – via the site's sitemap, or by following
+  the links of the page you entered (incl. "page 2, 3 …") – and recognizes
+  them by the recipe data they embed (schema.org), **without AI**. Results
+  show up while it runs, with photo, time and an *already in Tandoor* mark;
+  you pick which ones to import. It respects the site's `robots.txt`, reads
+  at most one page per second and checks up to 300 pages.
+- **📝 Paste text** – a recipe from a message, an email or a note.
+
+<p align="center">
+  <img src="screenshots/scan.png" alt="Picking recipes found by the website scan" width="70%">
+</p>
+
+Links (single, from a list, a scan or bookmarks) are read one page at a
+time – the page's schema.org recipe data is used when present – and each
+recipe keeps its link as the source in Tandoor. Links that can't be loaded
+or contain no recipe are skipped and listed in the review.
+
+Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
+**converted to metric** on the way.
+
+> **Recipes from other apps** (Paprika, Mealie, Nextcloud Cookbook,
+> RecipeSage, …): Tandoor imports their export files itself, on its own
+> import page. Afterwards run **Process new recipes** on the 🔧 Maintain page to
+> translate them, match their ingredients to yours and add tags.
 
 Before anything goes into Tandoor you review the result:
 
@@ -352,6 +383,8 @@ backend/
 
     # Import
     pdf_processor.py, epub_processor.py, image_processor.py, url_processor.py (web pages, link lists)
+    docx_processor.py, text_processor.py   Word documents; pasted text, Markdown, .txt (links or text)
+    site_scan.py            Website scan: sitemap / link crawl, schema.org recipe detection (no AI)
     ocr.py, image_preprocessing.py   Tesseract OCR, deskew/crop, two-page spreads
     ai_extractor.py         Recipe extraction: prompt, chunking, dedup, language detection
     import_matching.py      Match ingredients against Tandoor before the review
@@ -401,6 +434,10 @@ GitHub runs them on every pull request (`.github/workflows/tests.yml`).
 - Ingredient-to-step assignment and image matching are done by the AI or
   heuristically – worth a glance in the review screen for complex recipes.
 - Duplicate recipe detection compares titles only, not ingredients.
+- The website scan only finds pages that embed schema.org recipe data, and
+  sites that load their content with JavaScript or block bots (e.g. behind
+  Cloudflare) yield little or nothing. It is meant for picking recipes for
+  your own collection – respect the site's terms.
 - Imports that haven't been sent to Tandoor yet are lost when the container
   restarts (open suggestions, the queue and the undo history are kept).
 - `TOC_AWARE_CHUNKING` (aligning chunks to a PDF's table of contents) is
