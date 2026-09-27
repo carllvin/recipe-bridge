@@ -85,8 +85,10 @@ class ToolSuggestion(BaseModel):
     summary: str  # human-readable one-liner shown in the list, e.g. "merge 'Onion' into 'Zwiebel'"
     detail: dict = Field(default_factory=dict)  # the raw action payload the apply step needs
     preview: Optional[str] = None  # optional multi-line before/after, shown expandable under the summary
-    status: str = "pending"  # pending | applied | skipped | error
+    status: str = "pending"  # pending | applied | skipped | error | undone
     error: Optional[str] = None
+    applied_at: Optional[float] = None
+    undoable: bool = False  # an undo journal was saved when it was applied (see undo.py)
 
 
 class ToolJob(BaseModel):

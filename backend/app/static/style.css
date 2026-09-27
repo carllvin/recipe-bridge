@@ -947,3 +947,7 @@ a { color: inherit; }
 
 .tool-suggestion-row.queued { opacity: 0.6; }
 .queued-label { font-size: 0.75rem; color: var(--gold); white-space: nowrap; }
+.history { margin-top: 28px; border-top: 1px solid #2a2f2a; padding-top: 14px; }
+.history summary { cursor: pointer; font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 600; }
+.history-bar { margin: 8px 0; }
+.suggestion-undo { padding: 3px 10px; font-size: 0.75rem; flex-shrink: 0; }

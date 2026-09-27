@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import threading
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -15,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import apply_queue, health, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import apply_queue, health, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -837,10 +838,15 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
         apply_fn = _TOOL_APPLY.get(job.tool)
         if apply_fn is None:
             raise LookupError(f"Unknown tool: {job.tool}")
-        suggestion = apply_fn(job_id, suggestion_id)
-        if suggestion.status == "applied":
+        before = next((s.status for s in job.suggestions if s.id == suggestion_id), None)
+        with undo.recording() as journal:
+            suggestion = apply_fn(job_id, suggestion_id)
+        if suggestion.status == "applied" and before != "applied":
+            _remember_applied(job, suggestion, journal)
             health.mark_changed()
         return suggestion
+    if action == "undo":
+        return _undo_suggestion(job, suggestion_id)
     suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
     if suggestion is None:
         raise LookupError("Suggestion not found.")
@@ -848,6 +854,33 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
         suggestion.status = "skipped"
         tool_jobs.save_tool_job(job)
         tools_new_recipes.after_action(job)
+    return suggestion
+
+
+def _remember_applied(job, suggestion, journal) -> None:
+    suggestion.applied_at = time.time()
+    if journal:
+        undo.save(job.id, suggestion.id, journal)
+        suggestion.undoable = True
+    tool_jobs.save_tool_job(job)
+
+
+def _undo_suggestion(job, suggestion_id):
+    suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
+    if suggestion is None:
+        raise LookupError("Suggestion not found.")
+    if suggestion.status != "applied" or not suggestion.undoable:
+        return suggestion
+    try:
+        with tandoor_client.get_client() as client:
+            undo.revert(client, job.id, suggestion.id)
+    except Exception as exc:  # noqa: BLE001
+        suggestion.error = f"Undo failed: {exc}"
+        tool_jobs.save_tool_job(job)
+        raise
+    suggestion.status, suggestion.undoable, suggestion.error = "undone", False, None
+    tool_jobs.save_tool_job(job)
+    health.mark_changed()
     return suggestion
 
 
@@ -870,6 +903,21 @@ async def skip_tool_suggestion(job_id: str, suggestion_id: str):
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     return suggestion.model_dump()
+
+
+@app.get("/api/history")
+async def applied_history():
+    """Applied changes that can still be undone, newest first."""
+    queued = apply_queue.queued_keys()
+    items = [
+        {"job_id": job.id, "tool": job.tool, "id": s.id, "kind": s.kind, "summary": s.summary,
+         "applied_at": s.applied_at, "error": s.error, "queued": (job.id, s.id) in queued}
+        for job in tool_jobs.list_all_tool_jobs()
+        for s in job.suggestions
+        if s.status == "applied" and s.undoable and undo.exists(job.id, s.id)
+    ]
+    items.sort(key=lambda i: -(i["applied_at"] or 0))
+    return {"items": items[:300], "retention_days": undo.RETENTION_DAYS}
 
 
 @app.post("/api/tools/actions")
@@ -920,6 +968,7 @@ async def _cleanup_loop() -> None:
         try:
             jobs.cleanup_old_jobs(settings.data_dir, settings.job_retention_hours)
             tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
+            undo.cleanup({job.id for job in tool_jobs.list_all_tool_jobs()})
         except Exception:  # noqa: BLE001
             log.exception("Background cleanup failed")
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)

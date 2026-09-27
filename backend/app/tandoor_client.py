@@ -26,13 +26,33 @@ def _truncate(text: str, max_length: int) -> str:
     return text[: max_length - 1].rstrip() + "…"
 
 
+class RecordingClient(httpx.Client):
+    """httpx client that, while undo.recording() is active in this thread,
+    records the inverse of every write for undo (see undo.py). Without an
+    active recording it behaves exactly like httpx.Client."""
+
+    def request(self, method, url, **kwargs):
+        from . import undo  # late import: undo imports config only, but keep this module light
+
+        if undo.current() is None or method.upper() not in ("POST", "PATCH", "PUT", "DELETE"):
+            return super().request(method, url, **kwargs)
+        path = str(url)
+        if path.startswith(str(self.base_url)):
+            path = path[len(str(self.base_url)):]
+        path = path.split("?")[0]
+        entry = undo.before_write(self, method, path, kwargs.get("json"))
+        response = super().request(method, url, **kwargs)
+        undo.after_write(entry, response)
+        return response
+
+
 def get_client() -> httpx.Client:
     if not settings.tandoor_url or not settings.tandoor_token:
         raise TandoorError(
             "TANDOOR_URL / TANDOOR_TOKEN are not configured (see .env)."
         )
     base_url = settings.tandoor_url.rstrip("/")
-    return httpx.Client(
+    return RecordingClient(
         base_url=f"{base_url}/api",
         headers={
             "Authorization": f"Bearer {settings.tandoor_token}",

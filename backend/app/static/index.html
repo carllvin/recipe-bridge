@@ -30,6 +30,16 @@
       <div id="inbox-running" class="inbox-running"></div>
       <div id="inbox-queue" class="inbox-running inbox-queue hidden"></div>
       <div id="inbox-groups"></div>
+      <details id="history" class="history">
+        <summary data-i18n="historyTitle">Recently applied</summary>
+        <p class="inbox-hint" id="history-hint"></p>
+        <div class="tools-bulk-bar history-bar">
+          <label class="tools-select-all"><input type="checkbox" id="history-select-all"> <span data-i18n="toolSelectAll">Select all</span></label>
+          <span class="tools-bulk-status" id="history-status"></span>
+          <div class="tools-bulk-actions"><button class="btn secondary" id="history-undo-btn" type="button" disabled></button></div>
+        </div>
+        <div id="history-list" class="tools-suggestions-list"></div>
+      </details>
     </div>
 
     <!-- Meal plan -->

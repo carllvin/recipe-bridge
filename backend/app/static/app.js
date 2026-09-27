@@ -1090,6 +1090,7 @@ async function loadInbox(schedule = true) {
       ? `<span class="spinner small"></span> ${escapeHtml(tf('queueRunning', { n: data.queued }))}` : '';
     renderInbox();
     updateInboxBadge();
+    if (!historyState.busy) loadHistory();
     if (!schedule) return;
     clearTimeout(inboxState.timer);
     if ((data.running.length || data.queued) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
@@ -1174,6 +1175,81 @@ function renderInbox() {
     runInboxAction(b.dataset.group, action, items);
   }));
 }
+
+// ---------- Recently applied (undo) ----------
+
+const historyState = { items: [], selected: new Set(), busy: false };
+
+async function loadHistory() {
+  if (!el('history').open) return;
+  try {
+    const data = await (await fetch('/api/history')).json();
+    historyState.items = data.items;
+    el('history-hint').textContent = tf('historyHint', { days: data.retention_days });
+    const keys = new Set(data.items.map(itemKey));
+    historyState.selected.forEach((k) => { if (!keys.has(k)) historyState.selected.delete(k); });
+    renderHistory();
+  } catch (e) { /* optional */ }
+}
+
+function renderHistory() {
+  const items = historyState.items;
+  el('history-list').innerHTML = items.length ? items.map((i) => `
+    <div class="tool-suggestion-row applied ${i.queued ? 'queued' : ''}" data-key="${itemKey(i)}">
+      <input type="checkbox" class="suggestion-check" ${historyState.selected.has(itemKey(i)) ? 'checked' : ''} ${historyState.busy || i.queued ? 'disabled' : ''}>
+      <div class="suggestion-text">
+        ${i.queued ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(i.summary)}
+        <div class="inbox-source">${escapeHtml(toolTitle(i.tool))} · ${escapeHtml(shortWhen(i.applied_at))}</div>
+        ${i.error ? `<div class="inbox-error">${escapeHtml(i.error)}</div>` : ''}
+      </div>
+    </div>`).join('') : `<p class="inbox-empty">${t('historyEmpty')}</p>`;
+  const n = historyState.selected.size;
+  const selectable = items.filter((i) => !i.queued).length;
+  el('history-undo-btn').textContent = tf('historyUndoBtn', { count: n });
+  el('history-undo-btn').disabled = historyState.busy || !n;
+  el('history-select-all').checked = selectable > 0 && n === selectable;
+  el('history-select-all').disabled = historyState.busy || !selectable;
+  el('history-list').querySelectorAll('.tool-suggestion-row').forEach((row) => {
+    const box = row.querySelector('.suggestion-check');
+    const toggle = () => {
+      if (box.checked) historyState.selected.add(row.dataset.key); else historyState.selected.delete(row.dataset.key);
+      renderHistory();
+    };
+    box.addEventListener('change', toggle);
+    row.addEventListener('click', (e) => {
+      if (box.disabled || e.target === box) return;
+      box.checked = !box.checked;
+      toggle();
+    });
+  });
+}
+
+el('history').addEventListener('toggle', loadHistory);
+el('history-select-all').addEventListener('change', (e) => {
+  historyState.selected = new Set(e.target.checked ? historyState.items.filter((i) => !i.queued).map(itemKey) : []);
+  renderHistory();
+});
+el('history-undo-btn').addEventListener('click', async () => {
+  // Newest first - later changes are taken back before the ones they built on.
+  const todo = historyState.items.filter((i) => historyState.selected.has(itemKey(i)));
+  if (!todo.length || historyState.busy) return;
+  historyState.busy = true;
+  el('history-status').textContent = '';
+  try {
+    const batchId = await queueActions('undo', todo);
+    historyState.selected.clear();
+    const batch = await watchBatch(batchId, async (b) => {
+      el('history-status').textContent = b.done < b.total ? tf('historyUndoing', { current: Math.min(b.done + 1, b.total), total: b.total }) : '';
+      await loadHistory();
+    }, () => currentArea === 'inbox');
+    el('history-status').textContent = batchResultText(batch);
+  } catch (e) {
+    el('history-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+  }
+  historyState.busy = false;
+  await loadHistory();
+  loadInbox();
+});
 
 // ---------- Background apply/skip ----------
 // Selected suggestions are handed to the server's queue, which applies them
@@ -1817,10 +1893,24 @@ function renderToolSuggestions(job) {
         ${queued.has(s.id) ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(s.summary)}
         ${s.preview ? `<details class="suggestion-preview"><summary>${t('toolShowPreview')}</summary><pre>${escapeHtml(s.preview)}</pre></details>` : ''}
       </div>
-      ${s.status === 'pending' ? '' : `<span class="suggestion-status-label">${s.status === 'applied' ? t('toolStatusApplied') : s.status === 'skipped' ? t('toolStatusSkipped') : escapeHtml(s.error || t('toolStatusError'))}</span>`}
+      ${s.status === 'pending' ? '' : `<span class="suggestion-status-label">${s.status === 'applied' ? t('toolStatusApplied') : s.status === 'skipped' ? t('toolStatusSkipped') : s.status === 'undone' ? t('toolStatusUndone') : escapeHtml(s.error || t('toolStatusError'))}</span>`}
+      ${s.status === 'applied' && s.undoable && !queued.has(s.id) ? `<button class="btn secondary suggestion-undo" type="button" data-id="${s.id}">${t('undoBtn')}</button>` : ''}
     </div>
   `).join('');
 
+  list.querySelectorAll('.suggestion-undo').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const jobId = toolsState.jobId;
+    try {
+      const batchId = await queueActions('undo', [{ job_id: jobId, id: b.dataset.id }]);
+      const batch = await watchBatch(batchId, () => {}, () => toolsState.jobId === jobId);
+      el('tools-bulk-status').textContent = batchResultText(batch);
+    } catch (e) {
+      el('tools-bulk-status').textContent = `${t('toolStatusError')}: ${e.message}`;
+    }
+    const res = await fetch(`/api/tools/jobs/${jobId}`);
+    if (res.ok && toolsState.jobId === jobId) renderToolSuggestions(await res.json());
+  }));
   list.querySelectorAll('.tool-suggestion-row.pending').forEach((row) => {
     const box = row.querySelector('.suggestion-check');
     const toggle = (checked) => {
