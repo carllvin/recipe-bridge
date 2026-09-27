@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_today, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -784,6 +784,28 @@ async def cook_today_plan(body: dict = Body(...)):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc))
     return {"ok": True, "date": date}
+
+
+@app.get("/api/cooked/pending")
+async def cooked_pending():
+    try:
+        return {"items": await asyncio.to_thread(cook_feedback.pending)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/cooked")
+async def cooked_answer(body: dict = Body(...)):
+    """{"plan_id", "recipe_id", "date", "servings", "rating": 1-5 | null (not cooked)}"""
+    try:
+        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], int(body["recipe_id"]), body["date"],
+                                body.get("servings"), body.get("rating"))
+    except KeyError as exc:
+        raise HTTPException(400, f"Missing field {exc}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+    health.mark_changed()
+    return {"ok": True}
 
 
 @app.get("/api/tools/meal-plan/options")

@@ -1056,7 +1056,7 @@ function showArea(area) {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.area === area));
   if (area === 'import') loadRecentImports();
   if (area === 'inbox') loadInbox();
-  if (area === 'plan') openPlanArea();
+  if (area === 'plan') { openPlanArea(); loadCooked(); }
   if (area === 'maintain') {
     loadNewRecipesStatus();
     loadUsage();
@@ -1654,6 +1654,44 @@ function nextMonday() {
   const d = new Date();
   d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
   return d.toISOString().slice(0, 10);
+}
+
+// ---------- How was it? (cook log) ----------
+
+async function loadCooked() {
+  try {
+    const res = await fetch('/api/cooked/pending');
+    if (!res.ok) throw new Error();
+    const items = (await res.json()).items;
+    el('cooked-card').classList.toggle('hidden', !items.length);
+    el('cooked-list').innerHTML = items.map((i) => `
+      <div class="cooked-row" data-plan="${i.plan_id}" data-recipe="${i.recipe.id}" data-date="${i.date}" data-servings="${i.servings}">
+        <div class="ct-main"><div class="ct-name">${escapeHtml(i.recipe.name)}</div>
+          <div class="ct-meta">${escapeHtml(new Date(i.date + 'T12:00').toLocaleDateString([], { weekday: 'short', day: '2-digit', month: '2-digit' }))}${i.meal_type ? ' · ' + escapeHtml(i.meal_type) : ''}</div></div>
+        <div class="cooked-stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-rating="${n}" aria-label="${n}">★</button>`).join('')}</div>
+        <button class="btn secondary cooked-skip" type="button">${t('cookedNotCooked')}</button>
+      </div>`).join('');
+    el('cooked-list').querySelectorAll('.cooked-row').forEach((row) => {
+      const send = async (rating) => {
+        row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        const res2 = await fetch('/api/cooked', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: Number(row.dataset.plan), recipe_id: Number(row.dataset.recipe), date: row.dataset.date,
+            servings: Number(row.dataset.servings), rating }),
+        });
+        if (res2.ok) {
+          row.classList.add('done');
+          row.querySelector('.cooked-skip').textContent = rating ? `✓ ${'★'.repeat(rating)}` : t('cookedSkipped');
+        } else {
+          row.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        }
+      };
+      row.querySelectorAll('[data-rating]').forEach((b) => b.addEventListener('click', () => send(Number(b.dataset.rating))));
+      row.querySelector('.cooked-skip').addEventListener('click', () => send(null));
+    });
+  } catch (e) {
+    el('cooked-card').classList.add('hidden');
+  }
 }
 
 // ---------- What can I cook today? ----------

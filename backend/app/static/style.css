@@ -999,3 +999,14 @@ a { color: inherit; }
 .photo-thumb button { background: #2a2f2a; border: none; color: var(--paper); border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 0.85rem; }
 .photo-thumb button:disabled { opacity: 0.3; cursor: default; }
 .photo-collector-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; }
+.cooked-card { margin-bottom: 20px; }
+.cooked-list { display: flex; flex-direction: column; gap: 8px; }
+.cooked-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
+.cooked-row .ct-main { flex: 1; min-width: 160px; }
+.cooked-stars { display: flex; gap: 2px; }
+.cooked-stars button { background: none; border: none; color: #5a5f58; font-size: 1.35rem; cursor: pointer; padding: 0 2px; line-height: 1; }
+/* hovering a star lights it and every star before it */
+.cooked-stars:hover button { color: var(--gold); }
+.cooked-stars button:hover ~ button { color: #5a5f58; }
+.cooked-row .btn { padding: 4px 10px; font-size: 0.75rem; }
+.cooked-row.done { opacity: 0.55; }
