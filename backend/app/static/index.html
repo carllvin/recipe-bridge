@@ -208,7 +208,7 @@
         <span class="icon">📖</span>
         <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
-        <input id="file-input" type="file" accept=".pdf,.epub,.txt,.jpg,.jpeg,.png,.heic,.heif" multiple />
+        <input id="file-input" type="file" accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm,.jpg,.jpeg,.png,.heic,.heif" multiple />
       </label>
       <!-- Phones/tablets only: opens the camera directly (the drop area above
            already takes files and photos on every device). -->
@@ -226,13 +226,50 @@
           <button id="photo-import" class="btn" type="button"></button>
         </div>
       </section>
-      <form id="url-form" class="url-form">
-        <span class="url-form-or" data-i18n="urlImportOr">or import a single recipe from a website</span>
-        <div class="url-form-row">
-          <input id="url-input" type="url" inputmode="url" placeholder="https://…" required />
-          <button class="btn" type="submit" data-i18n="urlImportBtn">Import</button>
+      <div class="import-more">
+        <div class="import-tabs" role="tablist">
+          <button type="button" class="import-tab active" data-pane="url" data-i18n="importTabUrl">🔗 Link</button>
+          <button type="button" class="import-tab" data-pane="scan" data-i18n="importTabScan">🌐 Scan a website</button>
+          <button type="button" class="import-tab" data-pane="text" data-i18n="importTabText">📝 Paste text</button>
         </div>
-      </form>
+        <form id="url-form" class="url-form import-pane" data-pane="url">
+          <span class="url-form-or" data-i18n="urlImportOr">Import a single recipe from a website</span>
+          <div class="url-form-row">
+            <input id="url-input" type="url" inputmode="url" placeholder="https://…" required />
+            <button class="btn" type="submit" data-i18n="urlImportBtn">Import</button>
+          </div>
+        </form>
+        <form id="scan-form" class="url-form import-pane hidden" data-pane="scan">
+          <span class="url-form-or" data-i18n="scanHint">Finds the recipes on a site (homepage or a category page) – you pick which to import.</span>
+          <div class="url-form-row">
+            <input id="scan-input" type="url" inputmode="url" placeholder="https://…" required />
+            <button class="btn" type="submit" data-i18n="scanBtn">Scan</button>
+          </div>
+        </form>
+        <form id="text-form" class="url-form import-pane hidden" data-pane="text">
+          <span class="url-form-or" data-i18n="textHint">Paste a recipe from a message, an email or a note.</span>
+          <textarea id="text-input" rows="7" data-i18n-placeholder="textPlaceholder" placeholder="Title, ingredients, steps …"></textarea>
+          <button class="btn" type="submit" data-i18n="textImportBtn">Import text</button>
+        </form>
+      </div>
+      <section id="pick-panel" class="pick-panel hidden">
+        <div class="pick-head">
+          <h3 id="pick-title"></h3>
+          <button id="pick-close" class="btn secondary" type="button" data-i18n="modalClose">Close</button>
+        </div>
+        <div class="pick-status"><span id="pick-status"></span>
+          <button id="pick-stop" class="btn secondary hidden" type="button" data-i18n="pickStop">Stop</button></div>
+        <div class="pick-bar">
+          <input id="pick-filter" type="search" data-i18n-placeholder="healthFilter" placeholder="Filter …" />
+          <select id="pick-folder" class="hidden"></select>
+          <label><input id="pick-all" type="checkbox" /> <span data-i18n="toolSelectAll">Select all</span></label>
+        </div>
+        <div id="pick-list" class="pick-list"></div>
+        <div class="pick-foot">
+          <span id="pick-hint" class="settings-hint"></span>
+          <button id="pick-import" class="btn" type="button" disabled></button>
+        </div>
+      </section>
       <div id="upload-error" class="error-banner hidden" style="margin-top:18px;"></div>
       <div id="recent-imports" class="recent-imports hidden">
         <h3 data-i18n="recentImportsTitle">Recent imports</h3>

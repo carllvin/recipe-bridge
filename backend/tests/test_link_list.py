@@ -41,7 +41,7 @@ def test_each_link_becomes_its_own_recipe(tmp_path, monkeypatch):
     monkeypatch.setattr(main.import_matching, "match_job_ingredients", lambda job: None)
 
     job = jobs.create_job("links.txt")
-    main._run_extraction(job.id, [str(list_file)], "links")
+    main._run_extraction(job.id, [str(list_file)], "txt")
 
     job = jobs.get_job(job.id)
     assert job.status == "ready"
@@ -53,6 +53,8 @@ def test_each_link_becomes_its_own_recipe(tmp_path, monkeypatch):
     assert job.token_usage.input_tokens == 210
 
 
-def test_upload_classifies_txt_as_link_list():
-    assert main._classify_upload(["links.txt"]) == ("links", "")
+def test_upload_types():
+    assert main._classify_upload(["links.txt"]) == ("txt", "")
+    assert main._classify_upload(["recipes.md"]) == ("text", "")
+    assert main._classify_upload(["Omas Rezepte.docx"]) == ("docx", "")
     assert main._classify_upload(["links.txt", "photo.jpg"])[0] == ""

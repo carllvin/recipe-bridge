@@ -123,7 +123,8 @@ const fileInput = el('file-input');
 const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif'];
 const FALLBACK_PDF_EXTENSIONS = ['.pdf'];
 const FALLBACK_EPUB_EXTENSIONS = ['.epub'];
-const LINK_LIST_EXTENSIONS = ['.txt'];  // a text file with recipe links
+const SINGLE_DOC_EXTENSIONS = ['.txt', '.md', '.markdown', '.docx'];  // links or recipe text, Word
+const BOOKMARK_EXTENSIONS = ['.html', '.htm'];  // browser bookmark exports
 
 function extOf(filename) {
   const i = filename.lastIndexOf('.');
@@ -138,9 +139,9 @@ function classifyFiles(files) {
 
   if (files.length === 1 && pdfExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && epubExts.includes(exts[0])) return { ok: true };
-  if (files.length === 1 && LINK_LIST_EXTENSIONS.includes(exts[0])) return { ok: true };
+  if (files.length === 1 && SINGLE_DOC_EXTENSIONS.includes(exts[0])) return { ok: true };
   if (exts.length > 0 && exts.every((e) => imageExts.includes(e))) return { ok: true };
-  if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e) || LINK_LIST_EXTENSIONS.includes(e))) {
+  if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e) || SINGLE_DOC_EXTENSIONS.includes(e) || BOOKMARK_EXTENSIONS.includes(e))) {
     return { ok: false, error: t('onlyOnePdfOrEpubError') };
   }
   return { ok: false, error: t('unsupportedFileTypeError') };
@@ -181,6 +182,7 @@ function isImageFile(f) {
 
 function handleChosenFiles(files) {
   if (files.every(isImageFile)) { addPhotos(files); return; }
+  if (files.length === 1 && BOOKMARK_EXTENSIONS.includes(extOf(files[0].name))) { openBookmarks(files[0]); return; }
   uploadFiles(files);
 }
 
@@ -279,22 +281,21 @@ async function uploadFiles(files, options = {}) {
 }
 
 // Single recipe from a web page: same processing / review / import flow.
-el('url-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const url = el('url-input').value.trim();
-  if (!url) return;
+// Starts an import that isn't a file upload (web page, pasted text, picked
+// links) and switches to the processing screen.
+async function startImportRequest(endpoint, body, loadingText, onStarted) {
   el('upload-error').classList.add('hidden');
   requestNotificationPermission();
   el('upload-screen').classList.add('hidden');
   el('processing-screen').classList.remove('hidden');
   el('progress-track').classList.add('hidden');
   el('usage-badge').classList.add('hidden');
-  el('processing-text').textContent = t('urlImportLoading');
+  el('processing-text').textContent = loadingText;
   try {
-    const res = await fetch('/api/import-url', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -303,14 +304,179 @@ el('url-form').addEventListener('submit', async (e) => {
     const data = await res.json();
     state.jobId = data.job_id;
     setJobUrl(data.job_id);
-    el('url-input').value = '';
+    if (onStarted) onStarted();
     pollJob();
   } catch (err) {
     el('processing-screen').classList.add('hidden');
     el('upload-screen').classList.remove('hidden');
     showUploadError(err.message);
   }
+}
+
+el('url-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const url = el('url-input').value.trim();
+  if (!url) return;
+  startImportRequest('/api/import-url', { url }, t('urlImportLoading'), () => { el('url-input').value = ''; });
 });
+
+el('text-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = el('text-input').value.trim();
+  if (!text) return;
+  startImportRequest('/api/import-text', { text }, t('textImportLoading'), () => { el('text-input').value = ''; });
+});
+
+document.querySelectorAll('.import-tab').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('.import-tab').forEach((x) => x.classList.toggle('active', x === tab));
+  document.querySelectorAll('.import-pane').forEach((pane) => pane.classList.toggle('hidden', pane.dataset.pane !== tab.dataset.pane));
+}));
+
+// ---------- Pick list: recipes found on a website, or browser bookmarks ----------
+
+const pickState = { mode: null, items: [], selected: new Set(), scanId: null, timer: null, name: '' };
+const MAX_PICK = 200;
+
+function openPickList(mode, title, items, name) {
+  clearTimeout(pickState.timer);
+  Object.assign(pickState, { mode, items, selected: new Set(), scanId: null, name });
+  el('pick-title').textContent = title;
+  el('pick-filter').value = '';
+  const folders = [...new Set(items.map((i) => i.folder).filter(Boolean))].sort();
+  el('pick-folder').classList.toggle('hidden', mode !== 'bookmarks' || folders.length < 2);
+  el('pick-folder').innerHTML = `<option value="">${escapeHtml(t('pickAllFolders'))}</option>`
+    + folders.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+  el('pick-stop').classList.add('hidden');
+  el('pick-status').textContent = mode === 'bookmarks' ? tf('pickBookmarksCount', { n: items.length }) : '';
+  el('pick-panel').classList.remove('hidden');
+  renderPickList();
+  el('pick-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function visiblePickItems() {
+  const q = el('pick-filter').value.trim().toLowerCase();
+  const folder = el('pick-folder').value;
+  return pickState.items.filter((i) => (!folder || i.folder === folder)
+    && (!q || `${i.title} ${i.url} ${i.folder || ''}`.toLowerCase().includes(q)));
+}
+
+function renderPickList() {
+  const items = visiblePickItems();
+  el('pick-list').innerHTML = items.length ? items.map((i) => `
+    <label class="pick-row">
+      <input type="checkbox" data-url="${escapeHtml(i.url)}" ${pickState.selected.has(i.url) ? 'checked' : ''}>
+      ${pickState.mode === 'scan' ? (i.image ? `<img src="${escapeHtml(i.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'pick-noimg' }))">` : '<span class="pick-noimg"></span>') : ''}
+      <span class="pick-main">
+        <span class="pick-name">${escapeHtml(i.title || i.url)}<a href="${escapeHtml(i.url)}" target="_blank" rel="noopener" title="${escapeHtml(i.url)}">↗</a>
+          ${i.in_tandoor ? `<span class="pick-badge">${t('pickInTandoor')}</span>` : ''}</span>
+        <span class="pick-meta">${escapeHtml([i.minutes ? `${i.minutes} min` : '', i.folder || '', hostOf(i.url)].filter(Boolean).join(' · '))}</span>
+      </span>
+    </label>`).join('') : `<p class="settings-hint">${t(pickState.mode === 'scan' && pickState.scanId ? 'pickSearching' : 'pickNone')}</p>`;
+  el('pick-list').querySelectorAll('input[type=checkbox]').forEach((cb) => cb.addEventListener('change', () => {
+    if (cb.checked) pickState.selected.add(cb.dataset.url); else pickState.selected.delete(cb.dataset.url);
+    updatePickFoot();
+  }));
+  el('pick-all').checked = items.length > 0 && items.every((i) => pickState.selected.has(i.url));
+  updatePickFoot();
+}
+
+function updatePickFoot() {
+  const n = pickState.selected.size;
+  el('pick-import').textContent = tf('pickImportBtn', { n });
+  el('pick-import').disabled = n === 0 || n > MAX_PICK;
+  el('pick-hint').textContent = n > MAX_PICK ? tf('pickLimit', { n: MAX_PICK }) : '';
+}
+
+el('pick-filter').addEventListener('input', renderPickList);
+el('pick-folder').addEventListener('change', renderPickList);
+el('pick-all').addEventListener('change', () => {
+  visiblePickItems().forEach((i) => {
+    if (el('pick-all').checked) pickState.selected.add(i.url); else pickState.selected.delete(i.url);
+  });
+  renderPickList();
+});
+el('pick-close').addEventListener('click', () => {
+  if (pickState.scanId) fetch(`/api/scan/${pickState.scanId}/cancel`, { method: 'POST' }).catch(() => {});
+  clearTimeout(pickState.timer);
+  pickState.scanId = null;
+  el('pick-panel').classList.add('hidden');
+});
+el('pick-stop').addEventListener('click', () => {
+  if (pickState.scanId) fetch(`/api/scan/${pickState.scanId}/cancel`, { method: 'POST' }).catch(() => {});
+});
+el('pick-import').addEventListener('click', () => {
+  const urls = pickState.items.filter((i) => pickState.selected.has(i.url)).map((i) => i.url);
+  if (!urls.length) return;
+  if (pickState.scanId) fetch(`/api/scan/${pickState.scanId}/cancel`, { method: 'POST' }).catch(() => {});
+  clearTimeout(pickState.timer);
+  const folder = el('pick-folder').value;
+  el('pick-panel').classList.add('hidden');
+  startImportRequest('/api/import-links', { urls, name: folder || pickState.name }, tf('linksImportLoading', { n: urls.length }));
+});
+
+// Website scan: runs on the server (no AI); results show up while it's running.
+el('scan-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = el('scan-input').value.trim();
+  if (!url) return;
+  el('upload-error').classList.add('hidden');
+  try {
+    const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    openPickList('scan', tf('pickTitleScan', { host: hostOf(url) }), [], hostOf(url));
+    pickState.scanId = data.scan_id;
+    pollScan();
+  } catch (err) {
+    showUploadError(err.message);
+  }
+});
+
+async function pollScan() {
+  const scanId = pickState.scanId;
+  if (!scanId) return;
+  let st;
+  try {
+    st = await (await fetch(`/api/scan/${scanId}`)).json();
+  } catch (e) { pickState.timer = setTimeout(pollScan, 3000); return; }
+  if (pickState.scanId !== scanId) return;
+  const known = new Set(pickState.items.map((i) => i.url));
+  const added = (st.found || []).filter((f) => !known.has(f.url));
+  if (added.length) pickState.items = pickState.items.concat(added);
+  const running = st.status === 'scanning';
+  const source = st.source === 'sitemap' ? t('pickSourceSitemap') : st.source === 'links' ? t('pickSourceLinks') : '';
+  el('pick-status').textContent = st.status === 'error' ? `${t('toolStatusError')}: ${st.error}`
+    : running && !st.checked ? t('pickStatusStarting')  // still reading robots.txt / sitemaps
+    : tf(running ? 'pickStatusScanning' : st.status === 'cancelled' ? 'pickStatusCancelled' : 'pickStatusDone',
+      { checked: st.checked, total: st.total, found: pickState.items.length }) + (source ? ` · ${source}` : '');
+  el('pick-stop').classList.toggle('hidden', !running);
+  if (!running) pickState.scanId = null;
+  if (added.length || !running) renderPickList();
+  if (running) pickState.timer = setTimeout(pollScan, 1500);
+}
+
+// Browser bookmarks (the HTML export of Chrome, Firefox, Safari, Edge) are
+// read right here in the browser - the folder of each link becomes a filter.
+async function openBookmarks(file) {
+  const doc = new DOMParser().parseFromString(await file.text(), 'text/html');
+  const items = [];
+  doc.querySelectorAll('a[href]').forEach((a) => {
+    const url = a.getAttribute('href');
+    if (!/^https?:\/\//i.test(url)) return;
+    const folders = [];
+    for (let node = a.parentElement; node; node = node.parentElement) {
+      if (node.tagName === 'DL') {
+        const heading = node.previousElementSibling && node.previousElementSibling.tagName === 'H3'
+          ? node.previousElementSibling
+          : node.parentElement && node.parentElement.querySelector(':scope > h3');
+        if (heading) folders.unshift(heading.textContent.trim());
+      }
+    }
+    if (!items.some((i) => i.url === url)) items.push({ url, title: a.textContent.trim(), folder: folders.join(' / ') });
+  });
+  if (!items.length) { showUploadError(t('pickBookmarksNone')); return; }
+  openPickList('bookmarks', t('pickTitleBookmarks'), items, t('pickTitleBookmarks'));
+}
 
 function showUploadError(msg) {
   const box = el('upload-error');

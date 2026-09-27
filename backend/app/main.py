@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import io
+import json
 import logging
 import os
 import shutil
@@ -16,13 +17,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, site_scan, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
 from .pdf_processor import process_pdf
 from .url_processor import UrlImportError, links_from_text, process_url, validate_url
+from .text_processor import looks_like_link_list, process_text, title_from_text
+from .docx_processor import process_docx
 from .schemas import ExtractedRecipe
 
 logging.basicConfig(level=logging.INFO)
@@ -48,7 +51,10 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DUPLICATE_SIMILARITY_THRESHOLD = 0.82  # titles scoring at or above this (0-1) count as "similar"
 CLEANUP_INTERVAL_SECONDS = 3600        # how often the background cleanup task runs
 PDF_EXTENSIONS = {".pdf"}
-LINK_LIST_EXTENSIONS = {".txt"}  # a text file with recipe links
+TXT_EXTENSIONS = {".txt"}  # recipe links (one per line) or recipe text - decided by content
+TEXT_EXTENSIONS = {".md", ".markdown"}
+DOCX_EXTENSIONS = {".docx"}
+MAX_SELECTED_LINKS = 200  # links picked from a site scan or bookmarks
 
 
 def _job_dir(job_id: str) -> str:
@@ -142,9 +148,28 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
             result = process_url(source_paths[0], images_dir)
-        elif doc_type == "links":
-            _run_link_list(job, source_paths[0], images_dir)
+        elif doc_type == "txt":
+            with open(source_paths[0], encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            if looks_like_link_list(content):
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
+            doc_type = "text"
+            result = process_text(content)
+        elif doc_type == "links":  # links picked from a site scan or bookmarks (JSON list)
+            with open(source_paths[0], encoding="utf-8") as f:
+                _run_link_list(job, json.load(f)[:MAX_SELECTED_LINKS], images_dir)
             return
+        elif doc_type == "text":
+            job.progress_label = "Reading the text …"
+            jobs.save_job(job)
+            with open(source_paths[0], encoding="utf-8", errors="replace") as f:
+                result = process_text(f.read())
+        elif doc_type == "docx":
+            job.progress_label = "Reading the Word document …"
+            jobs.save_job(job)
+            result = process_docx(source_paths[0], images_dir)
         else:
             raise ValueError(f"Unknown document type: {doc_type}")
 
@@ -182,9 +207,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.token_usage.add(usage)
         jobs.match_images_to_recipes(job)
 
-        if doc_type == "url":
-            # A single web recipe doesn't belong to a cookbook by default -
-            # the name field stays empty (the user can still type one).
+        if doc_type in ("url", "text"):
+            # A web recipe or a pasted text doesn't belong to a cookbook by
+            # default - the name field stays empty (the user can still type one).
             job.suggested_cookbook_name = None
             job.cookbook_name = None
         else:
@@ -221,15 +246,14 @@ def _finish_extraction(job) -> None:
     job.status = "ready"
 
 
-def _run_link_list(job, list_path: str, images_dir: str) -> None:
-    """A .txt file with recipe links: every link is loaded and extracted on
-    its own (one web page = one AI call), and all recipes end up in one
-    review. Each link's page number is its position in the list, which keeps
-    the recipe's photo with it. Links that can't be loaded or contain no
-    recipe are skipped and listed in job.notes."""
+def _run_link_list(job, links: list[str], images_dir: str) -> None:
+    """Recipe links (a .txt file, or picked from a site scan / bookmarks):
+    every link is loaded and extracted on its own (one web page = one AI
+    call), and all recipes end up in one review. Each link's page number is
+    its position in the list, which keeps the recipe's photo with it. Links
+    that can't be loaded or contain no recipe are skipped and listed in
+    job.notes."""
     try:
-        with open(list_path, encoding="utf-8", errors="replace") as f:
-            links = links_from_text(f.read())
         if not links:
             raise ValueError("The text file contains no links (http:// or https://).")
         existing_tags = _fetch_existing_tags()
@@ -284,14 +308,19 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
         return "pdf", ""
     if len(filenames) == 1 and exts[0] in SUPPORTED_EPUB_EXTENSIONS:
         return "epub", ""
-    if len(filenames) == 1 and exts[0] in LINK_LIST_EXTENSIONS:
-        return "links", ""
+    if len(filenames) == 1 and exts[0] in TXT_EXTENSIONS:
+        return "txt", ""
+    if len(filenames) == 1 and exts[0] in TEXT_EXTENSIONS:
+        return "text", ""
+    if len(filenames) == 1 and exts[0] in DOCX_EXTENSIONS:
+        return "docx", ""
+    single_only = PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS
     if exts and all(e in SUPPORTED_IMAGE_EXTENSIONS for e in exts):
         return "images", ""
-    if len(filenames) > 1 and any(e in PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | LINK_LIST_EXTENSIONS for e in exts):
-        return "", "Only one PDF, EPUB or link list can be uploaded at a time (but multiple photos are fine)."
+    if len(filenames) > 1 and any(e in single_only for e in exts):
+        return "", "Only one document can be uploaded at a time (but multiple photos are fine)."
 
-    supported = ", ".join(sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS | LINK_LIST_EXTENSIONS))
+    supported = ", ".join(sorted(single_only | SUPPORTED_IMAGE_EXTENSIONS))
     return "", f"Unsupported file type. Supported: {supported}"
 
 
@@ -348,6 +377,72 @@ async def import_url(body: dict = Body(...)):
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
     return {"job_id": job.id}
+
+
+@app.post("/api/import-text")
+async def import_text(body: dict = Body(...)):
+    """Pasted recipe text (e.g. from a message or a note) - same extraction,
+    review and import flow as a document."""
+    _check_budget()
+    text = (body.get("text") or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "Please paste a recipe text.")
+    job = jobs.create_job(title_from_text(text))
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    path = os.path.join(_job_dir(job.id), "source.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    jobs.save_job(job)
+    threading.Thread(target=_run_extraction, args=(job.id, [path], "text"), daemon=True).start()
+    return {"job_id": job.id}
+
+
+@app.post("/api/import-links")
+async def import_links(body: dict = Body(...)):
+    """{"urls": [...], "name"?} - links picked from a site scan or browser
+    bookmarks, imported like a .txt link list."""
+    _check_budget()
+    urls = []
+    for url in body.get("urls") or []:
+        try:
+            url = validate_url(str(url))
+        except UrlImportError:
+            continue
+        if url not in urls:
+            urls.append(url)
+    if not urls:
+        raise HTTPException(400, "No valid links selected.")
+    job = jobs.create_job((body.get("name") or f"{len(urls)} links")[:80])
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    path = os.path.join(_job_dir(job.id), "links.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(urls[:MAX_SELECTED_LINKS], f)
+    jobs.save_job(job)
+    threading.Thread(target=_run_extraction, args=(job.id, [path], "links"), daemon=True).start()
+    return {"job_id": job.id}
+
+
+@app.post("/api/scan")
+async def start_site_scan(body: dict = Body(...)):
+    """Scans a website for recipe pages (no AI) - poll GET /api/scan/{id}."""
+    try:
+        return {"scan_id": site_scan.start((body.get("url") or "").strip())}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/scan/{scan_id}")
+async def get_site_scan(scan_id: str):
+    state = site_scan.get(scan_id)
+    if state is None:
+        raise HTTPException(404, "Scan not found.")
+    return state
+
+
+@app.post("/api/scan/{scan_id}/cancel")
+async def cancel_site_scan(scan_id: str):
+    site_scan.cancel(scan_id)
+    return site_scan.get(scan_id) or {}
 
 
 @app.get("/api/jobs")
