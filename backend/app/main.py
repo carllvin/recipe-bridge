@@ -763,8 +763,8 @@ async def start_recipes_translate():
 
 
 @app.get("/api/cook-today")
-async def cook_today_search(have: str = "", staples: bool = True):
-    return await asyncio.to_thread(cook_today.suggest, have, staples)
+async def cook_today_search(have: str = ""):
+    return await asyncio.to_thread(cook_today.suggest, have)
 
 
 @app.post("/api/cook-today/plan")

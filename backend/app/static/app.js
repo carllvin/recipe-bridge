@@ -222,11 +222,11 @@ function clearPhotos() {
   renderPhotos();
 }
 
-['photo-camera', 'photo-pick'].forEach((id) => el(id).addEventListener('change', (e) => {
+el('photo-camera').addEventListener('change', (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = '';  // so the same photo can be taken/picked again
   if (files.length) addPhotos(files);
-}));
+});
 el('photo-clear').addEventListener('click', clearPhotos);
 el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);
@@ -1701,7 +1701,7 @@ async function searchCookToday() {
   if (!have) return;
   el('ct-status').textContent = t('cookTodaySearching');
   try {
-    const params = new URLSearchParams({ have, staples: el('ct-staples').checked });
+    const params = new URLSearchParams({ have });
     const data = await (await fetch(`/api/cook-today?${params}`)).json();
     if (data.building && !data.results.length && !data.built_at) {
       // First use: the ingredient index is being built from every recipe.
