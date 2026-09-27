@@ -222,11 +222,11 @@ function clearPhotos() {
   renderPhotos();
 }
 
-['photo-camera', 'photo-pick'].forEach((id) => el(id).addEventListener('change', (e) => {
+el('photo-camera').addEventListener('change', (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = '';  // so the same photo can be taken/picked again
   if (files.length) addPhotos(files);
-}));
+});
 el('photo-clear').addEventListener('click', clearPhotos);
 el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);

@@ -204,15 +204,15 @@
       </p>
       <label id="dropzone" class="dropzone">
         <span class="icon">📖</span>
-        <div><strong data-i18n="dropzoneTitle">Drop files here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
+        <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
         <input id="file-input" type="file" accept=".pdf,.epub,.jpg,.jpeg,.png,.heic,.heif" multiple />
       </label>
+      <!-- Phones/tablets only: opens the camera directly (the drop area above
+           already takes files and photos on every device). -->
       <div class="photo-actions">
         <label class="btn secondary"><span data-i18n="photoTakeBtn">📷 Take photo</span>
           <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden /></label>
-        <label class="btn secondary"><span data-i18n="photoPickBtn">🖼️ Add photos</span>
-          <input id="photo-pick" type="file" accept=".jpg,.jpeg,.png,.heic,.heif,image/*" multiple hidden /></label>
       </div>
       <section id="photo-collector" class="photo-collector hidden">
         <h3 data-i18n="photoCollectorTitle">Photos for this import</h3>
