@@ -117,7 +117,7 @@ def cleanup_old_tool_jobs(retention_hours: int) -> int:
             if job.status != "scanning" and (
                 job.created_at < now - PENDING_RETENTION_DAYS * 86400
                 or (job.created_at < now - retention_hours * 3600
-                    and not any(s.status == "pending" for s in job.suggestions))
+                    and not any(s.status in ("pending", "error") for s in job.suggestions))
             )
         ]
         for jid in stale_ids:

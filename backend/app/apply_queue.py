@@ -86,7 +86,7 @@ def _new_batch(action) -> dict:
 def enqueue(action: str, items: list[dict]) -> str:
     """items: [{"job_id", "id"}] in the order to process them. Items that
     are already queued are left out. Returns the batch id."""
-    if action not in ("apply", "skip"):
+    if action not in ("apply", "skip", "retry"):
         raise ValueError(f"Unknown action {action!r}")
     batch_id = uuid.uuid4().hex[:10]
     with _cond:

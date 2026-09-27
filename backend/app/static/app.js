@@ -1053,6 +1053,7 @@ async function openImportJob(jobId) {
 // Order matters: merges first, so ingredient details and conversions are
 // applied to the entries that remain.
 const INBOX_GROUPS = [
+  { key: 'failed', icon: '⚠️', match: (i) => i.failed },
   { key: 'merges', icon: '🔀', match: (i) => i.entity || i.kind === 'merge' || i.kind === 'rename' },
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
@@ -1108,6 +1109,7 @@ function renderInbox() {
   el('inbox-groups').innerHTML = visible.map((g) => {
     const selected = g.items.filter((i) => inboxState.selected.has(itemKey(i))).length;
     const selectable = g.items.filter((i) => !i.queued).length;
+    const selectedRetryable = g.items.filter((i) => inboxState.selected.has(itemKey(i)) && i.retryable).length;
     const busy = inboxState.busyGroup === g.key;
     const collapsed = inboxState.collapsed.has(g.key);
     return `
@@ -1119,10 +1121,11 @@ function renderInbox() {
           ${selectable && selected === selectable ? 'checked' : ''} ${busy || !selectable ? 'disabled' : ''}> <span>${t('toolSelectAll')}</span></label>
         <span class="tools-bulk-status" id="inbox-status-${g.key}">${escapeHtml(inboxState.results[g.key] || '')}</span>
         <div class="tools-bulk-actions">
-          <button class="btn secondary inbox-skip" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t('toolSkipBtn')} (${selected})</button>
-          <button class="btn inbox-apply" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t('toolApplyBtn')} (${selected})</button>
+          <button class="btn secondary inbox-skip" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t(g.key === 'failed' ? 'inboxDismissBtn' : 'toolSkipBtn')} (${selected})</button>
+          <button class="btn inbox-apply" type="button" data-group="${g.key}" ${!selected || busy || (g.key === 'failed' && !selectedRetryable) ? 'disabled' : ''}>${t(g.key === 'failed' ? 'inboxRetryBtn' : 'toolApplyBtn')} (${g.key === 'failed' ? selectedRetryable : selected})</button>
         </div>
       </div>
+      ${g.key === 'failed' ? `<p class="inbox-hint">${t('inboxFailedHint')}</p>` : ''}
       ${g.key === 'merges' ? `<p class="inbox-hint">${t('inboxMergesHint')}</p>` : ''}
       <div class="tools-suggestions-list ${collapsed ? 'hidden' : ''}">
         ${g.items.map((i) => `
@@ -1130,6 +1133,7 @@ function renderInbox() {
             <input type="checkbox" class="suggestion-check" ${inboxState.selected.has(itemKey(i)) ? 'checked' : ''} ${busy || i.queued ? 'disabled' : ''}>
             <div class="suggestion-text">
               ${i.queued ? `<span class="queued-label">⏳ ${t('queuedLabel')}</span> ` : ''}${escapeHtml(i.summary)}
+              ${i.failed ? `<div class="inbox-error">${escapeHtml(i.error || t('toolStatusError'))}</div>` : ''}
               <div class="inbox-source">${escapeHtml(i.trigger === 'import' ? t('triggerImport') : toolTitle(i.tool))} · ${escapeHtml(shortWhen(i.job_created_at))}</div>
               ${i.preview ? `<details class="suggestion-preview"><summary>${t('toolShowPreview')}</summary><pre>${escapeHtml(i.preview)}</pre></details>` : ''}
             </div>
@@ -1164,7 +1168,10 @@ function renderInbox() {
     });
   });
   el('inbox-groups').querySelectorAll('.inbox-apply, .inbox-skip').forEach((b) => b.addEventListener('click', () => {
-    runInboxAction(b.dataset.group, b.classList.contains('inbox-apply') ? 'apply' : 'skip', groupItems(b.dataset.group));
+    const apply = b.classList.contains('inbox-apply');
+    const action = b.dataset.group === 'failed' ? (apply ? 'retry' : 'skip') : (apply ? 'apply' : 'skip');
+    const items = groupItems(b.dataset.group).filter((i) => action !== 'retry' || i.retryable);
+    runInboxAction(b.dataset.group, action, items);
   }));
 }
 
@@ -1197,17 +1204,12 @@ async function watchBatch(batchId, onTick, stillWatching = () => true) {
 }
 
 function batchProgressText(action, batch, withHint = true) {
-  return tf(action === 'apply' ? 'toolApplyingProgress' : 'toolSkippingProgress', { current: Math.min(batch.done + 1, batch.total), total: batch.total })
+  return tf(action === 'skip' ? 'toolSkippingProgress' : 'toolApplyingProgress', { current: Math.min(batch.done + 1, batch.total), total: batch.total })
     + (withHint ? ' · ' + t('queueBackgroundHint') : '');
 }
 
-// withDetail: name the first error too - for the inbox, where failed
-// suggestions drop out of the list instead of showing their error.
-function batchResultText(batch, withDetail = false) {
-  if (!batch || !batch.failed) return '';
-  const first = batch.errors[0];
-  if (!withDetail || !first) return tf('toolBulkFailed', { count: batch.failed });
-  return tf('inboxBulkFailed', { count: batch.failed }) + ` ${first.summary ? first.summary + ': ' : ''}${first.error}`;
+function batchResultText(batch) {
+  return batch && batch.failed ? tf('toolBulkFailed', { count: batch.failed }) : '';
 }
 
 async function runInboxAction(groupKey, action, items) {
@@ -1231,9 +1233,8 @@ async function runInboxAction(groupKey, action, items) {
     await loadInbox(false);
   }, () => currentArea === 'inbox');
   inboxState.busyGroup = null;
-  // Failed items drop out of the list (their run keeps the error) - the
-  // group's status line says what went wrong.
-  inboxState.results[groupKey] = batchResultText(batch, true);
+  // Failed items move to the "failed" group with their error.
+  inboxState.results[groupKey] = batchResultText(batch);
   await loadInbox();
 }
 

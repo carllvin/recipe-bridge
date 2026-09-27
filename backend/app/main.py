@@ -301,15 +301,24 @@ async def inbox():
                             "label": job.progress_label, "trigger": job.meta.get("trigger")})
             continue
         for s in job.suggestions:
-            if s.status != "pending":
+            if s.status not in ("pending", "error"):
                 continue
             items.append({
                 "job_id": job.id, "tool": job.tool, "job_created_at": job.created_at,
                 "trigger": job.meta.get("trigger"), "auto": bool(job.meta.get("auto")),
                 "id": s.id, "kind": s.kind, "entity": s.detail.get("entity"),
                 "summary": s.summary, "preview": s.preview, "queued": (job.id, s.id) in queued,
+                # Failed ones stay visible until retried or dismissed.
+                "failed": s.status == "error", "error": s.error,
+                "retryable": s.status == "error" and _retryable(job, s),
             })
     return {"items": items, "running": running, "count": len(items), "queued": len(queued)}
+
+
+def _retryable(job, suggestion) -> bool:
+    # The new-recipes run translates right away - there's no apply step to
+    # repeat for a failed translation (the next run tries again).
+    return not (job.tool == "new_recipes" and suggestion.kind == "translate_recipe")
 
 
 @app.get("/api/health")
@@ -352,7 +361,7 @@ async def health_unignore(body: dict = Body(...)):
 async def inbox_count():
     count = sum(
         1 for job in tool_jobs.list_all_tool_jobs() if job.status != "scanning"
-        for s in job.suggestions if s.status == "pending"
+        for s in job.suggestions if s.status in ("pending", "error")
     )
     running = sum(1 for job in tool_jobs.list_all_tool_jobs() if job.status == "scanning")
     return {"count": count, "running": running}
@@ -815,6 +824,15 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
         raise LookupError("Tool job not found.")
+    if action == "retry":
+        # A failed suggestion goes back to pending and is applied again.
+        suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
+        if suggestion is None:
+            raise LookupError("Suggestion not found.")
+        if suggestion.status == "error" and _retryable(job, suggestion):
+            suggestion.status, suggestion.error = "pending", None
+            tool_jobs.save_tool_job(job)
+        action = "apply"
     if action == "apply":
         apply_fn = _TOOL_APPLY.get(job.tool)
         if apply_fn is None:
@@ -826,7 +844,7 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
     suggestion = next((s for s in job.suggestions if s.id == suggestion_id), None)
     if suggestion is None:
         raise LookupError("Suggestion not found.")
-    if suggestion.status == "pending":
+    if suggestion.status in ("pending", "error"):  # also dismisses a failed one
         suggestion.status = "skipped"
         tool_jobs.save_tool_job(job)
         tools_new_recipes.after_action(job)
