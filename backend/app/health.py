@@ -160,10 +160,13 @@ def _compute() -> None:
             ),
         }
         metrics = {"recipes_total": len(recipes), "foods_used": len(used_foods)}
+        # lets the recipe tools read only what changed since (recipe_scope.py)
+        recipe_versions = {str(r["id"]): r.get("updated_at") for r in recipes}
         os.makedirs(settings.data_dir, exist_ok=True)
         tmp = _path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"computed_at": started, "metrics": metrics, "items": item_lists}, f, ensure_ascii=False)
+            json.dump({"computed_at": started, "metrics": metrics, "items": item_lists,
+                       "recipe_versions": recipe_versions}, f, ensure_ascii=False)
         os.replace(tmp, _path())
     except Exception as exc:  # noqa: BLE001
         log.exception("Health overview failed")

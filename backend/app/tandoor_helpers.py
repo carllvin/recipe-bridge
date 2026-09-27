@@ -10,11 +10,10 @@ import httpx
 log = logging.getLogger("tandoor-helper")
 
 
-def fetch_all_recipes_full(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:
-    """Fetches every recipe's full detail (steps + ingredients + keywords).
-    Used whenever a script needs to inspect what a recipe actually contains,
-    not just its compact list-view fields."""
-    ids = []
+def fetch_recipe_overview(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:
+    """Every recipe's compact list entry (id, name, updated_at ...) - a few
+    paged requests instead of one per recipe."""
+    items = []
     url = "/recipe/"
     params = {"page_size": 200}
     for _ in range(50):
@@ -22,22 +21,32 @@ def fetch_all_recipes_full(client: httpx.Client, max_recipes: int | None = None)
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results", data) if isinstance(data, dict) else data
-        ids.extend(item["id"] for item in results if item.get("id") is not None)
-        if max_recipes and len(ids) >= max_recipes:
-            ids = ids[:max_recipes]
+        items.extend(item for item in results if item.get("id") is not None)
+        if max_recipes and len(items) >= max_recipes:
+            items = items[:max_recipes]
             break
         next_url = data.get("next") if isinstance(data, dict) else None
         if not next_url:
             break
         url = next_url
         params = None
+    return items
 
+
+def fetch_recipes_full(client: httpx.Client, ids) -> list[dict]:
     full = []
     for rid in ids:
         resp = client.get(f"/recipe/{rid}/")
         if resp.status_code == 200:
             full.append(resp.json())
     return full
+
+
+def fetch_all_recipes_full(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:
+    """Fetches every recipe's full detail (steps + ingredients + keywords).
+    Used whenever a script needs to inspect what a recipe actually contains,
+    not just its compact list-view fields."""
+    return fetch_recipes_full(client, [item["id"] for item in fetch_recipe_overview(client, max_recipes)])
 
 
 def compute_usage_maps(recipes_full: list[dict]) -> dict[str, dict[int, int]]:

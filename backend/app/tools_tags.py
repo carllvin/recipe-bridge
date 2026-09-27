@@ -5,7 +5,7 @@ import logging
 import os
 import uuid
 
-from . import ignored, llm_provider, tandoor_client, tool_jobs
+from . import ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
 from .config import settings, get_language_code
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, fetch_all_recipes_full, find_recipes_by_filter, format_cost_estimate, resolve_name_collisions, validate_actions
@@ -344,11 +344,10 @@ def run_season_scan(job_id: str) -> None:
             return
 
         with tandoor_client.get_client() as client:
-            job.progress_label = "Scanning every recipe's full detail..."
+            job.progress_label = "Looking for recipes without a season tag..."
             tool_jobs.save_tool_job(job)
-            recipes = fetch_all_recipes_full(client)
-            skip = ignored.keys("recipes_without_season")
-            missing = [r for r in recipes if str(r["id"]) not in skip and not has_season_tag(r)]
+            missing = recipe_scope.recipes_for(client, "recipes_without_season", lambda r: not has_season_tag(r),
+                                               ignored.keys("recipes_without_season"), job)
             job.progress_total = len(missing)
             job.cost_estimate = format_cost_estimate(len(missing), "batched_season")
             tool_jobs.save_tool_job(job)

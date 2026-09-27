@@ -14,10 +14,10 @@ import os
 import tempfile
 import uuid
 
-from . import ignored, image_gen, llm_provider, tandoor_client, tool_jobs, tools_tags
+from . import ignored, image_gen, recipe_scope, llm_provider, tandoor_client, tool_jobs, tools_tags
 from .config import settings
 from .schemas import ToolSuggestion
-from .tandoor_helpers import chunked, fetch_all_recipes_full
+from .tandoor_helpers import chunked
 
 log = logging.getLogger("tandoor-helper")
 
@@ -78,11 +78,11 @@ def run_servings_scan(job_id: str) -> None:
             tool_jobs.save_tool_job(job)
             return
         with tandoor_client.get_client() as client:
-            job.progress_label = "Scanning every recipe's full detail..."
+            job.progress_label = "Looking for recipes without servings..."
             tool_jobs.save_tool_job(job)
-            skip = ignored.keys("recipes_without_servings")
-            recipes = [r for r in fetch_all_recipes_full(client)
-                       if str(r["id"]) not in skip and lacks_servings(r) and _ingredient_lines(r)]
+            recipes = recipe_scope.recipes_for(client, "recipes_without_servings",
+                                               lambda r: lacks_servings(r) and _ingredient_lines(r),
+                                               ignored.keys("recipes_without_servings"), job)
         job.progress_total = len(recipes)
         job.cost_estimate = (f"{len(recipes)} recipe(s) -> ~{-(-len(recipes) // SERVINGS_BATCH_SIZE)} "
                              f"small AI call(s) with the tools model.")
@@ -171,8 +171,8 @@ def run_images_scan(job_id: str) -> None:
         with tandoor_client.get_client() as client:
             job.progress_label = "Looking for recipes without a photo..."
             tool_jobs.save_tool_job(job)
-            skip = ignored.keys("recipes_without_image")
-            recipes = [r for r in fetch_all_recipes_full(client) if str(r["id"]) not in skip and lacks_image(r)]
+            recipes = recipe_scope.recipes_for(client, "recipes_without_image", lacks_image,
+                                               ignored.keys("recipes_without_image"), job)
         job.cost_estimate = (f"{len(recipes)} recipe(s) without a photo. Nothing is generated yet - each photo "
                              f"is generated (and paid) only when you apply its suggestion.")
         job.suggestions = [
