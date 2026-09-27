@@ -1010,3 +1010,7 @@ a { color: inherit; }
 .cooked-stars button:hover ~ button { color: #5a5f58; }
 .cooked-row .btn { padding: 4px 10px; font-size: 0.75rem; }
 .cooked-row.done { opacity: 0.55; }
+.review-notes { margin-left: auto; font-size: 0.8rem; color: var(--gold); position: relative; }
+.review-notes summary { cursor: pointer; }
+.review-notes ul { position: absolute; right: 0; top: 1.6em; z-index: 20; width: min(560px, 90vw); margin: 0; padding: 10px 14px 10px 28px;
+  background: #1c211b; border: 1px solid #3a3f3a; border-radius: var(--radius); color: #b9c0b5; overflow-wrap: anywhere; }

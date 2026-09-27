@@ -208,7 +208,7 @@
         <span class="icon">📖</span>
         <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
-        <input id="file-input" type="file" accept=".pdf,.epub,.jpg,.jpeg,.png,.heic,.heif" multiple />
+        <input id="file-input" type="file" accept=".pdf,.epub,.txt,.jpg,.jpeg,.png,.heic,.heif" multiple />
       </label>
       <!-- Phones/tablets only: opens the camera directly (the drop area above
            already takes files and photos on every device). -->
@@ -255,6 +255,10 @@
         <label for="cookbook-name-input" data-i18n="cookbookLabel">Cookbook in Tandoor</label>
         <input id="cookbook-name-input" type="text" data-i18n-placeholder="cookbookPlaceholder" placeholder="Cookbook name …" />
         <span class="cookbook-hint" data-i18n="cookbookHint">Will be created if it does not exist yet.</span>
+        <details id="review-notes" class="review-notes hidden">
+          <summary id="review-notes-summary"></summary>
+          <ul id="review-notes-list"></ul>
+        </details>
       </div>
       <div class="recipe-list">
         <div class="recipe-list-header">

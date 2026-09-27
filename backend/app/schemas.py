@@ -74,6 +74,7 @@ class Job(BaseModel):
     progress_label: Optional[str] = None
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
+    notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
 
 
 class ToolSuggestion(BaseModel):

@@ -1,7 +1,7 @@
 # Tandoor Helper
 
 A companion web app for [Tandoor Recipes](https://tandoor.dev/). It **imports
-whole cookbooks** (PDF, EPUB, phone photos, web pages) with the help of an AI
+whole cookbooks** (PDF, EPUB, phone photos, web pages, lists of links) with the help of an AI
 (Claude, ChatGPT or Gemini), **keeps your collection tidy** (duplicates,
 translations, nutrition, unit conversions, tags …) and **helps you plan
 meals** from your own recipes. It never changes anything behind your back:
@@ -38,9 +38,12 @@ bar).
   recipe"* when ingredients and method are on different pages. Scans and
   photos go through OCR (Tesseract) with deskewing, cropping and two-page
   spread detection.
-- **A single recipe from a web page** – paste the URL; the page's
-  schema.org recipe data is used when present, and the link is kept as the
-  recipe's source in Tandoor.
+- **Recipes from web pages** – paste a URL, or drop a **`.txt` file with a
+  list of links** (one per line, or any text containing links; up to 50).
+  Each page is read on its own – its schema.org recipe data is used when
+  present – and the link is kept as the recipe's source in Tandoor. Links
+  that can't be loaded or contain no recipe are skipped and listed in the
+  review.
 - Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
   **converted to metric** on the way.
 
@@ -348,7 +351,7 @@ backend/
     tandoor_helpers.py      Shared Tandoor helpers (paging, merges, name collisions)
 
     # Import
-    pdf_processor.py, epub_processor.py, image_processor.py, url_processor.py
+    pdf_processor.py, epub_processor.py, image_processor.py, url_processor.py (web pages, link lists)
     ocr.py, image_preprocessing.py   Tesseract OCR, deskew/crop, two-page spreads
     ai_extractor.py         Recipe extraction: prompt, chunking, dedup, language detection
     import_matching.py      Match ingredients against Tandoor before the review

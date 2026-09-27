@@ -123,6 +123,7 @@ const fileInput = el('file-input');
 const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif'];
 const FALLBACK_PDF_EXTENSIONS = ['.pdf'];
 const FALLBACK_EPUB_EXTENSIONS = ['.epub'];
+const LINK_LIST_EXTENSIONS = ['.txt'];  // a text file with recipe links
 
 function extOf(filename) {
   const i = filename.lastIndexOf('.');
@@ -137,8 +138,9 @@ function classifyFiles(files) {
 
   if (files.length === 1 && pdfExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && epubExts.includes(exts[0])) return { ok: true };
+  if (files.length === 1 && LINK_LIST_EXTENSIONS.includes(exts[0])) return { ok: true };
   if (exts.length > 0 && exts.every((e) => imageExts.includes(e))) return { ok: true };
-  if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e))) {
+  if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e) || LINK_LIST_EXTENSIONS.includes(e))) {
     return { ok: false, error: t('onlyOnePdfOrEpubError') };
   }
   return { ok: false, error: t('unsupportedFileTypeError') };
@@ -399,12 +401,21 @@ function updateProgressUI(job) {
 
 // ---------- Review screen ----------
 
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return url; }
+}
+
 function showReview() {
   el('processing-screen').classList.add('hidden');
   el('review-screen').classList.remove('hidden');
   el('action-bar').classList.remove('hidden');
   el('cookbook-name-input').value = state.job.cookbook_name || state.job.suggested_cookbook_name || '';
   updateUsageDisplay(state.job.token_usage);
+  // e.g. links of a link list that couldn't be read
+  const notes = state.job.notes || [];
+  el('review-notes').classList.toggle('hidden', !notes.length);
+  el('review-notes-summary').textContent = tf('reviewNotesSummary', { n: notes.length });
+  el('review-notes-list').innerHTML = notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
   renderRecipeList();
   updateSelectionCount();
   if (state.job.recipes.length > 0) {
@@ -443,7 +454,7 @@ function renderRecipeList() {
       <div class="thumb" style="${r.selected_image_id ? `background-image:url('${imageUrl(r.selected_image_id)}')` : ''}"></div>
       <div class="meta">
         <div class="title">${escapeHtml(r.title)}</div>
-        <div class="sub">${t('pageLabel')} ${r.source_page_start}${r.source_page_end !== r.source_page_start ? '–' + r.source_page_end : ''}</div>
+        <div class="sub">${r.source_url ? escapeHtml(hostOf(r.source_url)) : `${t('pageLabel')} ${r.source_page_start}${r.source_page_end !== r.source_page_start ? '–' + r.source_page_end : ''}`}</div>
         ${duplicateBadge(r)}
         ${statusPill(r)}
       </div>

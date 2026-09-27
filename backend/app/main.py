@@ -22,7 +22,7 @@ from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
 from .pdf_processor import process_pdf
-from .url_processor import UrlImportError, process_url, validate_url
+from .url_processor import UrlImportError, links_from_text, process_url, validate_url
 from .schemas import ExtractedRecipe
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +48,7 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 DUPLICATE_SIMILARITY_THRESHOLD = 0.82  # titles scoring at or above this (0-1) count as "similar"
 CLEANUP_INTERVAL_SECONDS = 3600        # how often the background cleanup task runs
 PDF_EXTENSIONS = {".pdf"}
+LINK_LIST_EXTENSIONS = {".txt"}  # a text file with recipe links
 
 
 def _job_dir(job_id: str) -> str:
@@ -141,6 +142,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
             result = process_url(source_paths[0], images_dir)
+        elif doc_type == "links":
+            _run_link_list(job, source_paths[0], images_dir)
+            return
         else:
             raise ValueError(f"Unknown document type: {doc_type}")
 
@@ -193,17 +197,74 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.suggested_cookbook_name = guess
             job.cookbook_name = guess
 
-        job.progress_label = "Checking for duplicates already in Tandoor …"
-        jobs.save_job(job)
-        _mark_duplicates(job)
-
-        job.progress_label = "Matching ingredients with Tandoor …"
-        jobs.save_job(job)
-        import_matching.match_job_ingredients(job)
-
-        job.status = "ready"
+        _finish_extraction(job)
     except Exception as exc:  # noqa: BLE001
         log.exception("Extraction failed for job %s", job_id)
+        job.status = "error"
+        job.error = str(exc)
+    finally:
+        if doc_type != "links":  # _run_link_list records its own usage
+            usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        jobs.save_job(job)
+
+
+def _finish_extraction(job) -> None:
+    """The steps after extraction shared by every import type."""
+    job.progress_label = "Checking for duplicates already in Tandoor …"
+    jobs.save_job(job)
+    _mark_duplicates(job)
+
+    job.progress_label = "Matching ingredients with Tandoor …"
+    jobs.save_job(job)
+    import_matching.match_job_ingredients(job)
+
+    job.status = "ready"
+
+
+def _run_link_list(job, list_path: str, images_dir: str) -> None:
+    """A .txt file with recipe links: every link is loaded and extracted on
+    its own (one web page = one AI call), and all recipes end up in one
+    review. Each link's page number is its position in the list, which keeps
+    the recipe's photo with it. Links that can't be loaded or contain no
+    recipe are skipped and listed in job.notes."""
+    try:
+        with open(list_path, encoding="utf-8", errors="replace") as f:
+            links = links_from_text(f.read())
+        if not links:
+            raise ValueError("The text file contains no links (http:// or https://).")
+        existing_tags = _fetch_existing_tags()
+        job.progress_total = len(links)
+        job.page_count = len(links)
+        for number, url in enumerate(links, 1):
+            job.progress_current = number
+            job.progress_label = f"Link {number}/{len(links)}: {urlparse(url).netloc}"
+            jobs.save_job(job)
+            try:
+                result = process_url(url, images_dir)
+                for image_id, info in result["images"].items():
+                    job.images[image_id] = {"page": number, "filename": info["filename"]}
+                page = {"page": number, "text": result["pages"][0]["text"]}
+                recipes, usage = extract_recipes_from_pages([page], existing_tags=existing_tags)
+                job.token_usage.add(usage)
+            except Exception as exc:  # noqa: BLE001 - one bad link must not stop the rest
+                log.info("Link %s skipped: %s", url, exc)
+                job.notes.append(f"{url} – {exc}")
+                continue
+            if not recipes:
+                job.notes.append(f"{url} – no recipe found")
+                continue
+            for recipe in recipes:
+                recipe.source_url = url
+                recipe.source_page_start = recipe.source_page_end = number
+            job.recipes.extend(recipes)
+        if not job.recipes:
+            raise ValueError("No recipe could be read from any of the links.")
+        jobs.match_images_to_recipes(job)
+        # Recipes from different websites don't belong to one cookbook by default.
+        job.suggested_cookbook_name = job.cookbook_name = None
+        _finish_extraction(job)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Link list import failed for job %s", job.id)
         job.status = "error"
         job.error = str(exc)
     finally:
@@ -223,12 +284,14 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
         return "pdf", ""
     if len(filenames) == 1 and exts[0] in SUPPORTED_EPUB_EXTENSIONS:
         return "epub", ""
+    if len(filenames) == 1 and exts[0] in LINK_LIST_EXTENSIONS:
+        return "links", ""
     if exts and all(e in SUPPORTED_IMAGE_EXTENSIONS for e in exts):
         return "images", ""
-    if len(filenames) > 1 and any(e in PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS for e in exts):
-        return "", "Only one PDF or EPUB can be uploaded at a time (but multiple photos are fine)."
+    if len(filenames) > 1 and any(e in PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | LINK_LIST_EXTENSIONS for e in exts):
+        return "", "Only one PDF, EPUB or link list can be uploaded at a time (but multiple photos are fine)."
 
-    supported = ", ".join(sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS))
+    supported = ", ".join(sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS | LINK_LIST_EXTENSIONS))
     return "", f"Unsupported file type. Supported: {supported}"
 
 
