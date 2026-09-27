@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -937,6 +937,12 @@ async def start_recipes_translate():
 @app.get("/api/cook-today")
 async def cook_today_search(have: str = ""):
     return await asyncio.to_thread(cook_today.suggest, have)
+
+
+@app.get("/api/season")
+async def in_season_now():
+    """Local fruit and vegetables in season this month (for the plan area)."""
+    return {"month": time.localtime().tm_mon, "produce": seasonal.display_names(seasonal.in_season())}
 
 
 @app.post("/api/cook-today/plan")

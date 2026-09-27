@@ -15,7 +15,7 @@ import re
 import threading
 import time
 
-from . import tandoor_client
+from . import seasonal, tandoor_client
 from .config import settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -69,6 +69,20 @@ def save_index(recipes) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"built_at": time.time(), "recipes": build_index(recipes)}, f, ensure_ascii=False)
     os.replace(tmp, _path())
+
+
+def seasonal_by_recipe() -> dict[int, list[str]]:
+    """Recipe id -> its in-season ingredients (display names), from the
+    index; empty if there is no index yet."""
+    data = _load()
+    if not data:
+        return {}
+    result = {}
+    for r in data["recipes"]:
+        keys = seasonal.seasonal_in(n for names in r["foods"] for n in names)
+        if keys:
+            result[r["id"]] = seasonal.display_names(keys)
+    return result
 
 
 def _load() -> dict | None:
@@ -158,8 +172,10 @@ def suggest(have_text: str, limit: int = 20) -> dict:
                 missing.append(names[0])
         if not matched:
             continue
+        season = seasonal.display_names(seasonal.seasonal_in(n for names in r["foods"] for n in names))
         results.append({"id": r["id"], "name": r["name"], "minutes": r["minutes"] or None, "rating": r["rating"],
-                        "matched": matched, "missing": missing, "needed": needed})
-    # Fewest missing first, then most of what you have used, then rating.
-    results.sort(key=lambda x: (len(x["missing"]), -len(x["matched"]), -(x["rating"] or 0)))
+                        "matched": matched, "missing": missing, "needed": needed, "season": season})
+    # Fewest missing first, then most of what you have used, then seasonal
+    # ingredients, then rating.
+    results.sort(key=lambda x: (len(x["missing"]), -len(x["matched"]), -len(x["season"]), -(x["rating"] or 0)))
     return {"building": building, "results": results[:limit], "built_at": data.get("built_at")}

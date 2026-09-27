@@ -1233,7 +1233,7 @@ function showArea(area) {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.area === area));
   if (area === 'import') loadRecentImports();
   if (area === 'inbox') loadInbox();
-  if (area === 'plan') { openPlanArea(); loadCooked(); }
+  if (area === 'plan') { openPlanArea(); loadCooked(); loadSeason(); }
   if (area === 'maintain') {
     loadNewRecipesStatus();
     loadUsage();
@@ -1840,6 +1840,16 @@ function nextMonday() {
   return d.toISOString().slice(0, 10);
 }
 
+// ---------- In season now ----------
+
+async function loadSeason() {
+  try {
+    const data = await (await fetch('/api/season')).json();
+    el('season-now').textContent = `🌱 ${t('seasonNow')}: ${data.produce.join(', ')}`;
+    el('season-now').classList.toggle('hidden', !data.produce.length);
+  } catch (e) { /* optional */ }
+}
+
 // ---------- How was it? (cook log) ----------
 
 async function loadCooked() {
@@ -1902,6 +1912,7 @@ async function searchCookToday() {
         `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
         r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
         r.minutes ? `${r.minutes} min` : '',
+        r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',
       ].filter(Boolean).join(' · ');
       return `<div class="ct-row">

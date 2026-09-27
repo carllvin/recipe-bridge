@@ -1041,3 +1041,4 @@ a { color: inherit; }
 .pick-badge { font-size: 0.7rem; color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 999px; padding: 0 6px; margin-left: 6px; white-space: nowrap; }
 .pick-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 10px; }
 .pick-foot .settings-hint { flex: 1; margin: 0; }
+.season-now { font-size: 0.85rem; color: #8fb996; margin: -8px 0 18px; }
