@@ -1701,7 +1701,7 @@ async function searchCookToday() {
   if (!have) return;
   el('ct-status').textContent = t('cookTodaySearching');
   try {
-    const params = new URLSearchParams({ have, staples: el('ct-staples').checked });
+    const params = new URLSearchParams({ have });
     const data = await (await fetch(`/api/cook-today?${params}`)).json();
     if (data.building && !data.results.length && !data.built_at) {
       // First use: the ingredient index is being built from every recipe.

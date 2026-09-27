@@ -977,7 +977,6 @@ a { color: inherit; }
   flex: 1; min-width: 200px; background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a;
   border-radius: var(--radius); color: var(--paper); padding: 8px 10px; font-size: 0.9rem;
 }
-.cook-today-form .mp-check { flex-basis: 100%; font-size: 0.8rem; display: flex; gap: 8px; align-items: center; }
 .ct-results { display: flex; flex-direction: column; gap: 8px; }
 .ct-row { display: flex; gap: 12px; align-items: center; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
 .ct-main { flex: 1; min-width: 0; }

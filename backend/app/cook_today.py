@@ -4,8 +4,8 @@ ingredients (built while the health overview is counted, which reads every
 recipe anyway) is matched against what you type in.
 
 Matching is forgiving: "Tomate" matches "Tomaten" and "Cherrytomaten",
-"Feta" matches "Feta-Käse". Pantry staples (salt, pepper, oil ...) can count
-as always there."""
+"Feta" matches "Feta-Käse". Pantry staples (salt, pepper, oil, onions,
+garlic ...) are assumed to be at home and don't count either way."""
 from __future__ import annotations
 
 import json
@@ -24,10 +24,14 @@ log = logging.getLogger("tandoor-helper")
 INDEX_MAX_AGE_HOURS = 24
 MIN_PART_LEN = 4  # shorter words only match whole names ("Ei" must not match "Eis")
 
-# Assumed to be at home when "pantry staples" is ticked - matched like the
-# user's own ingredients (so "Olivenöl" counts via "öl").
+# Always assumed to be at home. STAPLES also match as the end of a compound
+# word ("Olivenöl", "Meersalz", "Puderzucker"); STAPLE_WORDS only as the
+# last word of the name ("Rote Zwiebel", "Knoblauchzehen" - but not
+# "Frühlingszwiebel", which is a different vegetable).
 STAPLES = ["salz", "pfeffer", "wasser", "öl", "zucker", "mehl", "butter", "essig",
            "salt", "pepper", "water", "oil", "sugar", "flour", "vinegar"]
+STAPLE_WORDS = {"zwiebel", "zwiebeln", "knoblauch", "knoblauchzehe", "knoblauchzehen",
+                "onion", "onions", "garlic"}
 
 _build = {"running": False}
 _build_lock = threading.Lock()
@@ -121,16 +125,19 @@ def _matches(have: str, food_names) -> bool:
 
 
 def _is_staple(food_names) -> bool:
-    """Salt, oil, sugar ... also as the end of a compound word ("Meersalz",
-    "Olivenöl", "Puderzucker", "Rotweinessig")."""
+    """See STAPLES / STAPLE_WORDS."""
     for name in food_names:
         name = _norm(name)
-        if name and any(name == s or name.endswith(s) or name.startswith(s + " ") for s in STAPLES):
+        if not name:
+            continue
+        if any(name == s or name.endswith(s) or name.startswith(s + " ") for s in STAPLES):
+            return True
+        if name.split()[-1] in STAPLE_WORDS:
             return True
     return False
 
 
-def suggest(have_text: str, staples: bool = True, limit: int = 20) -> dict:
+def suggest(have_text: str, limit: int = 20) -> dict:
     data = _load()
     building = ensure_fresh()
     if data is None:
@@ -138,12 +145,11 @@ def suggest(have_text: str, staples: bool = True, limit: int = 20) -> dict:
     have = [_norm(h) for h in re.split(r"[,;\n]+", have_text or "") if _norm(h)]
     if not have:
         return {"building": building, "results": [], "built_at": data.get("built_at")}
-    pantry = staples
     results = []
     for r in data["recipes"]:
         needed, matched, missing = 0, [], []
         for names in r["foods"]:
-            if pantry and _is_staple(names):
+            if _is_staple(names):
                 continue  # a staple - not counted either way
             needed += 1
             if any(_matches(h, names) for h in have):

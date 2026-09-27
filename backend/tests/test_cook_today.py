@@ -24,18 +24,22 @@ def found(have, **kw):
 
 
 def test_forgiving_matches(index):
-    assert found("Zucchini, Feta") == [("Zucchini-Feta-Pfanne", ["Knoblauch"])]
-    assert found("Tomate, Reis, Zwiebeln") == [("Tomatenreis", [])]
+    # Olivenöl, Meersalz and Knoblauch are staples - nothing is missing
+    assert found("Zucchini, Feta") == [("Zucchini-Feta-Pfanne", [])]
+    assert found("Tomate, Reis") == [("Tomatenreis", [])]
 
 
 def test_short_words_only_match_whole_names(index):
     assert found("Ei") == []
 
 
-def test_staples_can_count_as_missing(index):
-    assert found("Zucchini, Feta", staples=False) == [("Zucchini-Feta-Pfanne", ["Olivenöl", "Meersalz", "Knoblauch"])]
+def test_staples_are_always_at_home():
+    assert cook_today._is_staple(["Olivenöl", ""]) and cook_today._is_staple(["Meersalz", ""])
+    assert cook_today._is_staple(["Rote Zwiebel", "Rote Zwiebeln"]) and cook_today._is_staple(["Knoblauchzehe", ""])
+    assert not cook_today._is_staple(["Frühlingszwiebel", ""])
+    assert not cook_today._is_staple(["Zucchini", ""])
 
 
 def test_fewest_missing_first(index):
-    names = [n for n, _ in found("Zucchini, Tomate, Reis, Zwiebel")]
-    assert names == ["Tomatenreis", "Zucchini-Feta-Pfanne"]
+    names = [n for n, _ in found("Zucchini, Tomate")]
+    assert names == ["Zucchini-Feta-Pfanne", "Tomatenreis"]  # 1 missing (Feta) vs. 1 missing (Reis), rating decides
