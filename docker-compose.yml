@@ -40,8 +40,13 @@ services:
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image}
       IMAGE_GEN_CUSTOM_INSTRUCTIONS: ${IMAGE_GEN_CUSTOM_INSTRUCTIONS:-}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      WATCH_DIR: ${WATCH_DIR:-}
+      WATCH_INTERVAL_SECONDS: ${WATCH_INTERVAL_SECONDS:-30}
     volumes:
       - tandoor_helper_data:/app/data
+      # Watched folder: uncomment and set WATCH_DIR=/app/import in .env -
+      # files put into ./import are imported on their own.
+      # - ./import:/app/import
     # Defined in the Dockerfile (HEALTHCHECK instruction); shown here only as a
     # reminder that `docker compose ps` will report healthy/unhealthy for this
     # service. Override interval/timeout/retries here if you need to.

@@ -10,14 +10,14 @@ import shutil
 import threading
 import time
 import uuid
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -334,15 +334,22 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
     if error:
         raise HTTPException(400, error)
 
-    display_name = filenames[0] if len(filenames) == 1 else f"{len(filenames)} photos"
-    job = jobs.create_job(display_name)
-    job_dir = _job_dir(job.id)
-    os.makedirs(job_dir, exist_ok=True)
+    job = jobs.create_job(_display_name(filenames))
+    source_paths = await _save_uploads(files, _job_dir(job.id))
+    _launch_extraction(job, source_paths, doc_type, single_recipe)
+    return {"job_id": job.id}
 
+
+def _display_name(filenames: list[str]) -> str:
+    return filenames[0] if len(filenames) == 1 else f"{len(filenames)} photos"
+
+
+async def _save_uploads(files, job_dir: str) -> list[str]:
+    """Streams uploaded files into the job folder (within MAX_UPLOAD_MB)."""
+    os.makedirs(job_dir, exist_ok=True)
     source_paths = []
     max_bytes = settings.max_upload_mb * 1024 * 1024
     total_size = 0
-
     for index, upload in enumerate(files):
         ext = os.path.splitext(upload.filename or "")[1].lower()
         dest_path = os.path.join(job_dir, f"source_{index:03d}{ext}")
@@ -355,12 +362,42 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
                     raise HTTPException(413, f"Upload larger than {settings.max_upload_mb} MB.")
                 out.write(chunk)
         source_paths.append(dest_path)
+    return source_paths
 
+
+def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recipe: bool = False) -> None:
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr,
                                                     single_recipe and doc_type == "images"), daemon=True).start()
 
-    return {"job_id": job.id}
+
+def _start_url_job(url: str, source: str | None = None):
+    """Raises HTTPException(400) for an invalid address."""
+    try:
+        url = validate_url(url)
+    except UrlImportError as exc:
+        raise HTTPException(400, str(exc))
+    job = jobs.create_job(urlparse(url).netloc or url)
+    job.source = source
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    jobs.save_job(job)
+    threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
+    return job
+
+
+def _start_text_job(text: str, source: str | None = None):
+    text = (text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "Please paste a recipe text.")
+    job = jobs.create_job(title_from_text(text))
+    job.source = source
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    path = os.path.join(_job_dir(job.id), "source.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    jobs.save_job(job)
+    threading.Thread(target=_run_extraction, args=(job.id, [path], "text"), daemon=True).start()
+    return job
 
 
 @app.post("/api/import-url")
@@ -368,15 +405,7 @@ async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
     and import flow as an uploaded document (see url_processor)."""
     _check_budget()
-    try:
-        url = validate_url(body.get("url", ""))
-    except UrlImportError as exc:
-        raise HTTPException(400, str(exc))
-    job = jobs.create_job(urlparse(url).netloc or url)
-    os.makedirs(_job_dir(job.id), exist_ok=True)
-    jobs.save_job(job)
-    threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
-    return {"job_id": job.id}
+    return {"job_id": _start_url_job(body.get("url", "")).id}
 
 
 @app.post("/api/import-text")
@@ -384,17 +413,55 @@ async def import_text(body: dict = Body(...)):
     """Pasted recipe text (e.g. from a message or a note) - same extraction,
     review and import flow as a document."""
     _check_budget()
-    text = (body.get("text") or "").strip()
-    if len(text) < 20:
-        raise HTTPException(400, "Please paste a recipe text.")
-    job = jobs.create_job(title_from_text(text))
-    os.makedirs(_job_dir(job.id), exist_ok=True)
-    path = os.path.join(_job_dir(job.id), "source.txt")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    jobs.save_job(job)
-    threading.Thread(target=_run_extraction, args=(job.id, [path], "text"), daemon=True).start()
-    return {"job_id": job.id}
+    return {"job_id": _start_text_job(body.get("text") or "").id}
+
+
+@app.post("/share")
+async def share_target(request: Request):
+    """Web Share Target of the installed app (see static/manifest.json): a
+    page, text, photos or a file shared from another app on the phone.
+    Starts the matching import and opens the app on it."""
+    form = await request.form()
+    files = [f for f in form.getlist("files") if getattr(f, "filename", None)]
+    fields = {k: str(form.get(k) or "").strip() for k in ("title", "text", "url")}
+    try:
+        _check_budget()
+        if files:
+            filenames = [f.filename for f in files]
+            doc_type, error = _classify_upload(filenames)
+            if error:
+                raise HTTPException(400, error)
+            job = jobs.create_job(_display_name(filenames))
+            job.source = "share"
+            _launch_extraction(job, await _save_uploads(files, _job_dir(job.id)), doc_type)
+        else:
+            links = links_from_text(" ".join((fields["url"], fields["text"], fields["title"])))
+            if links:
+                job = _start_url_job(links[0], "share")
+            else:
+                job = _start_text_job("\n\n".join(v for v in (fields["title"], fields["text"]) if v), "share")
+    except HTTPException as exc:
+        return RedirectResponse(f"/?error={quote(str(exc.detail))}", status_code=303)
+    return RedirectResponse(f"/?job={job.id}", status_code=303)
+
+
+def _start_folder_import(files: list[str], name: str) -> str:
+    """Watched folder (see watcher.py): copies the files into a new job and
+    starts it. ValueError when the files can't be imported."""
+    doc_type, error = _classify_upload([os.path.basename(f) for f in files])
+    if error:
+        raise ValueError(error)
+    job = jobs.create_job(name if len(files) > 1 else os.path.basename(files[0]))
+    job.source = "folder"
+    job_dir = _job_dir(job.id)
+    os.makedirs(job_dir, exist_ok=True)
+    paths = []
+    for index, src in enumerate(files):
+        dest = os.path.join(job_dir, f"source_{index:03d}{os.path.splitext(src)[1].lower()}")
+        shutil.copyfile(src, dest)
+        paths.append(dest)
+    _launch_extraction(job, paths, doc_type)
+    return job.id
 
 
 @app.post("/api/import-links")
@@ -509,7 +576,37 @@ async def inbox():
                 "failed": s.status == "error", "error": s.error,
                 "retryable": s.status == "error" and _retryable(job, s),
             })
-    return {"items": items, "running": running, "count": len(items), "queued": len(queued)}
+    imports = _pending_imports()
+    return {"items": items, "running": running, "count": len(items) + len(imports), "queued": len(queued),
+            "imports": imports}
+
+
+def _pending_imports() -> list[dict]:
+    """Imports that arrived without you at the screen (shared from the phone,
+    dropped into the watched folder) and still have recipes to review."""
+    out = []
+    for job in sorted(jobs.list_jobs(), key=lambda j: j.created_at):
+        if not job.source or job.status not in ("ready", "processing", "error"):
+            continue
+        pending = sum(1 for r in job.recipes if r.import_status in ("pending", "error"))
+        if job.status == "ready" and not pending:
+            continue
+        out.append({"job_id": job.id, "filename": job.filename, "source": job.source, "status": job.status,
+                    "error": job.error,
+                    "recipes": pending, "titles": [r.title for r in job.recipes if r.import_status != "imported"][:5],
+                    "created_at": job.created_at})
+    return out
+
+
+@app.post("/api/jobs/{job_id}/dismiss")
+async def dismiss_import(job_id: str):
+    """Removes an import from the review inbox (the job itself stays)."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    job.source = None
+    jobs.save_job(job)
+    return {"ok": True}
 
 
 def _retryable(job, suggestion) -> bool:
@@ -561,7 +658,7 @@ async def inbox_count():
         for s in job.suggestions if s.status in ("pending", "error")
     )
     running = sum(1 for job in tool_jobs.list_all_tool_jobs() if job.status == "scanning")
-    return {"count": count, "running": running}
+    return {"count": count + sum(1 for i in _pending_imports() if i["status"] != "processing"), "running": running}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -1260,6 +1357,8 @@ async def on_startup() -> None:
     asyncio.create_task(maintenance.loop())
     if settings.auto_process_interval_hours > 0:
         asyncio.create_task(tools_new_recipes.auto_run_loop())
+    if settings.watch_dir:
+        asyncio.create_task(watcher.loop(_start_folder_import))
 
 
 # Mount the static frontend last, so /api/* routes take precedence

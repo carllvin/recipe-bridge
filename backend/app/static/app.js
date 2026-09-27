@@ -1331,6 +1331,8 @@ async function loadInbox(schedule = true) {
   try {
     const data = await (await fetch('/api/inbox')).json();
     inboxState.items = data.items;
+    inboxState.imports = data.imports || [];
+    renderInboxImports();
     const keys = new Set(data.items.map(itemKey));
     inboxState.selected.forEach((k) => { if (!keys.has(k)) inboxState.selected.delete(k); });
     el('inbox-running').innerHTML = data.running.map((r) => `
@@ -1345,10 +1347,44 @@ async function loadInbox(schedule = true) {
     if (!historyState.busy) loadHistory();
     if (!schedule) return;
     clearTimeout(inboxState.timer);
-    if ((data.running.length || data.queued) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
+    if ((data.running.length || data.queued || (data.imports || []).some((i) => i.status === 'processing')) && currentArea === 'inbox') inboxState.timer = setTimeout(loadInbox, data.queued ? 2000 : 4000);
   } catch (e) {
     el('inbox-groups').innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
   }
+}
+
+// Imports that came in from the phone's share menu or the watched folder.
+function renderInboxImports() {
+  const imports = inboxState.imports || [];
+  el('inbox-imports').innerHTML = !imports.length ? '' : `
+    <section class="inbox-group inbox-imports">
+      <div class="inbox-group-head"><h2>📥 ${t('inboxImportsTitle')} <span class="inbox-count">${imports.length}</span></h2></div>
+      <div class="tools-suggestions-list">${imports.map((i) => `
+        <div class="tool-suggestion-row ${i.status === 'error' ? 'error' : ''}">
+          <div class="suggestion-text">
+            <div>${i.source === 'folder' ? '📂' : '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
+            <div class="inbox-source">${escapeHtml(t(i.source === 'folder' ? 'inboxImportFolder' : 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
+            <div class="suggestion-preview">${i.status === 'processing'
+              ? `<span class="spinner small"></span> ${t('inboxImportProcessing')}`
+              : i.status === 'error' ? `<span class="inbox-error">${escapeHtml(i.error || '')}</span>`
+              : escapeHtml(tf('inboxImportRecipes', { n: i.recipes })) + (i.titles.length ? ': ' + escapeHtml(i.titles.join(', ')) : '')}</div>
+          </div>
+          <div class="suggestion-actions">
+            <button class="btn secondary inbox-import-dismiss" type="button" data-job="${i.job_id}">${t('inboxDismissBtn')}</button>
+            <button class="btn inbox-import-open" type="button" data-job="${i.job_id}" ${i.status !== 'ready' ? 'disabled' : ''}>${t('inboxImportOpen')}</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    </section>`;
+  el('inbox-imports').querySelectorAll('.inbox-import-open').forEach((b) => b.addEventListener('click', () => {
+    showArea('import');
+    openImportJob(b.dataset.job);
+  }));
+  el('inbox-imports').querySelectorAll('.inbox-import-dismiss').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    await fetch(`/api/jobs/${b.dataset.job}/dismiss`, { method: 'POST' }).catch(() => {});
+    loadInbox(false);
+  }));
 }
 
 function renderInbox() {
@@ -1356,7 +1392,7 @@ function renderInbox() {
   inboxState.items.forEach((i) => groups.find((g) => g.match(i)).items.push(i));
   const visible = groups.filter((g) => g.items.length);
   if (!visible.length) {
-    el('inbox-groups').innerHTML = `<p class="inbox-empty">${t('inboxEmpty')}</p>`;
+    el('inbox-groups').innerHTML = (inboxState.imports || []).length ? '' : `<p class="inbox-empty">${t('inboxEmpty')}</p>`;
     return;
   }
   el('inbox-groups').innerHTML = visible.map((g) => {
@@ -2430,10 +2466,36 @@ async function runBulkAction(action) {
 
 // ---------- Init ----------
 
+// Bookmarklet: opens this app with ?import=<page address> in a new tab.
+el('bookmarklet').href = `javascript:(()=>{window.open(${JSON.stringify(location.origin + '/?import=')}+encodeURIComponent(location.href),'_blank')})()`;
+el('bookmarklet').addEventListener('click', (e) => { e.preventDefault(); showUploadError(t('bookmarkletClick')); });
+
+// Imports handed over in the address: ?import=<url> (bookmarklet),
+// ?text=<recipe text>, ?error=<message> (a failed share from the phone).
+function handleIncomingParams() {
+  const url = new URL(window.location);
+  const importUrl = url.searchParams.get('import');
+  const text = url.searchParams.get('text');
+  const error = url.searchParams.get('error');
+  ['import', 'text', 'error'].forEach((k) => url.searchParams.delete(k));
+  window.history.replaceState({}, '', url);
+  if (error) showUploadError(error);
+  if (importUrl && /^https?:\/\//i.test(importUrl)) {
+    startImportRequest('/api/import-url', { url: importUrl }, t('urlImportLoading'));
+  } else if (text && text.trim()) {
+    startImportRequest('/api/import-text', { text }, t('textImportLoading'));
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 (async function init() {
   await initI18n();
   await tryRestoreJobFromUrl();
   showArea('import');
+  if (!state.jobId) handleIncomingParams();
   checkTandoor();
   setInterval(checkTandoor, 15000);
   updateInboxBadge();

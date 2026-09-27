@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     gemini_image_model: str = "gemini-2.5-flash-image"  # Google's Imagen models were retired in 2026 - use a Gemini image ("Nano Banana") model
     image_gen_custom_instructions: str = ""  # extra instructions appended to the image-generation prompt (see .env.example)
 
+    # Watched folder: files put here are imported on their own and wait in the review inbox; empty = off
+    watch_dir: str = ""
+    watch_interval_seconds: int = 30
+
     # App
     data_dir: str = "/app/data"
     max_upload_mb: int = 100
