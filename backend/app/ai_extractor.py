@@ -8,7 +8,7 @@ import re
 import uuid
 from typing import Callable, Optional
 
-from . import llm_provider
+from . import json_answer, llm_provider
 from .config import settings, get_language_code
 from .schemas import ExtractedRecipe, TokenUsage
 
@@ -244,7 +244,15 @@ def _extract_json_array(raw: str) -> list:
                 return json.loads(match.group(0))
             except json.JSONDecodeError:
                 pass
-        # Fallback 2: the array as a whole is invalid (e.g. one recipe has an
+        # Fallback 2: repair the usual slips (unescaped quote in a text,
+        # line break inside a string, trailing comma).
+        try:
+            repaired = json_answer.parse(raw)
+            if isinstance(repaired, list):
+                return repaired
+        except json.JSONDecodeError:
+            pass
+        # Fallback 3: the array as a whole is invalid (e.g. one recipe has an
         # unescaped quote in a text field), but individual recipe objects
         # within it may still each be valid JSON on their own. Salvage those
         # instead of discarding every recipe in the chunk over one bad object.
