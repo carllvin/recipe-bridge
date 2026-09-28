@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, tools_unused, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -163,6 +163,8 @@ def _compute() -> None:
             "foods_duplicates": [{"key": p["key"], "name": p["name"]} for p in duplicates.food_duplicates(foods.values())],
             "units_duplicates": [{"key": p["key"], "name": p["name"]} for p in duplicates.unit_duplicates(units)],
             **_unused_items(recipes, foods, units, keywords, unit_conversions),
+            "keywords_ungrouped": [{"key": str(k["id"]), "name": k.get("name", "")}
+                                   for k in tools_tag_groups.ungrouped(keywords)],
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),

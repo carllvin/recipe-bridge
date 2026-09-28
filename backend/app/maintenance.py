@@ -35,6 +35,7 @@ METRIC_TOOLS = {
     "foods_unused": ("unused_foods", {}),
     "units_unused": ("unused_units", {}),
     "keywords_unused": ("unused_keywords", {}),
+    "keywords_ungrouped": ("tags_groups", {}),
 }
 
 _scans: dict = {}

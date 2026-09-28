@@ -427,7 +427,8 @@ def fetch_all_items(client: httpx.Client, endpoint: str, max_pages: int = 30) ->
         data = resp.json()
         results = data.get("results", data) if isinstance(data, dict) else data
         items.extend(
-            {"id": item.get("id"), "name": item.get("name")}
+            # numchild: tags / foods can be groups of others (see tools_tag_groups)
+            {"id": item.get("id"), "name": item.get("name"), "numchild": item.get("numchild") or 0}
             for item in results if item.get("name") and item.get("id") is not None
         )
 

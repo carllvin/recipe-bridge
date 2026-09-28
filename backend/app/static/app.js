@@ -1305,6 +1305,7 @@ function openAreaStart(area) {
 document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
+  tags_groups: 'toolTagGroupsTitle',
   unused_foods: 'toolUnusedFoodsTitle',
   unused_units: 'toolUnusedUnitsTitle',
   unused_keywords: 'toolUnusedKeywordsTitle',
@@ -1795,6 +1796,7 @@ const HEALTH_METRICS = [
   { key: 'foods_unused', tool: 'unused_foods', endpoint: '/api/tools/unused/food' },
   { key: 'units_unused', tool: 'unused_units', endpoint: '/api/tools/unused/unit' },
   { key: 'keywords_unused', tool: 'unused_keywords', endpoint: '/api/tools/unused/keyword' },
+  { key: 'keywords_ungrouped', tool: 'tags_groups', endpoint: '/api/tools/tags/groups' },
 ];
 
 // Tiles grouped by what they're about, each group with its "whole
@@ -1808,7 +1810,7 @@ const HEALTH_GROUPS = [
   { key: 'recipes', titleKey: 'healthGroupRecipes',
     metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image'] },
-  { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_unused'],
+  { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
 ];
 
