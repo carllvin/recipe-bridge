@@ -1,6 +1,7 @@
 """The maintenance tiles that also work with Mealie (RECIPE_MANAGER=mealie):
 possible duplicate ingredients / units, unused ingredients / units / tags,
-recipes without servings or without a photo.
+recipes without servings or without a photo - and, via mealie_tools, the
+AI tools for tags, translating and revising recipes and new recipes.
 
 - compute(): the health overview's entries (same shape as health.py's) -
   reading every recipe in full, like for Tandoor;
@@ -17,7 +18,7 @@ import os
 import tempfile
 import uuid
 
-from . import duplicates, ignored, image_gen, llm_provider, mealie_client, tool_jobs, tools_recipe_details, tools_tags
+from . import duplicates, ignored, image_gen, llm_provider, mealie_client, mealie_tools, tool_jobs, tools_recipe_details, tools_tags
 from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_client import TandoorError
@@ -26,9 +27,9 @@ from .tools_unused import find_unused
 log = logging.getLogger("tandoor-helper")
 
 METRICS = ["foods_duplicates", "units_duplicates", "foods_unused", "units_unused", "keywords_unused",
-           "recipes_without_servings", "recipes_without_image"]
+           "recipes_without_servings", "recipes_without_image", *mealie_tools.METRICS]
 TOOLS = ["ingredients_review", "units_review", "unused_foods", "unused_units", "unused_keywords",
-         "recipes_servings", "recipes_images"]
+         "recipes_servings", "recipes_images", *mealie_tools.TOOLS]
 ENTITY_PATHS = {"food": "/foods", "unit": "/units", "keyword": "/organizers/tags"}
 UNUSED_TOOLS = {"unused_foods": ("food", "foods_unused"), "unused_units": ("unit", "units_unused"),
                 "unused_keywords": ("keyword", "keywords_unused")}
@@ -104,6 +105,7 @@ def compute(client) -> tuple[dict, dict]:
            for entity, metric in (("food", "foods_unused"), ("unit", "units_unused"), ("keyword", "keywords_unused"))},
         "recipes_without_servings": recipe_items(lambda r: lacks_servings(r) and ingredient_lines(r)),
         "recipes_without_image": recipe_items(lacks_image),
+        **mealie_tools.metric_items(recipes, lists["food"]),
     }
     return {"recipes_total": len(recipes), "foods_used": len(used["food"])}, items
 
@@ -120,6 +122,9 @@ def _run(job_id, body):
         job.status = "cancelled" if job.cancel_requested else "ready"
         job.progress_label = None
         tool_jobs.save_tool_job(job)
+        if job.tool == "new_recipes":
+            from . import tools_new_recipes
+            tools_new_recipes.after_action(job)
     except Exception as exc:  # noqa: BLE001
         log.exception("Mealie maintenance scan failed for job %s", job_id)
         job.status, job.error = "error", str(exc)
@@ -221,7 +226,8 @@ def _images(job, client):
 
 
 SCANS = {"ingredients_review": _duplicates, "units_review": _duplicates, "unused_foods": _unused,
-         "unused_units": _unused, "unused_keywords": _unused, "recipes_servings": _servings, "recipes_images": _images}
+         "unused_units": _unused, "unused_keywords": _unused, "recipes_servings": _servings, "recipes_images": _images,
+         **mealie_tools.SCANS}
 
 
 def run_scan(job_id: str) -> None:
@@ -245,7 +251,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     path = None
     try:
         with mealie_client.get_client() as client:
-            if suggestion.kind == "merge":
+            if suggestion.kind in mealie_tools.KINDS and not (suggestion.kind == "merge" and "remove_id" in d):
+                mealie_tools.apply(client, suggestion)
+            elif suggestion.kind == "merge":
                 body = ({"fromFood": d["remove_id"], "toFood": d["keep_id"]} if d["entity"] == "food"
                         else {"fromUnit": d["remove_id"], "toUnit": d["keep_id"]})
                 mealie_client._check(client.put(f"{ENTITY_PATHS[d['entity']]}/merge", json=body), "the merge")
@@ -276,4 +284,7 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
         if path and os.path.exists(path):
             os.remove(path)
         tool_jobs.save_tool_job(job)
+    if job.tool == "new_recipes":
+        from . import tools_new_recipes
+        tools_new_recipes.after_action(job)
     return suggestion

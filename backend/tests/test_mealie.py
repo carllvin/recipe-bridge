@@ -50,6 +50,7 @@ def test_import_into_mealie(mealie, tmp_path, monkeypatch):
     monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: started.append(ids))
     job = soup_job(tmp_path)
     api = TestClient(main.app)
+    assert tools_new_recipes.status()["baseline_created"]
     data = api.post(f"/api/jobs/{job.id}/import", json={"cookbook_name": "Omas Kochbuch"}).json()
     assert [(r["status"], r["tandoor_recipe_id"]) for r in data["results"]] == [("imported", "zwiebelsuppe")]
     recipe = mealie.recipes["zwiebelsuppe"]
@@ -66,6 +67,7 @@ def test_import_into_mealie(mealie, tmp_path, monkeypatch):
     assert [c["name"] for c in recipe["recipeCategory"]] == ["Omas Kochbuch"]
     assert mealie.images["zwiebelsuppe"][0] == "jpg"
     assert started == []  # no Tandoor post-processing
+    assert tools_new_recipes.status()["new_count"] == 0  # reviewed on import - not "new"
 
     # undo the import
     assert api.post(f"/api/jobs/{job.id}/recipes/r1/undo-import").status_code == 200

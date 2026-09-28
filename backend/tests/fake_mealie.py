@@ -60,11 +60,25 @@ class FakeMealie:
             del self.db[kind][src]
             return httpx.Response(200, json={"message": "merged"})
         item = re.match(r"^(/foods|/units|/organizers/tags)/([^/]+)$", path)
-        if item and request.method == "DELETE":
-            kind = LISTS[item.group(1)]
-            if item.group(2) not in self.db[kind]:
+        if item:
+            kind, item_id = LISTS[item.group(1)], item.group(2)
+            if item_id not in self.db[kind]:
                 return httpx.Response(404, json={})
-            return httpx.Response(200, json=self.db[kind].pop(item.group(2)))
+            if request.method == "DELETE":
+                removed = self.db[kind].pop(item_id)
+                if kind == "tag":  # Mealie takes a deleted tag off its recipes
+                    for recipe in self.recipes.values():
+                        recipe["tags"] = [t for t in recipe.get("tags", []) if t["id"] != item_id]
+                return httpx.Response(200, json=removed)
+            if request.method == "GET":
+                return httpx.Response(200, json=copy.deepcopy(self.db[kind][item_id]))
+            if request.method == "PUT":
+                name = json.loads(request.content)["name"]
+                if any(i["name"].lower() == name.lower() and i["id"] != item_id for i in self.db[kind].values()):
+                    return httpx.Response(400, json={"detail": "exists"})
+                self.db[kind][item_id]["name"] = name
+                self._rename_refs(kind, item_id, name)
+                return httpx.Response(200, json=self.db[kind][item_id])
         if path in LISTS:
             kind = LISTS[path]
             if request.method == "GET":
@@ -76,9 +90,15 @@ class FakeMealie:
                 return httpx.Response(201, json=self.add(kind, body["name"]))
         if path == "/recipes":
             if request.method == "GET":
+                found = list(self.recipes.values())
+                if request.url.params.get("foods"):
+                    found = [r for r in found if any((i.get("food") or {}).get("id") == request.url.params["foods"]
+                                                     for i in r.get("recipeIngredient", []))]
+                if request.url.params.get("tags"):
+                    found = [r for r in found if any(t["id"] == request.url.params["tags"] for t in r.get("tags", []))]
                 return self._page([{k: r.get(k) for k in ("id", "name", "slug", "image", "recipeServings", "tags",
                                                          "description", "totalTime", "rating", "lastMade")}
-                                   for r in self.recipes.values()], request)
+                                   for r in found], request)
             if request.method == "POST":
                 name = json.loads(request.content)["name"]
                 slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -111,6 +131,13 @@ class FakeMealie:
             if request.method == "DELETE":
                 return httpx.Response(200, json=self.recipes.pop(slug))
         return httpx.Response(404, json={"detail": f"no route {request.method} {path}"})
+
+    def _rename_refs(self, kind, item_id, name):
+        for recipe in self.recipes.values():
+            refs = recipe.get("tags", []) if kind == "tag" else [i.get(kind) for i in recipe.get("recipeIngredient", [])]
+            for ref in refs:
+                if ref and ref.get("id") == item_id:
+                    ref["name"] = name
 
     def _slug(self, slug_or_id):
         return next((s for s, r in self.recipes.items() if r["id"] == slug_or_id), slug_or_id)

@@ -549,7 +549,7 @@ async def token_usage(days: int = 30):
 @app.get("/api/settings")
 async def get_app_settings():
     return {**app_settings.get(), "budget_status": usage_log.budget_status(),
-            "maintenance_status": maintenance.status(), "metrics": app_settings.MAINTENANCE_METRICS}
+            "maintenance_status": maintenance.status(), "metrics": maintenance.available_metrics()}
 
 
 @app.put("/api/settings")
@@ -834,7 +834,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     # ...) - suggestions then wait under Tools. Never blocks the import.
     post_processing_job_id = None
     imported_ids = [r["tandoor_recipe_id"] for r in results if r["status"] == "imported" and r["tandoor_recipe_id"]]
-    if imported_ids and not target.is_mealie():  # the ingredient data lives in Tandoor only
+    if imported_ids and target.is_mealie():
+        # The review covered what a new-recipes run would do with Mealie
+        # (there's no ingredient data to fill in) - they don't count as new.
+        health.mark_changed()
+        if tools_new_recipes._load_store() is not None:
+            tools_new_recipes.mark_processed(imported_ids)
+    elif imported_ids:
         health.mark_changed()
         try:
             post_processing_job_id = await asyncio.to_thread(tools_new_recipes.start_after_import, imported_ids)
@@ -1455,6 +1461,7 @@ async def get_config():
         "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
         # the tiles that work with Mealie (None = all of them, Tandoor)
         "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
+        "available_tools": mealie_maintenance.TOOLS if target.is_mealie() else None,
     }
 
 
@@ -1493,11 +1500,10 @@ async def on_startup() -> None:
     apply_queue.start()
     maintenance.configure(_TOOL_SCANS)
     if target.is_mealie():
-        log.info("Imports go to Mealie - the Tandoor maintenance and planning tools are off")
-    else:
-        asyncio.create_task(maintenance.loop())
-        if settings.auto_process_interval_hours > 0:
-            asyncio.create_task(tools_new_recipes.auto_run_loop())
+        log.info("Recipes go to Mealie - the tools that need Tandoor's data model are off")
+    asyncio.create_task(maintenance.loop())
+    if settings.auto_process_interval_hours > 0:
+        asyncio.create_task(tools_new_recipes.auto_run_loop())
     if settings.watch_dir:
         asyncio.create_task(watcher.loop(_start_folder_import))
 

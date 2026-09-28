@@ -476,7 +476,7 @@ def mark_diet_checked(recipe_ids) -> None:
     ids = diet_checked() | set(recipe_ids)
     os.makedirs(settings.data_dir, exist_ok=True)
     with open(_diet_checked_path(), "w", encoding="utf-8") as f:
-        json.dump(sorted(ids), f)
+        json.dump(sorted(ids, key=str), f)  # Tandoor ids and Mealie slugs
 
 MIN_TAGS_DEFAULT = 5
 # Recipes per AI call. The prompt and the tag vocabulary (the bulk of the

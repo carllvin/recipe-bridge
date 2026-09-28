@@ -106,6 +106,11 @@ function idValue(v) {
   return /^\d+$/.test(String(v)) ? Number(v) : v;
 }
 
+// With Mealie only some tools exist (APP_CONFIG.available_tools; null = all).
+function toolAvailable(tool) {
+  return !APP_CONFIG.available_tools || APP_CONFIG.available_tools.includes(tool);
+}
+
 // Link to a recipe imported into Tandoor (id) or Mealie (slug) - null without one.
 function importedRecipeUrl(id) {
   return id && APP_CONFIG.recipe_url_base ? `${APP_CONFIG.recipe_url_base}${id}` : null;
@@ -1431,7 +1436,7 @@ function showArea(area) {
   if (area === 'inbox') loadInbox();
   if (area === 'plan') { openPlanArea(); loadCooked(); loadSeason(); }
   if (area === 'maintain') {
-    if (!isMealie()) loadNewRecipesStatus();
+    loadNewRecipesStatus();
     loadUsage();
     loadHealth();
     loadSettings();
@@ -1897,7 +1902,7 @@ async function loadSettings() {
       return keys.length ? `<h5>${t(g.titleKey)}</h5>` + keys.map((k) => `
         <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('healthShort_' + k))}</label>`).join('') : '';
     }).join('');
-    settingsState.maint = isMealie() ? null : m;  // no automatic maintenance with Mealie
+    settingsState.maint = m;
     if (healthState.data) renderHealth(healthState.data);
     el('set-budget-limit').value = data.budget.monthly_tokens;
     el('set-budget-block').checked = data.budget.block_manual;
@@ -2041,7 +2046,7 @@ function renderHealth(data) {
         <h4>${t(g.titleKey)}</h4>
         ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
           title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
-        ${g.tool && !isMealie() ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
+        ${g.tool && toolAvailable(g.tool.tool) ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
       </div>
       ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;
@@ -2516,7 +2521,6 @@ el('plan-apply-btn').addEventListener('click', async () => {
 });
 
 async function loadNewRecipesStatus() {
-  if (isMealie()) return;  // Tandoor only
   const label = el('new-recipes-status');
   const btn = el('new-recipes-start-btn');
   btn.disabled = true;
@@ -2873,7 +2877,10 @@ if ('serviceWorker' in navigator) {
     // Maintain shows the tiles that also work with Mealie
     // (APP_CONFIG.health_metrics); planning uses Mealie's meal plan.
     document.querySelectorAll('.tandoor-only').forEach((elm) => elm.classList.add('hidden'));
-    document.querySelector('#settings-card > summary h3').textContent = t('settingsTitleMealie');
+    document.querySelectorAll('[data-i18n="toolNewRecipesDesc"]').forEach((elm) => {
+      elm.setAttribute('data-i18n', 'toolNewRecipesDescMealie');
+      elm.textContent = t('toolNewRecipesDescMealie');
+    });
     document.querySelectorAll('[data-i18n="cookedHint"]').forEach((elm) => {
       elm.setAttribute('data-i18n', 'cookedHintMealie');
       elm.textContent = t('cookedHintMealie');

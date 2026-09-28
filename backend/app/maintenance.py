@@ -14,7 +14,7 @@ import os
 import threading
 import time
 
-from . import app_settings, health, tool_jobs, usage_log
+from . import app_settings, health, target, tool_jobs, usage_log
 from .config import settings
 
 log = logging.getLogger("tandoor-helper")
@@ -45,6 +45,22 @@ _running = {"active": False, "label": None}
 
 def configure(scans: dict) -> None:
     _scans.update(scans)
+
+
+def available_metrics() -> list[str]:
+    """The tiles the automation can work on - with Mealie only those its
+    tools cover (mealie_maintenance)."""
+    if target.is_mealie():
+        from . import mealie_maintenance
+        return [m for m in app_settings.MAINTENANCE_METRICS if m in mealie_maintenance.METRICS]
+    return list(app_settings.MAINTENANCE_METRICS)
+
+
+def _scan(tool):
+    if target.is_mealie():
+        from . import mealie_maintenance
+        return mealie_maintenance.run_scan
+    return _scans[tool]
 
 
 def _path() -> str:
@@ -99,6 +115,8 @@ def run_once(trigger: str = "schedule") -> bool:
         overview = health.cached()
         tools = []
         for metric in cfg["metrics"]:
+            if metric not in available_metrics():
+                continue
             if overview["metrics"].get(metric) and METRIC_TOOLS[metric] not in tools:
                 tools.append(METRIC_TOOLS[metric])
         for tool, meta in tools:
@@ -110,10 +128,12 @@ def run_once(trigger: str = "schedule") -> bool:
                 continue
             job = tool_jobs.create_tool_job(tool)
             job.meta.update({**meta, "auto": True, "trigger": "maintenance"})
+            if target.is_mealie():
+                job.meta["target"] = "mealie"
             tool_jobs.save_tool_job(job)
             _running["label"] = tool
             log.info("Automatic maintenance: %s (job %s)", tool, job.id)
-            _scans[tool](job.id)  # blocking - one tool after another
+            _scan(tool)(job.id)  # blocking - one tool after another
             started.append(tool)
     except Exception as exc:  # noqa: BLE001
         log.exception("Automatic maintenance failed")
