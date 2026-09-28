@@ -49,9 +49,9 @@
 
     <!-- Meal plan -->
     <div id="area-plan" class="area-screen hidden">
-      <h1 data-i18n="toolMealPlanTitle">Meal plan &amp; shopping list</h1>
-      <p class="lede" data-i18n="toolMealPlanDesc">Picks one of your recipes per day.</p>
-      <p id="season-now" class="season-now hidden"></p>
+      <h1 data-i18n="planHeadline">Plan</h1>
+      <p class="lede" data-i18n="planLede">What to cook today – and this week?</p>
+      <div id="season-now" class="season-now hidden"></div>
       <section id="cooked-card" class="tool-card cooked-card hidden">
         <h3 data-i18n="cookedTitle">How was it?</h3>
         <p class="settings-hint" data-i18n="cookedHint">Rate what you cooked – Tandoor keeps it as a cook log, and the weekly plan prefers well-rated recipes you haven't had for a while.</p>
@@ -59,38 +59,41 @@
       </section>
       <section class="tool-card cook-today-card">
         <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
-        <p class="settings-hint" data-i18n="cookTodayHint">Type what you have at home – finds matching recipes in your collection (no AI).</p>
         <form id="cook-today-form" class="cook-today-form">
           <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
           <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
         </form>
+        <p class="settings-hint ct-hint">ⓘ <span data-i18n="cookTodayHint">Salt, pepper, oil … count as at home.</span></p>
         <p id="ct-status" class="settings-hint"></p>
         <div id="ct-results" class="ct-results"></div>
       </section>
-      <div class="tool-card plan-form-card">
+      <section class="tool-card plan-card">
+        <h3 data-i18n="weekPlanTitle">Weekly plan</h3>
         <form id="meal-plan-form" class="meal-plan-form">
           <label><span data-i18n="mealPlanStart">Start</span><input id="mp-start" type="date" required /></label>
           <label><span data-i18n="mealPlanDays">Days</span><input id="mp-days" type="number" min="1" max="14" value="7" required /></label>
           <label><span data-i18n="mealPlanMeal">Meal</span><select id="mp-meal" required></select></label>
           <label class="mp-wide"><span data-i18n="mealPlanWishes">Wishes</span><input id="mp-wishes" type="text" data-i18n-placeholder="mealPlanWishesPlaceholder" placeholder="e.g. 2x vegetarian, quick on weekdays" /></label>
-          <label class="mp-wide mp-check"><input id="mp-shopping" type="checkbox" checked /> <span data-i18n="mealPlanShopping">Add ingredients to the shopping list</span></label>
+          <div class="mp-wide mp-foot">
+            <label class="mp-check"><input id="mp-shopping" type="checkbox" checked /> <span data-i18n="mealPlanShopping">Add ingredients to the shopping list</span></label>
+            <button id="mp-start-btn" class="btn" type="submit" data-i18n="mealPlanStartBtn">Plan the week</button>
+          </div>
           <p id="mp-hint" class="new-recipes-auto hidden mp-wide"></p>
-          <button id="mp-start-btn" class="btn" type="submit" data-i18n="mealPlanStartBtn">Plan</button>
         </form>
-      </div>
-      <div id="plan-progress" class="tools-run-progress hidden">
-        <div class="spinner"></div>
-        <div class="status-text" data-i18n="planRunning">Planning …</div>
-      </div>
-      <div id="plan-error" class="error-banner hidden"></div>
-      <!-- The action bar sticks to the bottom only while the week is in view. -->
-      <div class="plan-week-wrap">
-        <div id="plan-week" class="plan-week"></div>
-        <div id="plan-actions" class="plan-actions hidden">
-          <span id="plan-status" class="tools-bulk-status"></span>
-          <button id="plan-apply-btn" class="btn" type="button"></button>
+        <div id="plan-progress" class="tools-run-progress hidden">
+          <div class="spinner"></div>
+          <div class="status-text" data-i18n="planRunning">Planning …</div>
         </div>
-      </div>
+        <div id="plan-error" class="error-banner hidden"></div>
+        <!-- The action bar sticks to the bottom only while the week is in view. -->
+        <div class="plan-week-wrap">
+          <div id="plan-week" class="plan-week"></div>
+          <div id="plan-actions" class="plan-actions hidden">
+            <span id="plan-status" class="tools-bulk-status"></span>
+            <button id="plan-apply-btn" class="btn" type="button"></button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <!-- Maintain (tools) -->

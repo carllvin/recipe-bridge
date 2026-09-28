@@ -1970,12 +1970,26 @@ function nextMonday() {
 
 // ---------- In season now ----------
 
+const SEASON_SHOWN = 6;
+
 async function loadSeason() {
   try {
     const data = await (await fetch('/api/season')).json();
-    el('season-now').textContent = `🌱 ${t('seasonNow')}: ${data.produce.join(', ')}`;
-    el('season-now').classList.toggle('hidden', !data.produce.length);
+    renderSeason(data.produce, false);
   } catch (e) { /* optional */ }
+}
+
+// The first few, the rest behind "+n".
+function renderSeason(produce, all) {
+  const box = el('season-now');
+  box.classList.toggle('hidden', !produce.length);
+  const month = new Date().toLocaleDateString(LANG_CODE, { month: 'long' });
+  const shown = all ? produce : produce.slice(0, SEASON_SHOWN);
+  const rest = produce.length - SEASON_SHOWN;
+  box.innerHTML = `🌱 ${escapeHtml(tf('seasonIn', { month }))}: ${escapeHtml(shown.join(' · '))}${rest > 0
+    ? `<button type="button">${all ? t('seasonLess') : `+${rest}`}</button>` : ''}`;
+  const btn = box.querySelector('button');
+  if (btn) btn.addEventListener('click', () => renderSeason(produce, !all));
 }
 
 // ---------- How was it? (cook log) ----------
@@ -2036,9 +2050,11 @@ async function searchCookToday() {
     el('ct-results').innerHTML = data.results.map((r) => {
       const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
       const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
+      // What's there is what you typed (and the score says how much) - so
+      // only what's missing is spelled out.
       const meta = [
-        `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
-        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
+        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}`
+          : `<span class="ct-have">✓ ${t('cookTodayComplete')}</span>`,
         r.minutes ? `${r.minutes} min` : '',
         r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',

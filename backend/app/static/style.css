@@ -791,7 +791,8 @@ a { color: inherit; }
 .tools-open-runs h3 { margin: 0 0 8px; font-size: 1rem; }
 
 
-.meal-plan-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; align-items: end; }
+.meal-plan-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; max-width: 640px; }
+.meal-plan-form .mp-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .meal-plan-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #8f9689; }
 .meal-plan-form .mp-wide { grid-column: 1 / -1; }
 .meal-plan-form .mp-check { flex-direction: row; align-items: center; gap: 8px; color: var(--paper); font-size: 0.85rem; }
@@ -839,7 +840,8 @@ a { color: inherit; }
   .area-screen, .tools-screen { padding: 24px 16px; }
   .upload-screen { padding: 24px 16px 96px; }
   .health-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .health-card { padding-left: 12px; padding-right: 12px; }
+  .health-card, .plan-card, .cook-today-card { padding-left: 12px; padding-right: 12px; }
+  .plan-card .plan-week { grid-template-columns: 1fr 1fr; gap: 8px; }
 }
 
 /* ---------- Import: recent imports ---------- */
@@ -866,7 +868,11 @@ a { color: inherit; }
 
 /* ---------- Plan: week view ---------- */
 
-.plan-form-card { margin-bottom: 20px; }
+.plan-card { margin-bottom: 20px; }
+.plan-card h3, .cook-today-card h3 { margin: 0 0 4px; }
+.plan-card .plan-week:not(:empty) { margin-top: 18px; }
+.plan-card .plan-actions { background: #1c211b; }
+.plan-card .tools-run-progress { margin-top: 16px; }
 .plan-week { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
 .plan-day {
   position: relative; display: flex; flex-direction: column; gap: 6px;
@@ -968,7 +974,15 @@ a { color: inherit; }
   border-radius: var(--radius); color: var(--paper); padding: 8px 10px; font-size: 0.9rem;
 }
 .ct-results { display: flex; flex-direction: column; gap: 8px; }
-.ct-row { display: flex; gap: 12px; align-items: center; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
+.ct-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 6px; align-items: center;
+  border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
+.ct-hint { margin: 6px 0 10px !important; }
+@media (max-width: 600px) {
+  .ct-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .ct-row .ct-plan { grid-column: 2; justify-self: start; }
+  .meal-plan-form { grid-template-columns: 1fr 1fr; }
+  .meal-plan-form label:nth-child(3) { grid-column: 1 / -1; }
+}
 .ct-main { flex: 1; min-width: 0; }
 .ct-name { font-weight: 600; }
 .ct-name a { color: inherit; }
@@ -1024,7 +1038,9 @@ a { color: inherit; }
 .pick-badge { font-size: 0.7rem; color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 999px; padding: 0 6px; margin-left: 6px; white-space: nowrap; }
 .pick-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 10px; }
 .pick-foot .settings-hint { flex: 1; margin: 0; }
-.season-now { font-size: 0.85rem; color: #8fb996; margin: -8px 0 18px; }
+.season-now { font-size: 0.85rem; color: #8fb996; margin: -8px 0 18px; line-height: 1.5; }
+.season-now button { background: none; border: 1px solid #3a4a3c; border-radius: 999px; color: inherit; font: inherit;
+  font-size: 0.78rem; padding: 0 8px; margin-left: 4px; cursor: pointer; }
 
 .bookmarklet { display: inline-block; padding: 2px 10px; margin-right: 6px; border: 1px dashed #c9a45c; border-radius: 999px;
   color: #c9a45c; text-decoration: none; cursor: grab; white-space: nowrap; }
