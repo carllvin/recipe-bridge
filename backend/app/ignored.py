@@ -19,6 +19,7 @@ METRICS = {
     "foods_without_nutrition", "foods_without_category", "missing_conversions",
     "recipes_not_translated", "recipes_need_restructure", "recipes_without_season", "recipes_few_tags",
     "foods_duplicates", "units_duplicates", "recipes_without_servings", "recipes_without_image",
+    "foods_unused", "units_unused", "keywords_unused",
 }
 
 _lock = threading.Lock()

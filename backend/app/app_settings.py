@@ -14,6 +14,7 @@ MAINTENANCE_METRICS = [
     "foods_duplicates", "foods_without_nutrition", "foods_without_category", "missing_conversions",
     "units_duplicates", "recipes_not_translated", "recipes_need_restructure", "recipes_without_season",
     "recipes_few_tags", "recipes_without_servings", "recipes_without_image",
+    "foods_unused", "units_unused", "keywords_unused",
 ]
 
 DEFAULTS = {

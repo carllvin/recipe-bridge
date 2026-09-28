@@ -1305,6 +1305,9 @@ function openAreaStart(area) {
 document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
+  unused_foods: 'toolUnusedFoodsTitle',
+  unused_units: 'toolUnusedUnitsTitle',
+  unused_keywords: 'toolUnusedKeywordsTitle',
   new_recipes: 'toolNewRecipesTitle',
   meal_plan: 'toolMealPlanTitle',
   ingredients_review: 'toolIngredientsReviewTitle',
@@ -1789,19 +1792,23 @@ const HEALTH_METRICS = [
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
   { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
+  { key: 'foods_unused', tool: 'unused_foods', endpoint: '/api/tools/unused/food' },
+  { key: 'units_unused', tool: 'unused_units', endpoint: '/api/tools/unused/unit' },
+  { key: 'keywords_unused', tool: 'unused_keywords', endpoint: '/api/tools/unused/keyword' },
 ];
 
 // Tiles grouped by what they're about, each group with its "whole
 // collection" tool (for what the counts can't see: typos, same meaning ...).
 const HEALTH_GROUPS = [
   { key: 'foods', titleKey: 'healthGroupFoods',
-    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions'],
+    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions', 'foods_unused'],
     tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'groupToolFoods', descKey: 'toolIngredientsReviewDesc' } },
-  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates'],
+  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
     metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
-      'recipes_without_servings', 'recipes_without_image'],
+      'recipes_without_servings', 'recipes_without_image'] },
+  { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
 ];
 
@@ -1859,7 +1866,7 @@ function renderHealth(data) {
         <h4>${t(g.titleKey)}</h4>
         ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
           title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
-        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>
+        ${g.tool ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
       </div>
       ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;

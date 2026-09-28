@@ -51,6 +51,29 @@ def _changed_after(item, timestamp) -> bool:
     return True
 
 
+def _is_changed(item, versions, computed_at) -> bool:
+    """New or changed since the overview."""
+    key = str(item["id"])
+    if versions is not None:
+        return key not in versions or versions[key] != item.get("updated_at")
+    return _changed_after(item, computed_at)  # overview from an older version: compare times
+
+
+def changed_since_overview(client, job=None):
+    """(the overview's entries per metric, the full recipes that are new or
+    changed since it was computed) - or None when there is no overview.
+    For tools about entries (ingredients, units, tags) rather than recipes."""
+    data = _health()
+    versions, computed_at = data.get("recipe_versions"), data.get("computed_at")
+    if not data.get("items") or (versions is None and not computed_at):
+        return None
+    changed = [item["id"] for item in fetch_recipe_overview(client) if _is_changed(item, versions, computed_at)]
+    if job is not None:
+        job.progress_label = f"Reading {len(changed)} changed recipe(s)..."
+        tool_jobs.save_tool_job(job)
+    return data["items"], fetch_recipes_full(client, changed)
+
+
 def recipes_for(client, metric: str, matches, skip=frozenset(), job=None) -> list[dict]:
     """Full recipes (not in skip) for which matches(recipe) is true."""
     data = _health()
@@ -65,14 +88,7 @@ def recipes_for(client, metric: str, matches, skip=frozenset(), job=None) -> lis
 
     ids = {item["key"] for item in listed}
     overview = fetch_recipe_overview(client)
-    for item in overview:
-        key = str(item["id"])
-        if versions is not None:
-            changed = key not in versions or versions[key] != item.get("updated_at")
-        else:  # overview from an older version: compare times instead
-            changed = _changed_after(item, computed_at)
-        if changed:
-            ids.add(key)  # new or changed since the overview
+    ids |= {str(item["id"]) for item in overview if _is_changed(item, versions, computed_at)}
     todo = [item["id"] for item in overview if str(item["id"]) in ids and str(item["id"]) not in skip]
     if job is not None:
         job.progress_label = f"Reading {len(todo)} recipe(s)..."

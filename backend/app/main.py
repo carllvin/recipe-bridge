@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -942,6 +942,9 @@ _TOOL_SCANS = {
     "meal_plan": tools_meal_plan.run_scan,
     "recipes_servings": tools_recipe_details.run_servings_scan,
     "recipes_images": tools_recipe_details.run_images_scan,
+    "unused_foods": tools_unused.run_scan,
+    "unused_units": tools_unused.run_scan,
+    "unused_keywords": tools_unused.run_scan,
 }
 
 # tool name -> the apply_suggestion(job_id, suggestion_id) function for that tool
@@ -961,6 +964,9 @@ _TOOL_APPLY = {
     "meal_plan": tools_meal_plan.apply_suggestion,
     "recipes_servings": tools_recipe_details.apply_servings_suggestion,
     "recipes_images": tools_recipe_details.apply_image_suggestion,
+    "unused_foods": tools_unused.apply_suggestion,
+    "unused_units": tools_unused.apply_suggestion,
+    "unused_keywords": tools_unused.apply_suggestion,
 }
 
 
@@ -1025,6 +1031,14 @@ async def start_units_review(body: dict | None = Body(None)):
     listed in the health overview instead of every entry."""
     focus = (body or {}).get("focus")
     return _start_tool_job("units_review", {"focus": focus} if focus == "duplicates" else None)
+
+
+@app.post("/api/tools/unused/{endpoint}")
+async def start_unused(endpoint: str):
+    """endpoint: food | unit | keyword - entries no recipe uses (no AI)."""
+    if endpoint not in tools_unused.KINDS:
+        raise HTTPException(404, "Unknown kind.")
+    return _start_tool_job(tools_unused.KINDS[endpoint][1])
 
 
 @app.post("/api/tools/recipes/servings")
