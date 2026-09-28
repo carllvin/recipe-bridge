@@ -1772,16 +1772,16 @@ const HEALTH_METRICS = [
 const HEALTH_GROUPS = [
   { key: 'foods', titleKey: 'healthGroupFoods',
     metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions'],
-    tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'toolIngredientsReviewTitle', descKey: 'toolIngredientsReviewDesc' } },
+    tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'groupToolFoods', descKey: 'toolIngredientsReviewDesc' } },
   { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates'],
-    tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'toolUnitsTitle', descKey: 'toolUnitsDesc' } },
+    tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
     metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image'],
-    tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'toolTagsCleanupTitle', descKey: 'toolTagsCleanupDesc' } },
+    tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
 ];
 
-const healthState = { open: null, data: null };
+const healthState = { open: null, data: null, showFine: new Set() };
 
 function renderHealth(data) {
   healthState.data = data;
@@ -1825,17 +1825,26 @@ function renderHealth(data) {
     const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
     const open = metrics.filter((m) => !done(m));
     const fine = metrics.filter(done);
+    const showFine = healthState.showFine.has(g.key);
+    const status = !fine.length ? ''
+      : !open.length ? t('healthGroupAllFine') : tf('healthGroupMoreFine', { n: fine.length });
+    // Heading, status and the group's tool in one line; finished tiles only
+    // on request (they still lead to ignored entries).
     return `<div class="health-group">
-      <h4>${t(g.titleKey)}</h4>
-      ${open.length ? `<div class="health-grid">${open.map(tile).join('')}</div>` : ''}
-      <div class="health-group-foot">
-        ${fine.length ? `<span class="health-ok-line">✓ ${t('healthOkLine')} ${fine.map((m) => ((data.ignored || {})[m.key]
-          ? `<button type="button" class="health-entries" data-metric="${m.key}" title="${escapeHtml(tf('healthIgnoredCount', { n: data.ignored[m.key] }))}">${t('healthShort_' + m.key)}</button>`
-          : escapeHtml(t('healthShort_' + m.key)))).join(' · ')}</span>` : ''}
-        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">→ ${t(g.tool.titleKey)}</button>
+      <div class="health-group-head">
+        <h4>${t(g.titleKey)}</h4>
+        ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
+          title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
+        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>
       </div>
+      ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;
   }).join('');
+  el('health-grid').querySelectorAll('.health-ok-toggle').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.group;
+    if (healthState.showFine.has(key)) healthState.showFine.delete(key); else healthState.showFine.add(key);
+    renderHealth(healthState.data);
+  }));
   el('health-grid').querySelectorAll('.health-group-tool').forEach((b) => b.addEventListener('click', () => {
     const g = HEALTH_GROUPS.find((x) => x.key === b.dataset.group);
     startTool(g.tool.endpoint, toolTitle(g.tool.tool));
