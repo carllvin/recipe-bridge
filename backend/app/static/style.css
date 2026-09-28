@@ -1128,3 +1128,18 @@ a { color: inherit; }
 .smart-depth { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #8f9689; }
 .smart-depth select { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius);
   color: var(--paper); padding: 6px 8px; font-size: 0.85rem; color-scheme: dark; }
+
+/* ---------- Login (APP_PASSWORD) ---------- */
+.login-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+.login-box { width: min(340px, 100%); display: flex; flex-direction: column; gap: 10px; text-align: center;
+  border: 1px solid #3a3f3a; border-radius: var(--radius); background: #1c211b; padding: 28px 24px; }
+.login-logo { width: 64px; height: 64px; align-self: center; border-radius: 14px; }
+.login-box .brand { font-size: 1.3rem; margin-bottom: 8px; }
+.login-box label { font-size: 0.8rem; color: #8f9689; text-align: left; }
+.login-box input { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius);
+  color: var(--paper); padding: 10px 12px; font: inherit; }
+.login-box input:focus { outline: none; border-color: var(--gold-dim); }
+.login-error { color: #e0a99f; font-size: 0.85rem; margin: 0; }
+.login-hint { color: #8f9689; font-size: 0.78rem; margin: 4px 0 0; }
+.login-box .brand em { color: var(--gold); font-style: normal; }
+.logout-link { display: inline-block; margin-top: 16px; font-size: 0.8rem; color: #8f9689; }

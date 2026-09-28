@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -45,6 +45,10 @@ async def revalidate_static_files(request, call_next):
     if not request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+# Registered after the one above, so it runs first: nothing is served
+# before the password check (see auth.py; off without APP_PASSWORD).
+app.middleware("http")(auth.middleware)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -1304,6 +1308,40 @@ async def suggestion_actions_status(batch: str | None = None):
     return apply_queue.status(batch)
 
 
+@app.get("/api/ping")
+async def ping():
+    """Open without signing in: the container health check, and the login
+    page's language."""
+    return {"ok": True, "language_code": get_ui_language_code(settings.output_language)}
+
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"), headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/login")
+async def login(request: Request, body: dict = Body(...)):
+    if not auth.enabled():
+        return {"ok": True}
+    wait = auth.locked_for(request)
+    if wait:
+        raise HTTPException(429, f"Too many wrong passwords - please wait {wait // 60 + 1} minutes.")
+    if not auth.check_password(request, str(body.get("password") or "")):
+        await asyncio.sleep(1)  # slows down guessing
+        raise HTTPException(401, "Wrong password.")
+    response = JSONResponse({"ok": True})
+    auth.set_cookie(request, response)
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(auth.COOKIE)
+    return response
+
+
 @app.get("/api/config")
 async def get_config():
     return {
@@ -1314,6 +1352,7 @@ async def get_config():
         "supported_extensions": sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS),
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "image_gen_available": image_gen.is_configured(),
+        "auth_enabled": auth.enabled(),
         "watch_dir": settings.watch_dir if settings.watch_dir and os.path.isdir(settings.watch_dir) else None,
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.

@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     watch_dir: str = ""
     watch_interval_seconds: int = 30
 
+    # Password for the web interface; empty = no password (e.g. only reachable in your home network)
+    app_password: str = ""
+
     # App
     data_dir: str = "/app/data"
     max_upload_mb: int = 100

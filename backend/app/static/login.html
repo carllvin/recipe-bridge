@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tandoor Helper</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#1c211d" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+</head>
+<body class="login-body">
+  <form id="login-form" class="login-box">
+    <img src="/icons/icon-192.png" alt="" class="login-logo" />
+    <div class="brand"><em>Tandoor</em> Helper</div>
+    <label for="password" id="label">Password</label>
+    <input id="password" type="password" autocomplete="current-password" autofocus required />
+    <button class="btn" type="submit" id="submit">Sign in</button>
+    <p id="error" class="login-error" hidden></p>
+    <p id="hint" class="login-hint">You stay signed in on this device.</p>
+  </form>
+  <script>
+    // The main app's translations need a signed-in session - so the few
+    // words of this page live here.
+    const TEXT = {
+      de: { label: 'Passwort', submit: 'Anmelden', hint: 'Du bleibst auf diesem Gerät angemeldet.', wrong: 'Falsches Passwort.' },
+      en: { label: 'Password', submit: 'Sign in', hint: 'You stay signed in on this device.', wrong: 'Wrong password.' },
+      fr: { label: 'Mot de passe', submit: 'Se connecter', hint: 'Vous restez connecté sur cet appareil.', wrong: 'Mot de passe incorrect.' },
+      it: { label: 'Password', submit: 'Accedi', hint: 'Resti connesso su questo dispositivo.', wrong: 'Password errata.' },
+      es: { label: 'Contraseña', submit: 'Entrar', hint: 'Seguirás conectado en este dispositivo.', wrong: 'Contraseña incorrecta.' },
+    };
+    let text = TEXT.en;
+    fetch('/api/ping').then((r) => r.json()).then((d) => {
+      text = TEXT[d.language_code] || TEXT.en;
+      document.documentElement.lang = d.language_code || 'en';
+      ['label', 'submit', 'hint'].forEach((k) => { document.getElementById(k).textContent = text[k]; });
+    }).catch(() => {});
+
+    // Only paths of this app as target (no "//other.site").
+    const next = new URLSearchParams(location.search).get('next') || '/';
+    const target = next.startsWith('/') && !next.startsWith('//') ? next : '/';
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const error = document.getElementById('error');
+      error.hidden = true;
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: document.getElementById('password').value }),
+      });
+      if (res.ok) { location.replace(target); return; }
+      const data = await res.json().catch(() => ({}));
+      error.textContent = res.status === 401 ? text.wrong : (data.detail || `HTTP ${res.status}`);
+      error.hidden = false;
+      document.getElementById('password').select();
+    });
+  </script>
+</body>
+</html>
