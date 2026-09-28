@@ -114,22 +114,21 @@ a { color: inherit; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 40px 24px;
   text-align: center;
 }
 
 .upload-screen h1 {
-  font-size: clamp(2.2rem, 5vw, 3.4rem);
-  max-width: 14ch;
-  line-height: 1.05;
-  margin: 0 0 14px;
+  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  line-height: 1.1;
+  margin: 0 0 10px;
 }
 
 .upload-screen p.lede {
   color: #b9c0b5;
-  max-width: 46ch;
-  margin: 0 0 36px;
+  max-width: 52ch;
+  margin: 0 0 28px;
   font-size: 1.02rem;
 }
 
@@ -791,13 +790,6 @@ a { color: inherit; }
 .tools-open-runs { margin-bottom: 16px; }
 .tools-open-runs h3 { margin: 0 0 8px; font-size: 1rem; }
 
-.url-form { width: min(560px, 90vw); margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
-.url-form-or { font-size: 0.85rem; color: #8f9689; text-align: center; }
-.url-form-row { display: flex; gap: 8px; }
-.url-form-row input {
-  flex: 1; min-width: 0; background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a;
-  border-radius: var(--radius); color: var(--paper); padding: 10px 12px; font-size: 0.95rem;
-}
 
 .meal-plan-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; align-items: end; }
 .meal-plan-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #8f9689; }
@@ -845,6 +837,7 @@ a { color: inherit; }
   .nav-badge { position: absolute; top: 0; right: 4px; }
   .app { padding-bottom: 64px; }
   .area-screen, .tools-screen { padding: 24px 16px; }
+  .upload-screen { padding: 24px 16px 96px; }
 }
 
 /* ---------- Import: recent imports ---------- */
@@ -1014,13 +1007,6 @@ a { color: inherit; }
 .review-notes summary { cursor: pointer; }
 .review-notes ul { position: absolute; right: 0; top: 1.6em; z-index: 20; width: min(560px, 90vw); margin: 0; padding: 10px 14px 10px 28px;
   background: #1c211b; border: 1px solid #3a3f3a; border-radius: var(--radius); color: #b9c0b5; overflow-wrap: anywhere; }
-.import-more { width: min(560px, 90vw); margin-top: 18px; }
-.import-tabs { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
-.import-tab { background: none; border: 1px solid #3a3f3a; color: #b9c0b5; border-radius: 999px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; }
-.import-tab.active { background: var(--paper); color: var(--ink); border-color: var(--paper); }
-.import-more .url-form { width: 100%; }
-#text-input { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius); color: var(--paper);
-  padding: 10px; font: inherit; font-size: 0.9rem; resize: vertical; }
 #text-form .btn { align-self: flex-end; }
 .pick-panel { width: min(760px, 94vw); margin-top: 18px; border: 1px solid #3a3f3a; border-radius: var(--radius); background: #1c211b; padding: 14px 16px; text-align: left; }
 .pick-head { display: flex; align-items: center; gap: 10px; }
@@ -1043,9 +1029,24 @@ a { color: inherit; }
 .pick-foot .settings-hint { flex: 1; margin: 0; }
 .season-now { font-size: 0.85rem; color: #8fb996; margin: -8px 0 18px; }
 
-.bookmarklet-hint { font-size: 0.8rem; color: #8f9689; text-align: center; margin: 4px 0 0; line-height: 1.5; }
 .bookmarklet { display: inline-block; padding: 2px 10px; margin-right: 6px; border: 1px dashed #c9a45c; border-radius: 999px;
   color: #c9a45c; text-decoration: none; cursor: grab; white-space: nowrap; }
 .tools-skipped-note { font-size: 0.85rem; color: #b9bdb3; border: 1px solid #3a4038; border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
 .tools-skipped-note p { margin: 4px 0; }
 .tools-skipped-note ul { margin: 4px 0; padding-left: 18px; }
+
+/* one field for links and pasted text */
+.smart-form { width: min(560px, 90vw); margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.smart-form textarea { width: 100%; box-sizing: border-box; resize: none; overflow-y: auto; min-height: 46px; line-height: 1.4;
+  font: inherit; font-size: 0.95rem; padding: 11px 14px; border-radius: var(--radius); border: 1px solid #2a2f2a; background: rgba(239,233,218,0.05); color: var(--paper); }
+.smart-form textarea:focus { outline: none; border-color: var(--gold); }
+.smart-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.smart-hint { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: #8f9689; }
+.upload-screen .recent-imports { text-align: left; }
+
+/* "More ways to import" */
+.more-ways { width: min(560px, 90vw); margin-top: 28px; text-align: left; border-top: 1px solid #2f352f; padding-top: 12px; }
+.more-ways summary { cursor: pointer; color: #b9c0b5; font-size: 0.9rem; }
+.more-way { margin-top: 14px; }
+.more-way h4 { margin: 0 0 4px; font-size: 0.9rem; }
+.more-way p { margin: 0 0 6px; font-size: 0.82rem; color: #8f9689; line-height: 1.5; }

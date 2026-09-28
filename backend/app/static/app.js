@@ -313,24 +313,54 @@ async function startImportRequest(endpoint, body, loadingText, onStarted) {
   }
 }
 
-el('url-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const url = el('url-input').value.trim();
-  if (!url) return;
-  startImportRequest('/api/import-url', { url }, t('urlImportLoading'), () => { el('url-input').value = ''; });
+// ---------- One field for links and pasted text ----------
+
+// "www.site.de/rezept" or "site.de/..." without https:// counts as a link too.
+function smartLink(value) {
+  if (/^https?:\/\/\S+$/i.test(value)) return value;
+  if (/^(www\.)?[\w-]+(\.[\w-]+)*\.[a-z]{2,}(\/\S*)?$/i.test(value)) return 'https://' + value;
+  return null;
+}
+
+function smartMode() {
+  const value = el('smart-input').value.trim();
+  const link = !value.includes('\n') ? smartLink(value) : null;
+  if (link) return { mode: 'url', value: link };
+  if (value.length >= 20) return { mode: 'text', value };
+  return { mode: null, value };
+}
+
+function updateSmartForm() {
+  const input = el('smart-input');
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight, 320)}px`;
+  const { mode } = smartMode();
+  el('smart-import').disabled = !mode;
+  el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
+  el('smart-scan').classList.toggle('hidden', mode !== 'url');
+  el('smart-hint').textContent = mode === 'url' ? t('smartHintUrl') : mode === 'text' ? t('smartHintText') : '';
+}
+
+function clearSmartForm() {
+  el('smart-input').value = '';
+  updateSmartForm();
+}
+
+el('smart-input').addEventListener('input', updateSmartForm);
+// Enter imports a link; in a recipe text it's a new line.
+el('smart-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && smartMode().mode === 'url') {
+    e.preventDefault();
+    el('smart-form').requestSubmit();
+  }
 });
 
-el('text-form').addEventListener('submit', (e) => {
+el('smart-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const text = el('text-input').value.trim();
-  if (!text) return;
-  startImportRequest('/api/import-text', { text }, t('textImportLoading'), () => { el('text-input').value = ''; });
+  const { mode, value } = smartMode();
+  if (mode === 'url') startImportRequest('/api/import-url', { url: value }, t('urlImportLoading'), clearSmartForm);
+  else if (mode === 'text') startImportRequest('/api/import-text', { text: value }, t('textImportLoading'), clearSmartForm);
 });
-
-document.querySelectorAll('.import-tab').forEach((tab) => tab.addEventListener('click', () => {
-  document.querySelectorAll('.import-tab').forEach((x) => x.classList.toggle('active', x === tab));
-  document.querySelectorAll('.import-pane').forEach((pane) => pane.classList.toggle('hidden', pane.dataset.pane !== tab.dataset.pane));
-}));
 
 // ---------- Pick list: recipes found on a website, or browser bookmarks ----------
 
@@ -415,10 +445,9 @@ el('pick-import').addEventListener('click', () => {
 });
 
 // Website scan: runs on the server (no AI); results show up while it's running.
-el('scan-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const url = el('scan-input').value.trim();
-  if (!url) return;
+el('smart-scan').addEventListener('click', async () => {
+  const { mode, value: url } = smartMode();
+  if (mode !== 'url') return;
   el('upload-error').classList.add('hidden');
   try {
     const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
@@ -2514,6 +2543,9 @@ if ('serviceWorker' in navigator) {
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
+  updateSmartForm();
+  el('more-way-folder').textContent = APP_CONFIG.watch_dir
+    ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();
   setInterval(checkTandoor, 15000);
   updateInboxBadge();
