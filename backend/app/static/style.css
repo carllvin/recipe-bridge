@@ -1121,3 +1121,4 @@ a { color: inherit; }
 .settings-summary.over { color: #e0a99f; }
 .settings-metrics h5 { margin: 8px 0 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8f9689; }
 .settings-card { display: block; }
+.more-way p.more-way-warn { color: #e0a99f; }

@@ -2629,6 +2629,8 @@ if ('serviceWorker' in navigator) {
   showArea('import');
   if (!state.jobId) handleIncomingParams();
   updateSmartForm();
+  // Installing (and so the share menu) needs HTTPS or localhost.
+  el('more-way-insecure').classList.toggle('hidden', window.isSecureContext);
   el('more-way-folder').textContent = APP_CONFIG.watch_dir
     ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();
