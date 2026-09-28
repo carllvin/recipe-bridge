@@ -98,35 +98,36 @@
       <div id="tools-cards-view">
         <h1 data-i18n="maintainHeadline">Maintain</h1>
         <p class="lede" data-i18n="maintainLede">Keep your Tandoor collection tidy. Every tool shows suggestions first - you review them under "Review".</p>
-        <div class="maintain-top">
-          <div class="tool-card tool-card-featured">
-            <div class="tool-card-icon">🆕</div>
-            <h3 data-i18n="toolNewRecipesTitle">Process new recipes</h3>
-            <p data-i18n="toolNewRecipesDesc">For recipes added since the last run (via Tandoor or this app): translates them automatically, then suggests revising their structure (steps, ingredients per step, servings, times), matching their ingredients, units and tags to existing ones, filling in ingredient details, and adding tags.</p>
-            <p id="new-recipes-status" class="new-recipes-status"></p>
-            <p id="new-recipes-auto" class="new-recipes-auto hidden"></p>
-            <div id="new-recipes-open-jobs" class="new-recipes-open-jobs"></div>
+        <section class="new-recipes-bar">
+          <div class="new-recipes-main">
+            <span class="new-recipes-icon">🆕</span>
+            <div class="new-recipes-text">
+              <h3 data-i18n="toolNewRecipesTitle">Process new recipes</h3>
+              <p id="new-recipes-status" class="new-recipes-status"></p>
+              <p id="new-recipes-auto" class="new-recipes-auto hidden"></p>
+            </div>
             <button id="new-recipes-start-btn" class="btn tool-start-btn" data-tool="new_recipes" data-endpoint="/api/tools/new-recipes/process" data-i18n="toolStartBtn" disabled>Start</button>
           </div>
-          <div class="tool-card usage-card">
-            <div class="tool-card-icon">📊</div>
-            <h3 data-i18n="usageTitle">AI usage (30 days)</h3>
-            <p id="usage-total" class="new-recipes-status"></p>
-            <p id="usage-budget" class="usage-budget hidden"></p>
-            <div id="usage-by-source" class="usage-by-source"></div>
-          </div>
-        </div>
+          <div id="new-recipes-open-jobs" class="new-recipes-open-jobs"></div>
+          <details class="new-recipes-info">
+            <summary data-i18n="newRecipesWhat">What does this do?</summary>
+            <p data-i18n="toolNewRecipesDesc">For recipes added since the last run (via Tandoor or this app): translates them automatically, then suggests revising their structure, matching their ingredients, units and tags, filling in ingredient details, and adding tags.</p>
+          </details>
+        </section>
         <section class="tool-card health-card">
           <div class="health-head">
             <h3 data-i18n="healthTitle">State of your collection</h3>
             <span id="health-when" class="new-recipes-auto"></span>
             <button id="health-refresh-btn" class="btn secondary" type="button" data-i18n="healthRefresh">Refresh</button>
           </div>
-          <div id="health-grid" class="health-grid"></div>
+          <div id="health-grid" class="health-groups"></div>
           <div id="health-detail" class="health-detail hidden"></div>
         </section>
-        <section class="tool-card settings-card">
-          <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+        <details id="settings-card" class="tool-card settings-card">
+          <summary>
+            <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+            <span id="settings-summary" class="settings-summary"></span>
+          </summary>
           <div class="settings-grid">
             <div class="settings-block">
               <h4 data-i18n="maintTitle">Automatic maintenance</h4>
@@ -150,30 +151,14 @@
               <div class="budget-bar"><div id="budget-fill"></div></div>
               <p id="budget-text" class="settings-hint"></p>
               <p class="settings-hint" data-i18n="budgetHint">Once reached, automatic runs (new recipes, post-processing after imports, automatic maintenance) no longer start.</p>
+              <h4 class="usage-head" data-i18n="usageTitle">AI usage (30 days)</h4>
+              <p id="usage-total" class="settings-hint"></p>
+              <div id="usage-by-source" class="usage-by-source"></div>
             </div>
           </div>
           <div class="settings-actions">
             <button id="settings-save" class="btn" type="button" data-i18n="settingsSave">Save</button>
             <span id="settings-saved" class="settings-hint"></span>
-          </div>
-        </section>
-        <details class="more-tools">
-          <summary data-i18n="moreToolsTitle">More tools</summary>
-          <p class="more-tools-hint" data-i18n="moreToolsHint">Run over the whole collection.</p>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolIngredientsReviewTitle">Ingredients: review &amp; clean up</h3>
-              <p data-i18n="toolIngredientsReviewDesc">Fixes prepared-form names, translates, and merges duplicates.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="ingredients_review" data-endpoint="/api/tools/ingredients/review" data-i18n="toolStartBtn">Start</button>
-          </div>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolUnitsTitle">Units: review &amp; clean up</h3>
-              <p data-i18n="toolUnitsDesc">Unifies spellings, translates, and fills in missing plurals.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="units_review" data-endpoint="/api/tools/units/review" data-i18n="toolStartBtn">Start</button>
-          </div>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolTagsCleanupTitle">Tags: translate &amp; simplify</h3>
-              <p data-i18n="toolTagsCleanupDesc">Translates tags and merges ones that mean the same thing - in one pass.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="tags_cleanup" data-endpoint="/api/tools/tags/cleanup" data-i18n="toolStartBtn">Start</button>
           </div>
         </details>
       </div>

@@ -1659,11 +1659,29 @@ function renderBudget(budget) {
   el('budget-text').textContent = budget.limit
     ? tf('budgetUsed', { used: budget.used.toLocaleString(), limit: budget.limit.toLocaleString(), pct })
     : tf('budgetUsedNoLimit', { used: budget.used.toLocaleString() });
-  const line = el('usage-budget');
-  line.classList.toggle('hidden', !budget.warn);
-  line.classList.toggle('over', budget.exceeded);
-  line.textContent = budget.exceeded ? t('budgetExceeded') : budget.warn ? tf('budgetWarn', { pct }) : '';
+  settingsState.budget = budget;
+  renderSettingsSummary();
 }
+
+// Collapsed "automation & budget": when it runs and how much budget is used.
+function renderSettingsSummary() {
+  const { maint, budget } = settingsState;
+  const parts = [];
+  if (maint) {
+    const time = `${String(maint.hour).padStart(2, '0')}:00`;
+    parts.push(!maint.enabled ? t('maintSummaryOff')
+      : maint.every_days === 1 ? tf('maintSummaryDaily', { time }) : tf('maintSummaryEvery', { n: maint.every_days, time }));
+  }
+  if (budget) {
+    const pct = budget.limit ? Math.min(100, Math.round((budget.used / budget.limit) * 100)) : 0;
+    parts.push(budget.exceeded ? t('budgetExceeded')
+      : budget.limit ? tf('budgetSummary', { pct }) : tf('budgetSummaryNone', { used: budget.used.toLocaleString() }));
+  }
+  el('settings-summary').textContent = parts.join(' · ');
+  el('settings-summary').classList.toggle('over', !!(budget && (budget.exceeded || budget.warn)));
+}
+
+const settingsState = { maint: null, budget: null };
 
 function renderMaintStatus(st) {
   const parts = [];
@@ -1688,8 +1706,14 @@ async function loadSettings() {
     el('set-maint-enabled').checked = m.enabled;
     el('set-maint-hour').value = String(m.hour);
     el('set-maint-days').value = String(m.every_days);
-    el('set-maint-metrics').innerHTML = data.metrics.map((k) => `
-      <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('health_' + k))}</label>`).join('');
+    // grouped like the tiles
+    el('set-maint-metrics').innerHTML = HEALTH_GROUPS.map((g) => {
+      const keys = g.metrics.filter((k) => data.metrics.includes(k));
+      return keys.length ? `<h5>${t(g.titleKey)}</h5>` + keys.map((k) => `
+        <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('healthShort_' + k))}</label>`).join('') : '';
+    }).join('');
+    settingsState.maint = m;
+    if (healthState.data) renderHealth(healthState.data);
     el('set-budget-limit').value = data.budget.monthly_tokens;
     el('set-budget-block').checked = data.budget.block_manual;
     renderBudget(data.budget_status);
@@ -1737,6 +1761,20 @@ const HEALTH_METRICS = [
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
 ];
 
+// Tiles grouped by what they're about, each group with its "whole
+// collection" tool (for what the counts can't see: typos, same meaning ...).
+const HEALTH_GROUPS = [
+  { key: 'foods', titleKey: 'healthGroupFoods',
+    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions'],
+    tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'toolIngredientsReviewTitle', descKey: 'toolIngredientsReviewDesc' } },
+  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates'],
+    tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'toolUnitsTitle', descKey: 'toolUnitsDesc' } },
+  { key: 'recipes', titleKey: 'healthGroupRecipes',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
+      'recipes_without_servings', 'recipes_without_image'],
+    tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'toolTagsCleanupTitle', descKey: 'toolTagsCleanupDesc' } },
+];
+
 const healthState = { open: null, data: null };
 
 function renderHealth(data) {
@@ -1747,7 +1785,8 @@ function renderHealth(data) {
     : data.error ? `${t('toolStatusError')}: ${data.error}`
     : data.computed_at ? tf('healthComputedAt', { when: shortWhen(data.computed_at) }) : t('healthNever');
   if (!data.computed_at) { el('health-grid').innerHTML = ''; closeHealthDetail(); return; }
-  el('health-grid').innerHTML = HEALTH_METRICS.map((m) => {
+  const auto = settingsState.maint && settingsState.maint.enabled ? settingsState.maint.metrics : [];
+  const tile = (m) => {
     const value = data.metrics[m.key] ?? 0;
     const ignoredCount = (data.ignored || {})[m.key] || 0;
     // A run of this tool that is still going or waiting for review replaces
@@ -1762,8 +1801,9 @@ function renderHealth(data) {
         ? `<button class="btn secondary health-fix" type="button" disabled title="${escapeHtml(t('healthImageGenOff'))}">${t('healthFix')}</button>`
       : value ? `<button class="btn secondary health-fix" type="button" data-metric="${m.key}">${t('healthFix')}</button>` : '';
     return `<div class="health-tile ${value ? 'todo' : 'ok'} ${healthState.open === m.key ? 'open' : ''} ${running ? 'refreshing' : ''}">
+      ${auto.includes(m.key) ? `<span class="health-auto" title="${escapeHtml(t('healthAuto'))}">🔁</span>` : ''}
       <div class="health-value">${value ? value.toLocaleString() : '✓'}</div>
-      <div class="health-label">${t('health_' + m.key)}</div>
+      <div class="health-label" title="${escapeHtml(t('health_' + m.key))}">${t('healthShort_' + m.key)}</div>
       ${ignoredCount ? `<div class="health-ignored-count">${tf('healthIgnoredCount', { n: ignoredCount })}</div>` : ''}
       ${pendingHtml}
       ${value && m.needsImageGen && !APP_CONFIG.image_gen_available ? `<div class="health-ignored-count">${t('healthImageGenOff')}</div>` : ''}
@@ -1772,7 +1812,28 @@ function renderHealth(data) {
         ${value || ignoredCount ? `<button class="btn secondary health-entries" type="button" data-metric="${m.key}">${t('healthEntries')}</button>` : ''}
       </div>
     </div>`;
+  };
+  el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
+    const metrics = g.metrics.map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
+    const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
+    const open = metrics.filter((m) => !done(m));
+    const fine = metrics.filter(done);
+    return `<div class="health-group">
+      <h4>${t(g.titleKey)}</h4>
+      ${open.length ? `<div class="health-grid">${open.map(tile).join('')}</div>` : ''}
+      <div class="health-group-foot">
+        ${fine.length ? `<span class="health-ok-line">✓ ${t('healthOkLine')} ${fine.map((m) => ((data.ignored || {})[m.key]
+          ? `<button type="button" class="health-entries" data-metric="${m.key}" title="${escapeHtml(tf('healthIgnoredCount', { n: data.ignored[m.key] }))}">${t('healthShort_' + m.key)}</button>`
+          : escapeHtml(t('healthShort_' + m.key)))).join(' · ')}</span>` : ''}
+        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">→ ${t(g.tool.titleKey)}</button>
+      </div>
+    </div>`;
   }).join('');
+  el('health-grid').querySelectorAll('.health-group-tool').forEach((b) => b.addEventListener('click', () => {
+    const g = HEALTH_GROUPS.find((x) => x.key === b.dataset.group);
+    startTool(g.tool.endpoint, toolTitle(g.tool.tool));
+  }));
   el('health-grid').querySelectorAll('.health-fix').forEach((b) => b.addEventListener('click', () => {
     const m = HEALTH_METRICS.find((x) => x.key === b.dataset.metric);
     startTool(m.endpoint, toolTitle(m.tool), m.body);
@@ -1790,7 +1851,9 @@ function closeHealthDetail() {
   healthState.open = null;
   el('health-detail').classList.add('hidden');
   el('health-detail').innerHTML = '';
-  el('health-grid').querySelectorAll('.health-tile.open').forEach((tile) => tile.classList.remove('open'));
+  // re-render: a finished tile that was only open for its ignored entries
+  // goes back into the "all fine" line
+  if (healthState.data && healthState.data.computed_at) renderHealth(healthState.data);
 }
 
 function healthRow(item) {
