@@ -2297,6 +2297,29 @@ async function searchCookToday() {
 
 el('cook-today-form').addEventListener('submit', (e) => { e.preventDefault(); searchCookToday(); });
 
+// Photo of the fridge / pantry: the AI lists what it sees, which goes into
+// the field (next to what was typed) - then the usual search runs.
+el('ct-photo').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length) return;
+  el('ct-status').textContent = t('cookTodayPhotoReading');
+  const form = new FormData();
+  files.slice(0, 4).forEach((f) => form.append('files', f));
+  try {
+    const res = await fetch('/api/cook-today/photo', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    if (!data.ingredients.length) { el('ct-status').textContent = t('cookTodayPhotoNone'); return; }
+    const typed = el('ct-have').value.split(',').map((x) => x.trim()).filter(Boolean);
+    const known = new Set(typed.map((x) => x.toLowerCase()));
+    el('ct-have').value = [...typed, ...data.ingredients.filter((x) => !known.has(x.toLowerCase()))].join(', ');
+    searchCookToday();
+  } catch (err) {
+    el('ct-status').textContent = `${t('toolStatusError')}: ${err.message}`;
+  }
+});
+
 async function loadMealPlanOptions() {
   if (!el('mp-start').value) el('mp-start').value = nextMonday();
   const select = el('mp-meal');

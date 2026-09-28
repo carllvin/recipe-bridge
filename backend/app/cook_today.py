@@ -179,3 +179,50 @@ def suggest(have_text: str, limit: int = 20) -> dict:
     # ingredients, then rating.
     results.sort(key=lambda x: (len(x["missing"]), -len(x["matched"]), -len(x["season"]), -(x["rating"] or 0)))
     return {"building": building, "results": results[:limit], "built_at": data.get("built_at")}
+
+
+# ---------- ingredients from a photo of the fridge / pantry ----------
+
+PHOTO_MAX_SIDE = 1600
+PHOTO_PROMPT = """This is a photo of a fridge, pantry shelf or kitchen counter.
+List the food items a cook could use that are clearly visible - fresh
+produce, dairy, meat, fish, eggs, bread, and packaged staples whose content
+you can read or recognize. Use plain base names in {language}, singular where
+natural, without brand names or amounts (e.g. "Zucchini", "Feta", "Eier",
+"Kichererbsen"). Leave out anything you can't identify with confidence,
+drinks, and items like salt, pepper and oil.
+
+Respond with ONLY a JSON array of strings (no explanation, no markdown fence)."""
+
+
+def ingredients_from_photos(photos: list[bytes]) -> tuple[list[str], int, int]:
+    """(ingredient names, input tokens, output tokens) - one AI call per
+    photo with the main model (it reads images); names merged without
+    duplicates."""
+    import io
+
+    from PIL import Image, ImageOps
+
+    from . import json_answer, llm_provider
+
+    prompt = PHOTO_PROMPT.replace("{language}", settings.output_language or "English")
+    names, seen, tokens_in, tokens_out = [], set(), 0, 0
+    for data in photos:
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        img.thumbnail((PHOTO_MAX_SIDE, PHOTO_MAX_SIDE))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=85)
+        text, usage = llm_provider.transcribe_image(buf.getvalue(), prompt, max_tokens=800)
+        tokens_in += usage.input_tokens
+        tokens_out += usage.output_tokens
+        try:
+            found = json_answer.parse(text)
+        except ValueError:
+            log.warning("Fridge photo: unreadable answer %r", text[:200])
+            continue
+        for name in found if isinstance(found, list) else []:
+            name = str(name).strip()
+            if name and name.casefold() not in seen:
+                seen.add(name.casefold())
+                names.append(name)
+    return names, tokens_in, tokens_out

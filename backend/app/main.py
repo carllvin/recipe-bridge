@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -1097,6 +1097,30 @@ async def cook_today_search(have: str = ""):
 async def in_season_now():
     """Local fruit and vegetables in season this month (for the plan area)."""
     return {"month": time.localtime().tm_mon, "produce": seasonal.display_names(seasonal.in_season())}
+
+
+MAX_FRIDGE_PHOTOS = 4
+
+
+@app.post("/api/cook-today/photo")
+async def cook_today_photo(files: list[UploadFile] = File(...)):
+    """Photos of the fridge / pantry -> the ingredients the AI sees in them."""
+    _check_budget()
+    if not llm_provider.is_configured():
+        raise HTTPException(400, llm_provider.missing_key_hint())
+    photos = []
+    for upload in files[:MAX_FRIDGE_PHOTOS]:
+        data = await upload.read(settings.max_upload_mb * 1024 * 1024 + 1)
+        if len(data) > settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"Photo larger than {settings.max_upload_mb} MB.")
+        photos.append(data)
+    try:
+        names, tokens_in, tokens_out = await asyncio.to_thread(cook_today.ingredients_from_photos, photos)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Fridge photo failed: %s", exc)
+        raise HTTPException(502, f"The AI could not read the photo: {exc}")
+    usage_log.record("cook_today_photo", tokens_in, tokens_out)
+    return {"ingredients": names}
 
 
 @app.post("/api/cook-today/plan")

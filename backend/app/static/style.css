@@ -1167,3 +1167,4 @@ a { color: inherit; }
   .ingredient-row.has-original { grid-template-areas: "h name name name" ". orig orig orig" ". amount unit step" ". note note note"; }
   .ingredient-row .ing-original { grid-area: orig; margin-top: -2px; }
 }
+.ct-photo-btn { cursor: pointer; padding-left: 14px; padding-right: 14px; }

@@ -61,6 +61,8 @@
         <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
         <form id="cook-today-form" class="cook-today-form">
           <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
+          <label class="btn secondary ct-photo-btn" data-i18n-title="cookTodayPhotoTitle" title="Photo of the fridge">📷
+            <input id="ct-photo" type="file" accept="image/*" capture="environment" multiple hidden /></label>
           <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
         </form>
         <p class="settings-hint ct-hint">ⓘ <span data-i18n="cookTodayHint">Salt, pepper, oil … count as at home.</span></p>
