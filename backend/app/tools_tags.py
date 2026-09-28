@@ -5,7 +5,7 @@ import logging
 import os
 import uuid
 
-from . import ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
+from . import ignored, json_answer, llm_provider, recipe_scope, tandoor_client, tool_jobs
 from .config import settings, get_language_code
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, fetch_all_recipes_full, find_recipes_by_filter, format_cost_estimate, resolve_name_collisions, validate_actions
@@ -323,13 +323,12 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
 def _complete_json(job, system_prompt, payload, max_tokens):
     """One AI call with a JSON payload; adds token usage to the job and
     returns the parsed JSON answer."""
-    text_out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False), max_tokens=max_tokens)
-    job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
-    job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
-    text_out = text_out.strip().strip("`")
-    if text_out.startswith("json"):
-        text_out = text_out[4:]
-    return json.loads(text_out)
+    def ask(prompt):
+        text_out, usage = llm_provider.complete_tool_text(prompt, json.dumps(payload, ensure_ascii=False), max_tokens=max_tokens)
+        job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
+        job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
+        return text_out, usage
+    return json_answer.complete(ask, system_prompt)[0]
 
 
 def run_season_scan(job_id: str) -> None:

@@ -13,7 +13,7 @@ import json
 import logging
 import uuid
 
-from . import ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
+from . import ignored, json_answer, llm_provider, recipe_scope, tandoor_client, tool_jobs
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import format_cost_estimate, minimal_ref
@@ -116,15 +116,9 @@ def translate_recipe_text(recipe: dict, language: str):
     # Plain replace, not str.format(): the prompt's own {{ ... }} / {# ... #}
     # Jinja examples would otherwise be misread as format fields.
     system_prompt = SYSTEM_PROMPT.replace("{language}", language)
-    text_out, usage = llm_provider.complete_text(
-        system_prompt, json.dumps(payload, ensure_ascii=False), max_tokens=6000
-    )
-    text_out = text_out.strip()
-    if text_out.startswith("```"):
-        text_out = text_out.strip("`")
-        if text_out.startswith("json"):
-            text_out = text_out[4:]
-    result = json.loads(text_out)
+    result, usage = json_answer.complete(
+        lambda prompt: llm_provider.complete_text(prompt, json.dumps(payload, ensure_ascii=False), max_tokens=6000),
+        system_prompt)
 
     steps = result.get("steps", [])
     if len(steps) != len(payload["steps"]):
