@@ -1161,3 +1161,9 @@ a { color: inherit; }
 @media (max-width: 600px) {
   .ingredient-row .ing-unit-wrap { grid-area: unit; }
 }
+.ingredient-row .ing-original { grid-column: 2 / -1; font-size: 0.75rem; color: #8f9689; margin-top: -6px; }
+.tag-original { font-size: 0.72rem; color: #8f9689; }
+@media (max-width: 600px) {
+  .ingredient-row.has-original { grid-template-areas: "h name name name" ". orig orig orig" ". amount unit step" ". note note note"; }
+  .ingredient-row .ing-original { grid-area: orig; margin-top: -2px; }
+}

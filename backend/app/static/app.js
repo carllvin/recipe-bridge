@@ -831,6 +831,15 @@ function matchBadgeHtml(ing) {
   return '';
 }
 
+// What the AI read before the match with Tandoor ("Zwiebeln" -> "Zwiebel"),
+// shown under the ingredient.
+function originalLineHtml(ing) {
+  const parts = [];
+  if (ing.tandoor_match === 'matched' && ing.original_name && ing.original_name !== ing.name) parts.push(ing.original_name);
+  if (ing.unit_match === 'matched' && ing.original_unit && ing.original_unit !== ing.unit) parts.push(`${t('placeholderUnit')}: ${ing.original_unit}`);
+  return parts.length ? `<div class="ing-original">${escapeHtml(tf('matchOriginalLine', { original: parts.join(' · ') }))}</div>` : '';
+}
+
 function unitBadgeHtml(ing) {
   if (!ing.unit) return '';
   if (ing.unit_match === 'matched') {
@@ -860,7 +869,8 @@ function tagChipHtml(r, tag, i) {
   const original = (r.tag_original || {})[tag];
   const marker = status === 'new' ? `<span class="tag-new">${t('matchNewLabel')}</span>`
     : status === 'matched' ? `<button type="button" class="tag-revert" data-idx="${i}" title="${escapeHtml(tf('tagMatchedTitle', { original: original || '' }))}">↺</button>` : '';
-  return `<span class="tag ${status || ''}">${escapeHtml(tag)}${marker}<button type="button" class="tag-remove" data-idx="${i}" aria-label="${escapeHtml(t('tagRemove'))}">×</button></span>`;
+  const was = status === 'matched' && original ? `<span class="tag-original">(${escapeHtml(original)})</span>` : '';
+  return `<span class="tag ${status || ''}">${escapeHtml(tag)}${was}${marker}<button type="button" class="tag-remove" data-idx="${i}" aria-label="${escapeHtml(t('tagRemove'))}">×</button></span>`;
 }
 
 function renderDetail(r) {
@@ -869,7 +879,7 @@ function renderDetail(r) {
   const ingredientsHtml = r.ingredients.map((ing, i) => {
     const stepOptions = r.steps.map((s, si) => `<option value="${si}" ${((ing.step_index ?? 0) === si) ? 'selected' : ''}>${si + 1}</option>`).join('');
     return `
-    <div class="ingredient-row" data-idx="${i}" draggable="true">
+    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}" draggable="true">
       <span class="ing-drag-handle" title="${t('dragToReorder')}">⠿</span>
       <input class="ing-amount" value="${ing.amount ?? ''}" placeholder="${t('placeholderAmount')}" />
       <div class="ing-unit-wrap">
@@ -881,6 +891,7 @@ function renderDetail(r) {
         ${matchBadgeHtml(ing)}
       </div>
       <select class="ing-step" title="${t('fieldStepAssignment')}">${stepOptions || '<option value="0">1</option>'}</select>
+      ${originalLineHtml(ing)}
       <input class="ing-note" value="${escapeHtml(ing.note ?? '')}" placeholder="${t('placeholderNote')}" />
     </div>
   `;
