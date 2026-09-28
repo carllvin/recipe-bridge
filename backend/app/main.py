@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -237,6 +237,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
     finally:
         if doc_type != "links":  # _run_link_list records its own usage
             usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+            notify.import_finished(job)
         jobs.save_job(job)
 
 
@@ -300,6 +301,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.error = str(exc)
     finally:
         usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        notify.import_finished(job)
         jobs.save_job(job)
 
 
@@ -555,6 +557,11 @@ async def put_app_settings(body: dict = Body(...)):
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, f"Invalid settings: {exc}")
     return await get_app_settings()
+
+
+@app.post("/api/notify/test")
+async def notify_test():
+    return await asyncio.to_thread(notify.test)
 
 
 @app.post("/api/maintenance/run")
@@ -1381,6 +1388,7 @@ async def get_config():
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "image_gen_available": image_gen.is_configured(),
         "auth_enabled": auth.enabled(),
+        "notify_channels": notify.channels(),
         "watch_dir": settings.watch_dir if settings.watch_dir and os.path.isdir(settings.watch_dir) else None,
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.

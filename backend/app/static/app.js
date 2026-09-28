@@ -1752,6 +1752,7 @@ async function loadSettings() {
     el('set-budget-block').checked = data.budget.block_manual;
     renderBudget(data.budget_status);
     renderMaintStatus(data.maintenance_status);
+    renderNotifyStatus();
     clearTimeout(loadSettings.timer);
     if (data.maintenance_status.running && currentArea === 'maintain') loadSettings.timer = setTimeout(loadSettings, 5000);
   } catch (e) { /* optional panel */ }
@@ -1771,6 +1772,25 @@ el('settings-save').addEventListener('click', async () => {
   el('settings-saved').textContent = res.ok ? t('settingsSaved') : `${t('toolStatusError')}: HTTP ${res.status}`;
   setTimeout(() => { el('settings-saved').textContent = ''; }, 3000);
   loadSettings();
+});
+
+function renderNotifyStatus() {
+  const channels = APP_CONFIG.notify_channels || [];
+  el('notify-status').textContent = channels.length ? tf('notifyOn', { channels: channels.join(', ') }) : t('notifyOff');
+  el('notify-test').classList.toggle('hidden', !channels.length);
+}
+
+el('notify-test').addEventListener('click', async () => {
+  el('notify-test').disabled = true;
+  el('notify-result').textContent = '';
+  try {
+    const data = await (await fetch('/api/notify/test', { method: 'POST' })).json();
+    el('notify-result').textContent = data.errors.length ? data.errors.join(' · ') : tf('notifySent', { channels: data.sent.join(', ') });
+  } catch (e) {
+    el('notify-result').textContent = e.message;
+  } finally {
+    el('notify-test').disabled = false;
+  }
 });
 
 el('set-maint-run').addEventListener('click', async () => {

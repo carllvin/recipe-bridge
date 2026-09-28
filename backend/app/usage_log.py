@@ -30,6 +30,12 @@ def record(source: str, input_tokens: int, output_tokens: int) -> None:
                 f.write(line + "\n")
     except OSError as exc:
         log.warning("Could not record token usage: %s", exc)
+        return
+    try:
+        from . import notify  # late import: notify needs config only
+        notify.budget_changed(budget_status())
+    except Exception as exc:  # noqa: BLE001 - a notification must never break recording
+        log.warning("Budget notification failed: %s", exc)
 
 
 def summary(days: int = 30) -> dict:

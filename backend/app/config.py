@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     watch_dir: str = ""
     watch_interval_seconds: int = 30
 
+    # Push notifications (see notify.py) - ntfy topic URL (e.g. https://ntfy.sh/my-secret-topic) and/or Telegram bot
+    notify_ntfy_url: str = ""
+    notify_ntfy_token: str = ""          # only for a protected ntfy topic
+    notify_telegram_token: str = ""
+    notify_telegram_chat_id: str = ""
+    app_url: str = ""                    # public address of the helper - notifications link to it
+
     # Password for the web interface; empty = no password (e.g. only reachable in your home network)
     app_password: str = ""
 

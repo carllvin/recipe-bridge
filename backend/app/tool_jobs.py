@@ -92,6 +92,11 @@ def _log_usage(job: ToolJob) -> None:
 def save_tool_job(job: ToolJob) -> None:
     if job.status != "scanning":
         _log_usage(job)
+    if job.status == "ready" and job.meta.get("auto") and not job.meta.get("notified"):
+        # an automatic run (maintenance, new recipes, after an import) is done
+        job.meta["notified"] = True
+        from . import notify  # late import: notify needs config only
+        notify.suggestions_ready(sum(1 for s in job.suggestions if s.status == "pending"))
     with _lock:
         _tool_jobs[job.id] = job
     # While scanning, progress is saved every few items - only write to
