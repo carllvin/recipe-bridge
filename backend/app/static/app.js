@@ -101,6 +101,11 @@ function isMealie() {
   return !!APP_CONFIG.recipe_manager && APP_CONFIG.recipe_manager !== 'Tandoor';
 }
 
+// Tandoor's ids are numbers, Mealie's uuids (and its meal types words).
+function idValue(v) {
+  return /^\d+$/.test(String(v)) ? Number(v) : v;
+}
+
 // Link to a recipe imported into Tandoor (id) or Mealie (slug) - null without one.
 function importedRecipeUrl(id) {
   return id && APP_CONFIG.recipe_url_base ? `${APP_CONFIG.recipe_url_base}${id}` : null;
@@ -2228,7 +2233,7 @@ async function loadCooked() {
         row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
         const res2 = await fetch('/api/cooked', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: Number(row.dataset.plan), recipe_id: Number(row.dataset.recipe), date: row.dataset.date,
+          body: JSON.stringify({ plan_id: idValue(row.dataset.plan), recipe_id: idValue(row.dataset.recipe), date: row.dataset.date,
             servings: Number(row.dataset.servings), rating }),
         });
         if (res2.ok) {
@@ -2264,7 +2269,8 @@ async function searchCookToday() {
     }
     el('ct-status').textContent = data.results.length ? '' : t('cookTodayNone');
     el('ct-results').innerHTML = data.results.map((r) => {
-      const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
+      const link = isMealie() ? importedRecipeUrl(r.slug)
+        : (APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null);
       const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
       // What's there is what you typed (and the score says how much) - so
       // only what's missing is spelled out.
@@ -2288,8 +2294,8 @@ async function searchCookToday() {
       const res = await fetch('/api/cook-today/plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipe: { id: Number(b.dataset.id), name: b.dataset.name },
-          meal_type: { id: Number(meal.value), name: meal.options[meal.selectedIndex].text },
+          recipe: { id: idValue(b.dataset.id), name: b.dataset.name },
+          meal_type: { id: idValue(meal.value), name: meal.options[meal.selectedIndex].text },
           add_to_shopping: el('mp-shopping').checked,
         }),
       });
@@ -2382,7 +2388,7 @@ el('meal-plan-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({
         start_date: el('mp-start').value,
         days: Number(el('mp-days').value),
-        meal_type: { id: Number(select.value), name: select.options[select.selectedIndex]?.textContent || '' },
+        meal_type: { id: idValue(select.value), name: select.options[select.selectedIndex]?.textContent || '' },
         wishes: el('mp-wishes').value,
         add_to_shopping: el('mp-shopping').checked,
       }),
@@ -2864,11 +2870,14 @@ if ('serviceWorker' in navigator) {
 (async function init() {
   await initI18n();
   if (isMealie()) {
-    // Planning works on Tandoor's data only; Maintain shows the tiles that
-    // also work with Mealie (APP_CONFIG.health_metrics).
-    document.querySelectorAll('.nav-btn[data-area="plan"]').forEach((b) => b.classList.add('hidden'));
+    // Maintain shows the tiles that also work with Mealie
+    // (APP_CONFIG.health_metrics); planning uses Mealie's meal plan.
     document.querySelectorAll('.tandoor-only').forEach((elm) => elm.classList.add('hidden'));
     document.querySelector('#settings-card > summary h3').textContent = t('settingsTitleMealie');
+    document.querySelectorAll('[data-i18n="cookedHint"]').forEach((elm) => {
+      elm.setAttribute('data-i18n', 'cookedHintMealie');
+      elm.textContent = t('cookedHintMealie');
+    });
   }
   await tryRestoreJobFromUrl();
   showArea('import');

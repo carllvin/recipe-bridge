@@ -11,8 +11,8 @@ functions the import uses from tandoor_client, for Mealie's REST API:
   filters, e.g. on a category);
 - the photo goes to PUT /api/recipes/<slug>/image.
 
-Only the import works with Mealie - the maintenance and planning tools are
-built on Tandoor's data model (nutrition per ingredient, tag tree, ...)."""
+Maintenance (mealie_maintenance) and planning (mealie_plan) build on this
+client for the parts that exist in Mealie."""
 from __future__ import annotations
 
 import logging

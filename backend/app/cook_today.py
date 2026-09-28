@@ -15,7 +15,7 @@ import re
 import threading
 import time
 
-from . import seasonal, tandoor_client
+from . import mealie_plan, seasonal, tandoor_client, target
 from .config import settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -56,7 +56,7 @@ def build_index(recipes) -> list[dict]:
                     continue
                 foods[food["id"]] = [food.get("name", ""), food.get("plural_name") or ""]
         index.append({
-            "id": r["id"], "name": r.get("name", ""), "foods": list(foods.values()),
+            "id": r["id"], "slug": r.get("slug"), "name": r.get("name", ""), "foods": list(foods.values()),
             "minutes": (r.get("working_time") or 0) + (r.get("waiting_time") or 0),
             "rating": r.get("rating"), "last_cooked": r.get("last_cooked"),
         })
@@ -95,6 +95,11 @@ def _load() -> dict | None:
 
 def _rebuild() -> None:
     try:
+        if target.is_mealie():
+            from .mealie_maintenance import fetch_recipes_full
+            with target.client().get_client() as client:
+                save_index([mealie_plan.as_tandoor(r) for r in fetch_recipes_full(client)])
+            return
         with tandoor_client.get_client() as client:
             save_index(fetch_all_recipes_full(client))
     except Exception:  # noqa: BLE001
@@ -173,7 +178,7 @@ def suggest(have_text: str, limit: int = 20) -> dict:
         if not matched:
             continue
         season = seasonal.display_names(seasonal.seasonal_in(n for names in r["foods"] for n in names))
-        results.append({"id": r["id"], "name": r["name"], "minutes": r["minutes"] or None, "rating": r["rating"],
+        results.append({"id": r["id"], "slug": r.get("slug"), "name": r["name"], "minutes": r["minutes"] or None, "rating": r["rating"],
                         "matched": matched, "missing": missing, "needed": needed, "season": season})
     # Fewest missing first, then most of what you have used, then seasonal
     # ingredients, then rating.

@@ -1,7 +1,6 @@
 """Which recipe manager the import goes to: Tandoor (default) or Mealie
-(RECIPE_MANAGER=mealie). Only the import path asks this module for its
-client; the maintenance and planning tools always talk to Tandoor and are
-hidden with Mealie."""
+(RECIPE_MANAGER=mealie). The import, planning and the Mealie maintenance
+tiles ask this module for their client."""
 from __future__ import annotations
 
 from . import mealie_client, tandoor_client, tools_ingredients

@@ -14,7 +14,7 @@ import logging
 import os
 import threading
 
-from . import tandoor_client
+from . import mealie_plan, tandoor_client, target
 from .config import settings
 
 log = logging.getLogger("tandoor-helper")
@@ -64,6 +64,12 @@ def pending() -> list[dict]:
     today = dt.date.today()
     start = today - dt.timedelta(days=LOOKBACK_DAYS)
     answered = _load()
+    if target.is_mealie():
+        with target.client().get_client() as client:
+            entries = mealie_plan.plan_entries(client, start, today)
+        logs = [{"recipe": e["recipe"]["id"], "created_at": e["recipe"]["last_made"]}
+                for e in entries if e.get("recipe") and e["recipe"].get("last_made")]
+        return _open(entries, logs, answered, start, today)
     with tandoor_client.get_client() as client:
         entries = _results(client.get("/meal-plan/", params={
             "from_date": start.isoformat(), "to_date": today.isoformat(), "page_size": 200}))
@@ -72,6 +78,12 @@ def pending() -> list[dict]:
         except Exception as exc:  # noqa: BLE001
             log.info("Could not read cook logs (%s) - asking about every planned meal", exc)
             logs = []
+    return _open(entries, logs, answered, start, today)
+
+
+def _open(entries, logs, answered, start, today) -> list[dict]:
+    """Plan entries still to ask about: in the window, with a recipe, not
+    answered here and not logged on or after that day."""
     logged = {}
     for entry in logs:
         rid = (entry.get("recipe") or {}).get("id") if isinstance(entry.get("recipe"), dict) else entry.get("recipe")
@@ -91,9 +103,12 @@ def pending() -> list[dict]:
     return result
 
 
-def answer(plan_id, recipe_id: int, date: str, servings, rating) -> None:
+def answer(plan_id, recipe_id, date: str, servings, rating) -> None:
     """rating 1-5 = cooked (creates the cook log), None = wasn't cooked."""
-    if rating is not None:
+    if rating is not None and target.is_mealie():
+        with target.client().get_client() as client:
+            mealie_plan.rate(client, str(recipe_id), date, rating)
+    elif rating is not None:
         payload = {"recipe": recipe_id, "servings": servings or 1, "rating": max(1, min(5, int(rating))),
                    "created_at": f"{date}T19:00:00"}
         with tandoor_client.get_client() as client:

@@ -3,7 +3,7 @@
 and days that already have a plan are left out). Each day is a suggestion;
 applying it creates the entry in Tandoor's meal plan and - if wanted - puts
 the recipe's ingredients on Tandoor's shopping list (which groups them by
-the supermarket categories).
+the supermarket categories). With Mealie the same via mealie_plan.
 
 Uses the cheaper tools model: the input is a compact one-line-per-recipe
 list, the answer one line per day."""
@@ -14,7 +14,7 @@ import json
 import logging
 import uuid
 
-from . import cook_today, llm_provider, seasonal, tandoor_client, tool_jobs
+from . import cook_today, llm_provider, mealie_plan, seasonal, tandoor_client, target, tool_jobs
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
@@ -62,7 +62,10 @@ def _fetch_all(client, endpoint, params=None) -> list[dict]:
 
 
 def options() -> dict:
-    """Meal types for the form (breakfast, dinner, ... as set up in Tandoor)."""
+    """Meal types for the form (breakfast, dinner, ... as set up in Tandoor;
+    Mealie's are fixed)."""
+    if target.is_mealie():
+        return {"meal_types": mealie_plan.meal_types()}
     with tandoor_client.get_client() as client:
         types = _fetch_all(client, "meal-type")
     return {"meal_types": [{"id": t["id"], "name": t["name"]} for t in types]}
@@ -83,7 +86,8 @@ def _candidates(client) -> list[dict]:
     """Recipes that may be planned: not cooked in the last two weeks, best
     rated first, capped to keep the prompt small."""
     cutoff = dt.date.today() - dt.timedelta(days=RECENTLY_COOKED_DAYS)
-    recipes = [r for r in _fetch_all(client, "recipe")
+    everything = mealie_plan.fetch_recipes(client) if target.is_mealie() else _fetch_all(client, "recipe")
+    recipes = [r for r in everything
                if not (_date(r.get("last_cooked")) and _date(r.get("last_cooked")) >= cutoff)]
     # Well rated and long not cooked first (unrated counts as average); the
     # AI weighs it again, this only decides who makes the capped list.
@@ -165,12 +169,13 @@ def run_scan(job_id: str) -> None:
         days = [start + dt.timedelta(days=i) for i in range(max(1, min(int(params.get("days") or 7), 14)))]
         meal_type = params["meal_type"]
 
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             job.progress_label = "Loading recipes and the existing meal plan..."
             tool_jobs.save_tool_job(job)
             candidates = _candidates(client)
             try:
-                planned = _fetch_all(client, "meal-plan", {"from_date": days[0].isoformat(), "to_date": days[-1].isoformat()})
+                planned = (mealie_plan.plan_entries(client, days[0], days[-1]) if target.is_mealie() else
+                           _fetch_all(client, "meal-plan", {"from_date": days[0].isoformat(), "to_date": days[-1].isoformat()}))
             except Exception as exc:  # noqa: BLE001
                 log.info("Could not read the existing meal plan (%s) - not skipping any days", exc)
                 planned = []
@@ -211,7 +216,7 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
     if any(s.status == "applied" for s in current):
         raise tandoor_client.TandoorError("That day is already in the meal plan.")
     exclude = {s.detail["recipe"]["id"] for s in job.suggestions if s.status != "skipped"}
-    with tandoor_client.get_client() as client:
+    with target.client().get_client() as client:
         candidates = _candidates(client)
     picked = _pick(job, candidates, [day], job.meta.get("params", {}), exclude_ids=exclude)
     if not picked:
@@ -225,7 +230,10 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
 def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
     """Creates one entry in Tandoor's meal plan with the recipe's own
     servings - so the shopping list gets exactly the amounts written in the
-    recipe. Returns the created entry."""
+    recipe. Returns the created entry. With Mealie: its meal plan and
+    shopping list (mealie_plan)."""
+    if target.is_mealie():
+        return mealie_plan.create_entry(client, recipe, date, meal_type, add_to_shopping)
     resp = client.get(f"/recipe/{recipe['id']}/")
     resp.raise_for_status()
     payload = {
@@ -263,7 +271,7 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
 
     d = suggestion.detail
     try:
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             create_plan_entry(client, d["recipe"], d["date"], d["meal_type"], d["add_to_shopping"])
         suggestion.status = "applied"
     except Exception as exc:  # noqa: BLE001

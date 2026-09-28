@@ -1138,13 +1138,18 @@ async def cook_today_plan(body: dict = Body(...)):
     date = body.get("date") or time.strftime("%Y-%m-%d")
 
     def create():
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             return tools_meal_plan.create_plan_entry(client, recipe, date, meal_type, bool(body.get("add_to_shopping")))
     try:
         await asyncio.to_thread(create)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc))
     return {"ok": True, "date": date}
+
+
+def _recipe_id(value):
+    """Tandoor's recipe ids are numbers, Mealie's uuids."""
+    return str(value) if target.is_mealie() else int(value)
 
 
 @app.get("/api/cooked/pending")
@@ -1159,7 +1164,7 @@ async def cooked_pending():
 async def cooked_answer(body: dict = Body(...)):
     """{"plan_id", "recipe_id", "date", "servings", "rating": 1-5 | null (not cooked)}"""
     try:
-        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], int(body["recipe_id"]), body["date"],
+        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], _recipe_id(body["recipe_id"]), body["date"],
                                 body.get("servings"), body.get("rating"))
     except KeyError as exc:
         raise HTTPException(400, f"Missing field {exc}")

@@ -84,6 +84,11 @@ def ingredient_lines(recipe) -> list[str]:
 def compute(client) -> tuple[dict, dict]:
     """(metrics, items per metric) for the health overview."""
     recipes = fetch_recipes_full(client)
+    try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
+        from . import cook_today, mealie_plan
+        cook_today.save_index([mealie_plan.as_tandoor(r) for r in recipes])
+    except Exception:  # noqa: BLE001
+        log.exception("Saving the recipe index failed")
     lists = {entity: mealie_client.fetch_all_items(client, entity) for entity in ENTITY_PATHS}
     used = used_ids(recipes)
 
