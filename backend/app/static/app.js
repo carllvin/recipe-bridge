@@ -700,6 +700,7 @@ el('undo-all-btn').addEventListener('click', async () => {
       throw new Error(err.detail || t('undoAllFailed'));
     }
     const data = await res.json();
+    if (state.jobId !== jobId) return;  // left the review meanwhile - the import still ran
     data.results.forEach((result) => {
       const r = findRecipe(result.id);
       if (!r) return;
@@ -1102,8 +1103,9 @@ function numOrNull(v) {
 let patchTimer = null;
 function patchRecipe(id, partial) {
   clearTimeout(patchTimer);
+  const jobId = state.jobId;  // still the right job if the review is left meanwhile
   patchTimer = setTimeout(() => {
-    fetch(`/api/jobs/${state.jobId}/recipes/${id}`, {
+    fetch(`/api/jobs/${jobId}/recipes/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(partial),
@@ -1130,14 +1132,16 @@ async function runImport(recipeIds) {
   renderRecipeList();
 
   const cookbookName = el('cookbook-name-input').value.trim();
+  const jobId = state.jobId;
 
   try {
-    const res = await fetch(`/api/jobs/${state.jobId}/import`, {
+    const res = await fetch(`/api/jobs/${jobId}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipe_ids: recipeIds, cookbook_name: cookbookName }),
     });
     const data = await res.json();
+    if (state.jobId !== jobId) return;  // left the review meanwhile - the import still ran
     data.results.forEach((result) => {
       const r = findRecipe(result.id);
       if (!r) return;
@@ -1152,8 +1156,10 @@ async function runImport(recipeIds) {
     importBtn.disabled = false;
     retryBtn.disabled = false;
     importBtn.textContent = originalImportLabel;
-    renderRecipeList();
-    if (state.activeRecipeId) renderDetail(findRecipe(state.activeRecipeId));
+    if (state.jobId === jobId) {
+      renderRecipeList();
+      if (state.activeRecipeId) renderDetail(findRecipe(state.activeRecipeId));
+    }
   }
 }
 
@@ -1250,9 +1256,7 @@ function goHome() {
     showArea('import');  // back to whatever the import area showed (upload or review)
     return;
   }
-  if (state.jobId) {
-    if (!confirm(t('confirmGoHome'))) return;
-  }
+  // Edits are saved as you type, and the import stays under "recent imports".
   el('success-modal').classList.add('hidden');
   resetToUpload();
 }
@@ -1278,7 +1282,21 @@ function showArea(area) {
   window.scrollTo(0, 0);
 }
 
-document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => showArea(b.dataset.area)));
+// A menu item always opens the start page of its area - also when you are
+// already there (e.g. inside a tool run or the review of an import).
+function openAreaStart(area) {
+  if (area === 'import') {
+    el('success-modal').classList.add('hidden');
+    if (state.jobId || el('upload-screen').classList.contains('hidden')) { resetToUpload(); return; }
+  }
+  if (area === 'maintain') {
+    closeToolRun();
+    closeHealthDetail();
+  }
+  showArea(area);
+}
+
+document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
   new_recipes: 'toolNewRecipesTitle',
@@ -2329,13 +2347,17 @@ async function loadNewRecipesStatus() {
   }
 }
 
-el('tools-back-btn').addEventListener('click', () => {
+function closeToolRun() {
   clearTimeout(toolsState.pollTimer);
   toolsState.jobId = null;
   toolsState.job = null;
   toolsState.selected.clear();
   el('tools-run-view').classList.add('hidden');
   el('tools-cards-view').classList.remove('hidden');
+}
+
+el('tools-back-btn').addEventListener('click', () => {
+  closeToolRun();
   loadNewRecipesStatus();
   loadHealth();
 });
