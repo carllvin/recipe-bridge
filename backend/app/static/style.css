@@ -1125,3 +1125,6 @@ a { color: inherit; }
 .settings-metrics h5 { margin: 8px 0 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8f9689; }
 .settings-card { display: block; }
 .more-way p.more-way-warn { color: #e0a99f; }
+.smart-depth { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #8f9689; }
+.smart-depth select { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius);
+  color: var(--paper); padding: 6px 8px; font-size: 0.85rem; color-scheme: dark; }

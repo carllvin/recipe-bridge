@@ -228,6 +228,15 @@
         <div class="smart-actions">
           <button id="smart-import" class="btn" type="submit" disabled data-i18n="smartImport">Import</button>
           <button id="smart-scan" class="btn secondary hidden" type="button" data-i18n="smartScan">🌐 Scan the whole website</button>
+          <label id="smart-depth-wrap" class="smart-depth hidden">
+            <span data-i18n="scanDepth">Depth</span>
+            <select id="smart-depth">
+              <option value="1" data-i18n="scanDepth1">1 level</option>
+              <option value="2" data-i18n="scanDepth2">2 levels</option>
+              <option value="3" data-i18n="scanDepth3">3 levels</option>
+              <option value="4" data-i18n="scanDepth4">4 levels</option>
+            </select>
+          </label>
         </div>
         <p id="smart-hint" class="smart-hint"></p>
       </form>

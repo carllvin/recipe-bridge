@@ -56,8 +56,8 @@ def web(monkeypatch):
     return requested
 
 
-def run(url):
-    scan_id = site_scan.start(url)
+def run(url, depth=site_scan.DEFAULT_DEPTH):
+    scan_id = site_scan.start(url, depth)
     for _ in range(200):
         state = site_scan.get(scan_id)
         if state["status"] != "scanning":
@@ -86,3 +86,17 @@ def test_category_page_follows_links_and_pagination(web):
 def test_invalid_url_is_rejected():
     with pytest.raises(ValueError):
         site_scan.start("blog.example")
+
+
+def test_depth_limits_how_far_links_are_followed(web):
+    # Linsensuppe is only linked from page 2 of the category - two levels away.
+    shallow = run("https://blog.example/kategorie/suppen/", depth=1)
+    assert [f["title"] for f in shallow["found"]] == ["Kürbissuppe"]
+    assert shallow["depth"] == 1 and shallow["max_check"] == site_scan.MAX_CHECK_BY_DEPTH[1]
+    deep = run("https://blog.example/kategorie/suppen/", depth=3)
+    assert sorted(f["title"] for f in deep["found"]) == ["Kürbissuppe", "Linsensuppe"]
+
+
+def test_depth_out_of_range_is_rejected():
+    with pytest.raises(ValueError):
+        site_scan.start("https://blog.example/", depth=9)

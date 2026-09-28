@@ -493,7 +493,7 @@ async def import_links(body: dict = Body(...)):
 async def start_site_scan(body: dict = Body(...)):
     """Scans a website for recipe pages (no AI) - poll GET /api/scan/{id}."""
     try:
-        return {"scan_id": site_scan.start((body.get("url") or "").strip())}
+        return {"scan_id": site_scan.start((body.get("url") or "").strip(), body.get("depth") or site_scan.DEFAULT_DEPTH)}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 

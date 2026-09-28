@@ -338,7 +338,8 @@ function updateSmartForm() {
   el('smart-import').disabled = !mode;
   el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
   el('smart-scan').classList.toggle('hidden', mode !== 'url');
-  el('smart-hint').textContent = mode === 'url' ? t('smartHintUrl') : mode === 'text' ? t('smartHintText') : '';
+  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url');
+  el('smart-hint').textContent = mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
 function clearSmartForm() {
@@ -450,7 +451,9 @@ el('smart-scan').addEventListener('click', async () => {
   if (mode !== 'url') return;
   el('upload-error').classList.add('hidden');
   try {
-    const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const depth = Number(el('smart-depth').value) || 2;
+    try { localStorage.setItem('th.scanDepth', String(depth)); } catch (e) { /* not available */ }
+    const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, depth }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     openPickList('scan', tf('pickTitleScan', { host: hostOf(url) }), [], hostOf(url));
@@ -2659,6 +2662,7 @@ if ('serviceWorker' in navigator) {
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
+  try { el('smart-depth').value = localStorage.getItem('th.scanDepth') || '2'; } catch (e) { /* default */ }
   updateSmartForm();
   // Installing (and so the share menu) needs HTTPS or localhost.
   el('more-way-insecure').classList.toggle('hidden', window.isSecureContext);
