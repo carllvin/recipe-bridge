@@ -449,13 +449,17 @@ el('pick-import').addEventListener('click', () => {
 });
 
 // Website scan: runs on the server (no AI); results show up while it's running.
-el('smart-scan').addEventListener('click', async () => {
+el('smart-scan').addEventListener('click', () => {
   const { mode, value: url } = smartMode();
   if (mode !== 'url') return;
+  const depth = Number(el('smart-depth').value) || 2;
+  try { localStorage.setItem('th.scanDepth', String(depth)); } catch (e) { /* not available */ }
+  startSiteScan(url, depth);
+});
+
+async function startSiteScan(url, depth) {
   el('upload-error').classList.add('hidden');
   try {
-    const depth = Number(el('smart-depth').value) || 2;
-    try { localStorage.setItem('th.scanDepth', String(depth)); } catch (e) { /* not available */ }
     const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, depth }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -465,7 +469,7 @@ el('smart-scan').addEventListener('click', async () => {
   } catch (err) {
     showUploadError(err.message);
   }
-});
+}
 
 async function pollScan() {
   const scanId = pickState.scanId;
@@ -1218,8 +1222,37 @@ function showImportSummary(results, cookbookName, cookbookWarning, postProcessin
   }
   body.textContent = lines.join('\n');
 
+  // A recipe from a website: offer to look for more on that site.
+  const site = ok > 0 ? importedSite() : null;
+  const scanBtn = el('modal-scan-btn');
+  scanBtn.classList.toggle('hidden', !site);
+  if (site) {
+    scanBtn.textContent = tf('modalScanSite', { host: hostOf(site) });
+    scanBtn.dataset.url = site;
+  }
+
   el('success-modal').classList.remove('hidden');
 }
+
+// The homepage of the website all recipes of this import came from (a
+// single link, or links from one site) - null for files or several sites.
+function importedSite() {
+  const recipes = (state.job && state.job.recipes) || [];
+  const urls = recipes.map((r) => r.source_url);
+  if (!urls.length || urls.some((u) => !u)) return null;
+  const origins = new Set(urls.map((u) => { try { return new URL(u).origin; } catch (e) { return null; } }));
+  if (origins.size !== 1 || origins.has(null)) return null;
+  return `${[...origins][0]}/`;
+}
+
+el('modal-scan-btn').addEventListener('click', () => {
+  const url = el('modal-scan-btn').dataset.url;
+  el('success-modal').classList.add('hidden');
+  resetToUpload();
+  let depth = 2;
+  try { depth = Number(localStorage.getItem('th.scanDepth')) || 2; } catch (e) { /* default */ }
+  startSiteScan(url, depth);
+});
 
 el('modal-close-btn').addEventListener('click', () => {
   el('success-modal').classList.add('hidden');
