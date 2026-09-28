@@ -534,7 +534,16 @@ a { color: inherit; }
   flex: 1;
   min-height: 54px;
   resize: vertical;
+  background: rgba(239,233,218,0.05);
+  border: 1px solid #2a2f2a;
+  border-radius: var(--radius);
+  color: var(--paper);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
+.step-row textarea:focus { outline: none; border-color: var(--gold-dim); }
 
 .image-picker {
   display: flex;
@@ -750,11 +759,35 @@ a { color: inherit; }
 .tool-suggestion-row.error { border-color: #b95555; }
 .tool-suggestion-row .suggestion-status-label { font-size: 0.78rem; color: #8f9689; }
 
+/* Phones: an ingredient gets the full width for its name, amount / unit /
+   step below it, then the note. */
+@media (max-width: 600px) {
+  .ingredient-row {
+    grid-template-columns: 18px 72px 1fr 60px;
+    grid-template-areas: "h name name name" ". amount unit step" ". note note note";
+    gap: 6px 8px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #2a2f2a;
+  }
+  .ingredient-row .ing-drag-handle { grid-area: h; }
+  .ingredient-row .ing-name-wrap { grid-area: name; }
+  .ingredient-row .ing-amount { grid-area: amount; min-width: 0; }
+  .ingredient-row .ing-unit { grid-area: unit; min-width: 0; }
+  .ingredient-row .ing-step { grid-area: step; }
+  .ingredient-row .ing-note { grid-area: note; }
+  .ingredient-row .ing-name { font-weight: 600; }
+}
+
+/* Phones: one column that scrolls as a whole - cookbook name, the recipe
+   list (its own short scroll area), the selected recipe, and the import bar
+   sticking to the bottom. */
 @media (max-width: 800px) {
-  .review-screen { grid-template-columns: 1fr; }
-  .recipe-list { max-height: 40vh; }
-  .cookbook-bar { flex-wrap: wrap; }
+  .review-screen { display: flex; flex-direction: column; overflow-y: auto; }
+  .recipe-list { flex: none; max-height: 34vh; border-right: none; border-bottom: 1px solid #3a3f3a; }
+  .recipe-list-kbd-hint { display: none; }
+  .recipe-detail { flex: none; overflow: visible; padding: 20px 16px 24px; }
+  .cookbook-bar { flex-wrap: wrap; padding: 12px 16px; gap: 6px 12px; }
   .cookbook-bar input { width: 100%; max-width: none; }
+  .action-bar { position: sticky; bottom: 0; z-index: 5; padding: 10px 16px; gap: 10px; flex-wrap: wrap; }
+  .action-bar-buttons { flex-wrap: wrap; justify-content: flex-end; }
 }
 
 .tools-bulk-bar {
@@ -826,7 +859,10 @@ a { color: inherit; }
 .spinner.small { width: 14px; height: 14px; border-width: 2px; display: inline-block; vertical-align: middle; }
 
 @media (max-width: 800px) {
-  .topbar { padding: 14px 16px; }
+  .topbar { padding: 14px 16px; align-items: center; }
+  .brand { white-space: nowrap; }
+  #topbar-badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+  .tandoor-badge, .usage-badge { font-size: 0.7rem; padding: 3px 8px; white-space: nowrap; }
   .main-nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; margin: 0;
     justify-content: space-around; padding: 6px 4px calc(6px + env(safe-area-inset-bottom));

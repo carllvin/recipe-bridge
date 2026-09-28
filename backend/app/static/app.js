@@ -601,6 +601,8 @@ function hostOf(url) {
 }
 
 function showReview() {
+  // also when a finished import is opened straight from the address (?job=)
+  el('upload-screen').classList.add('hidden');
   el('processing-screen').classList.add('hidden');
   el('review-screen').classList.remove('hidden');
   el('action-bar').classList.remove('hidden');
@@ -661,6 +663,10 @@ function renderRecipeList() {
         return;
       }
       selectRecipe(r.id);
+      // phones: the recipe shows below the list - bring it into view
+      if (window.matchMedia('(max-width: 800px)').matches) {
+        el('recipe-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
     item.querySelector('.select-cb').addEventListener('click', (e) => {
       e.stopPropagation();
