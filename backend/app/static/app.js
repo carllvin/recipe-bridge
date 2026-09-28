@@ -92,10 +92,15 @@ async function checkTandoor() {
 }
 
 el('tandoor-badge').addEventListener('click', () => {
-  if (APP_CONFIG.tandoor_url && el('tandoor-badge').classList.contains('ok')) {
-    window.open(APP_CONFIG.tandoor_url, '_blank', 'noopener');
+  if (APP_CONFIG.manager_url && el('tandoor-badge').classList.contains('ok')) {
+    window.open(APP_CONFIG.manager_url, '_blank', 'noopener');
   }
 });
+
+// Link to a recipe imported into Tandoor (id) or Mealie (slug) - null without one.
+function importedRecipeUrl(id) {
+  return id && APP_CONFIG.recipe_url_base ? `${APP_CONFIG.recipe_url_base}${id}` : null;
+}
 
 // ---------- Token usage badge ----------
 
@@ -654,7 +659,7 @@ function renderRecipeList() {
   recipes.forEach((r) => {
     const item = document.createElement('div');
     item.className = 'recipe-item' + (r.id === state.activeRecipeId ? ' active' : '');
-    const opensInTandoor = r.import_status === 'imported' && r.tandoor_recipe_id && APP_CONFIG.tandoor_url;
+    const opensInTandoor = r.import_status === 'imported' && importedRecipeUrl(r.tandoor_recipe_id);
     if (opensInTandoor) item.title = t('tandoorOpenRecipeHint');
     item.innerHTML = `
       <input type="checkbox" ${r.selected ? 'checked' : ''} data-id="${r.id}" class="select-cb" />
@@ -669,7 +674,7 @@ function renderRecipeList() {
     item.addEventListener('click', (e) => {
       if (e.target.classList.contains('select-cb')) return;
       if (opensInTandoor) {
-        window.open(`${APP_CONFIG.tandoor_url}/view/recipe/${r.tandoor_recipe_id}`, 'tandoorRecipePopup', 'width=900,height=850,noopener');
+        window.open(importedRecipeUrl(r.tandoor_recipe_id), 'tandoorRecipePopup', 'width=900,height=850,noopener');
         return;
       }
       selectRecipe(r.id);
@@ -930,8 +935,8 @@ function renderDetail(r) {
       )}</div>`
     : '';
 
-  const tandoorLink = (APP_CONFIG.tandoor_url && r.tandoor_recipe_id)
-    ? `<a class="btn secondary" href="${APP_CONFIG.tandoor_url}/view/recipe/${r.tandoor_recipe_id}" target="_blank" rel="noopener">${t('openInTandoorBtn')}</a>`
+  const tandoorLink = importedRecipeUrl(r.tandoor_recipe_id)
+    ? `<a class="btn secondary" href="${escapeHtml(importedRecipeUrl(r.tandoor_recipe_id))}" target="_blank" rel="noopener">${t('openInTandoorBtn')}</a>`
     : '';
 
   const importedNotice = r.import_status === 'imported'
@@ -2828,6 +2833,10 @@ if ('serviceWorker' in navigator) {
 
 (async function init() {
   await initI18n();
+  if (APP_CONFIG.recipe_manager && APP_CONFIG.recipe_manager !== 'Tandoor') {
+    // Maintaining and planning work on Tandoor's data only.
+    document.querySelectorAll('.nav-btn[data-area="maintain"], .nav-btn[data-area="plan"]').forEach((b) => b.classList.add('hidden'));
+  }
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

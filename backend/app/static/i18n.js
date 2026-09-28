@@ -2067,7 +2067,12 @@ let T = TRANSLATIONS.en;
 let APP_CONFIG = {};
 
 function t(key) {
-  return (T && T[key] !== undefined) ? T[key] : ((TRANSLATIONS.en[key] !== undefined) ? TRANSLATIONS.en[key] : key);
+  const text = (T && T[key] !== undefined) ? T[key] : ((TRANSLATIONS.en[key] !== undefined) ? TRANSLATIONS.en[key] : key);
+  // Imports to Mealie (RECIPE_MANAGER=mealie): "Tandoor" in the texts means
+  // the recipe manager - but the app's own name stays "Tandoor Helper".
+  const manager = APP_CONFIG.recipe_manager;
+  return manager && manager !== 'Tandoor' && typeof text === 'string'
+    ? text.replace(/Tandoor(?! Helper)/g, manager) : text;
 }
 
 function tf(key, params) {

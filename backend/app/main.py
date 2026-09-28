@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -73,8 +73,8 @@ def _mark_duplicates(job) -> None:
     if not settings.check_duplicates:
         return
     try:
-        with tandoor_client.get_client() as client:
-            existing_names = tandoor_client.fetch_all_recipe_names(client)
+        with target.client().get_client() as client:
+            existing_names = target.client().fetch_all_recipe_names(client)
     except Exception as exc:  # noqa: BLE001
         log.info("Duplicate check skipped (Tandoor unreachable/not configured): %s", exc)
         return
@@ -114,8 +114,8 @@ def _fetch_existing_tags() -> list[str] | None:
     if not settings.reuse_existing_tags:
         return None
     try:
-        with tandoor_client.get_client() as client:
-            return tandoor_client.fetch_all_keyword_names(client)
+        with target.client().get_client() as client:
+            return target.client().fetch_all_keyword_names(client)
     except Exception as exc:  # noqa: BLE001
         log.info("Tag reuse lookup skipped (Tandoor unreachable/not configured): %s", exc)
         return None
@@ -686,8 +686,8 @@ async def tandoor_tags():
     """Existing tag names (not tag groups) - offered when adding a tag to a
     recipe in the import review."""
     def load():
-        with tandoor_client.get_client() as client:
-            return sorted((k["name"] for k in tandoor_client.fetch_all_items(client, "keyword") if not k.get("numchild")),
+        with target.client().get_client() as client:
+            return sorted((k["name"] for k in target.client().fetch_all_items(client, "keyword") if not k.get("numchild")),
                           key=str.casefold)
     try:
         return {"tags": await asyncio.to_thread(load)}
@@ -766,12 +766,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     cookbook_warning = None
 
     try:
-        with tandoor_client.get_client() as client:
+        api = target.client()  # Tandoor or Mealie
+        with api.get_client() as client:
             cookbook_id = None
             cookbook_endpoint = None
             if cookbook_name:
                 try:
-                    cookbook_id, cookbook_endpoint = tandoor_client.get_or_create_cookbook(client, cookbook_name)
+                    cookbook_id, cookbook_endpoint = api.get_or_create_cookbook(client, cookbook_name)
                 except tandoor_client.TandoorError as exc:
                     cookbook_warning = str(exc)
                     log.warning("Could not create cookbook: %s", exc)
@@ -788,18 +789,18 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
 
                 warnings: list[str] = []
                 try:
-                    tandoor_id = tandoor_client.create_recipe(client, recipe)
+                    tandoor_id = api.create_recipe(client, recipe)
                     recipe.tandoor_recipe_id = tandoor_id
 
                     if image_path and os.path.exists(image_path):
                         try:
-                            tandoor_client.upload_image(client, tandoor_id, image_path)
+                            api.upload_image(client, tandoor_id, image_path)
                         except tandoor_client.TandoorError as exc:
                             warnings.append(f"Image upload failed: {exc}")
 
                     if cookbook_id is not None:
                         try:
-                            tandoor_client.add_recipe_to_cookbook(client, cookbook_id, cookbook_endpoint, tandoor_id)
+                            api.add_recipe_to_cookbook(client, cookbook_id, cookbook_endpoint, tandoor_id)
                         except tandoor_client.TandoorError as exc:
                             warnings.append(str(exc))
 
@@ -833,7 +834,7 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     # ...) - suggestions then wait under Tools. Never blocks the import.
     post_processing_job_id = None
     imported_ids = [r["tandoor_recipe_id"] for r in results if r["status"] == "imported" and r["tandoor_recipe_id"]]
-    if imported_ids:
+    if imported_ids and not target.is_mealie():  # the ingredient data lives in Tandoor only
         health.mark_changed()
         try:
             post_processing_job_id = await asyncio.to_thread(tools_new_recipes.start_after_import, imported_ids)
@@ -859,8 +860,8 @@ async def undo_import(job_id: str, recipe_id: str):
         raise HTTPException(400, "This recipe hasn't been imported (or was already undone).")
 
     try:
-        with tandoor_client.get_client() as client:
-            tandoor_client.delete_recipe(client, recipe.tandoor_recipe_id)
+        with target.client().get_client() as client:
+            target.client().delete_recipe(client, recipe.tandoor_recipe_id)
     except tandoor_client.TandoorError as exc:
         raise HTTPException(502, f"Could not undo the import: {exc}")
 
@@ -887,10 +888,10 @@ async def undo_all_imports(job_id: str):
 
     results = []
     try:
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             for recipe in imported:
                 try:
-                    tandoor_client.delete_recipe(client, recipe.tandoor_recipe_id)
+                    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
                     recipe.import_status = "pending"
                     recipe.tandoor_recipe_id = None
                     recipe.import_error = None
@@ -1413,13 +1414,17 @@ async def get_config():
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.
         "tandoor_url": settings.tandoor_url.rstrip("/") if settings.tandoor_url else None,
+        # Where imports go (Tandoor or Mealie; with Mealie only the import area)
+        "recipe_manager": target.name(),
+        "manager_url": target.base_url(),
+        "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
     }
 
 
 @app.get("/api/tandoor/status")
 async def tandoor_status():
     try:
-        tandoor_client.test_connection()
+        await asyncio.to_thread(target.client().test_connection)
         return {"connected": True}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"connected": False, "error": str(exc)}, status_code=200)
@@ -1450,9 +1455,12 @@ async def on_startup() -> None:
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()
     maintenance.configure(_TOOL_SCANS)
-    asyncio.create_task(maintenance.loop())
-    if settings.auto_process_interval_hours > 0:
-        asyncio.create_task(tools_new_recipes.auto_run_loop())
+    if target.is_mealie():
+        log.info("Imports go to Mealie - the Tandoor maintenance and planning tools are off")
+    else:
+        asyncio.create_task(maintenance.loop())
+        if settings.auto_process_interval_hours > 0:
+            asyncio.create_task(tools_new_recipes.auto_run_loop())
     if settings.watch_dir:
         asyncio.create_task(watcher.loop(_start_folder_import))
 

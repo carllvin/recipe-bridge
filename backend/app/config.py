@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_tools_model: str = ""       # cheaper model for the maintenance tools; empty = gemini_model
 
+    # Where imports go: "tandoor" (default) or "mealie" - with Mealie only the import works
+    recipe_manager: str = "tandoor"
+    mealie_url: str = ""       # e.g. https://mealie.myserver.com (no trailing slash)
+    mealie_token: str = ""     # Mealie: user profile -> API tokens
+
     # Tandoor
     tandoor_url: str = ""      # e.g. https://recipes.myserver.com (no trailing slash)
     tandoor_token: str = ""    # Tandoor API token: user settings -> API
