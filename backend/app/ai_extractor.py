@@ -78,6 +78,21 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
             f"when nothing existing fits.\n"
         )
 
+    # Diet / allergen tags right away, so an import through this app needs no
+    # extra tag suggestions afterwards (see tools_new_recipes).
+    from .tools_tags import diet_tags  # late import: tools_tags pulls in the Tandoor client
+    diet = diet_tags(existing_tags or [])
+    diet_instruction = (
+        f"\n\nIMPORTANT - Diet tags: also add, when they apply, these tags exactly as "
+        f"written: {', '.join(repr(d) for d in diet)}. Judge them by the ingredient list: "
+        f"{diet[0]!r} only without meat and fish, {diet[1]!r} only without any animal "
+        f"product (then add {diet[0]!r} too). The free-from tags ({', '.join(repr(d) for d in diet[2:])}) "
+        f"only when the complete ingredient list clearly contains none of it (e.g. no "
+        f"wheat flour, pasta, bread, soy sauce for gluten; no milk, butter, cream, cheese "
+        f"for lactose; no nuts or nut products for nut-free) - when in doubt, leave it "
+        f"out. Diet tags don't count towards the 5 general tags."
+    )
+
     custom_instruction_block = ""
     if settings.custom_instructions.strip():
         custom_instruction_block = (
@@ -97,7 +112,7 @@ decorative/chapter pages with no actual recipe on them.
 {language_instruction}
 
 {unit_instruction}
-{tag_reuse_instruction}
+{tag_reuse_instruction}{diet_instruction}
 A recipe may span multiple pages, or several recipes may appear on one page. Use \
 the page markers to determine source_page_start and source_page_end correctly \
 (the actual page number, not the position within the text).

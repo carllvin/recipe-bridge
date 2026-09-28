@@ -465,7 +465,7 @@ a { color: inherit; }
 
 .ingredient-row {
   display: grid;
-  grid-template-columns: 18px 80px 90px 1fr 56px;
+  grid-template-columns: 18px 80px 120px 1fr 56px;
   gap: 10px;
   margin-bottom: 10px;
   font-size: 0.9rem;
@@ -657,6 +657,7 @@ a { color: inherit; }
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .tools-nav-btn {
@@ -770,7 +771,6 @@ a { color: inherit; }
   .ingredient-row .ing-drag-handle { grid-area: h; }
   .ingredient-row .ing-name-wrap { grid-area: name; }
   .ingredient-row .ing-amount { grid-area: amount; min-width: 0; }
-  .ingredient-row .ing-unit { grid-area: unit; min-width: 0; }
   .ingredient-row .ing-step { grid-area: step; }
   .ingredient-row .ing-note { grid-area: note; }
   .ingredient-row .ing-name { font-weight: 600; }
@@ -1143,3 +1143,21 @@ a { color: inherit; }
 .login-hint { color: #8f9689; font-size: 0.78rem; margin: 4px 0 0; }
 .login-box .brand em { color: var(--gold); font-style: normal; }
 .logout-link { display: inline-block; margin-top: 16px; font-size: 0.8rem; color: #8f9689; }
+
+/* import review: unit match badge, editable tags */
+.ing-unit-wrap { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ing-unit-wrap .ing-unit { flex: 1; min-width: 0; width: 100%; }
+.tags-row { align-items: center; }
+.tag { display: inline-flex; align-items: center; gap: 6px; }
+.tag.new { border-style: dashed; }
+.tag.matched { border-color: var(--gold-dim); }
+.tag-new { font-size: 0.68rem; color: #8f9689; }
+.tag-remove, .tag-revert { background: none; border: none; padding: 0 2px; color: #8f9689; cursor: pointer; font-size: 0.9rem; line-height: 1; }
+.tag-remove:hover { color: #e0a99f; }
+.tag-revert { color: var(--gold); font-size: 0.8rem; }
+.tag-add { background: rgba(239,233,218,0.05); border: 1px dashed #4a5147; border-radius: 999px; color: var(--paper);
+  padding: 4px 12px; font-size: 0.8rem; width: 150px; }
+.tag-add:focus { outline: none; border-color: var(--gold-dim); }
+@media (max-width: 600px) {
+  .ingredient-row .ing-unit-wrap { grid-area: unit; }
+}

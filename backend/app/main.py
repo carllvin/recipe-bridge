@@ -291,7 +291,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             job.recipes.extend(recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")
-        jobs.match_images_to_recipes(job)
+        # Each link is its own "page": only that page's photos belong to its
+        # recipes (no neighbouring pages as for a cookbook's photo spreads).
+        jobs.match_images_to_recipes(job, page_margin=0)
         # Recipes from different websites don't belong to one cookbook by default.
         job.suggested_cookbook_name = job.cookbook_name = None
         _finish_extraction(job)
@@ -677,6 +679,21 @@ async def inbox_count():
     )
     running = sum(1 for job in tool_jobs.list_all_tool_jobs() if job.status == "scanning")
     return {"count": count + sum(1 for i in _pending_imports() if i["status"] != "processing"), "running": running}
+
+
+@app.get("/api/tandoor/tags")
+async def tandoor_tags():
+    """Existing tag names (not tag groups) - offered when adding a tag to a
+    recipe in the import review."""
+    def load():
+        with tandoor_client.get_client() as client:
+            return sorted((k["name"] for k in tandoor_client.fetch_all_items(client, "keyword") if not k.get("numchild")),
+                          key=str.casefold)
+    try:
+        return {"tags": await asyncio.to_thread(load)}
+    except Exception as exc:  # noqa: BLE001
+        log.info("Tag list unavailable: %s", exc)
+        return {"tags": []}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -1262,6 +1279,9 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
         tool_jobs.save_tool_job(job)
         tools_new_recipes.after_action(job)
     return suggestion
+
+
+tools_new_recipes.configure(_perform_suggestion_action)
 
 
 def _remember_applied(job, suggestion, journal) -> None:

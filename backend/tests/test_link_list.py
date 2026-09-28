@@ -58,3 +58,29 @@ def test_upload_types():
     assert main._classify_upload(["recipes.md"]) == ("text", "")
     assert main._classify_upload(["Omas Rezepte.docx"]) == ("docx", "")
     assert main._classify_upload(["links.txt", "photo.jpg"])[0] == ""
+
+
+def test_each_recipe_only_gets_its_own_page_photo(tmp_path, monkeypatch):
+    list_file = tmp_path / "links.txt"
+    list_file.write_text("https://a.example/one\nhttps://a.example/two\nhttps://a.example/three\n")
+
+    def fake_process_url(url, images_dir):
+        name = url.rsplit("/", 1)[1]
+        return {"pages": [{"page": 1, "text": name}], "page_count": 1,
+                "images": {f"img-{name}": {"page": 1, "filename": f"{name}.jpg"}}}
+
+    def fake_extract(pages, existing_tags=None, **kw):
+        name = pages[0]["text"]
+        return [ExtractedRecipe(id=name, title=name, source_page_start=1, source_page_end=1)], TokenUsage()
+
+    monkeypatch.setattr(main, "process_url", fake_process_url)
+    monkeypatch.setattr(main, "extract_recipes_from_pages", fake_extract)
+    monkeypatch.setattr(main, "_fetch_existing_tags", lambda: [])
+    monkeypatch.setattr(main, "_mark_duplicates", lambda job: None)
+    monkeypatch.setattr(main.import_matching, "match_job_ingredients", lambda job: None)
+
+    job = jobs.create_job("links.txt")
+    main._run_extraction(job.id, [str(list_file)], "txt")
+    job = jobs.get_job(job.id)
+    assert {r.title: r.candidate_image_ids for r in job.recipes} == {
+        "one": ["img-one"], "two": ["img-two"], "three": ["img-three"]}

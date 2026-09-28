@@ -14,6 +14,8 @@ class Ingredient(BaseModel):
     step_index: Optional[int] = None  # 0-based index of the step that needs this ingredient
     tandoor_match: Optional[str] = None  # "exists" | "matched" | "new" - set by import_matching before review
     original_name: Optional[str] = None  # name before it was matched to an existing Tandoor ingredient
+    unit_match: Optional[str] = None  # same for the unit: "exists" | "matched" | "new"
+    original_unit: Optional[str] = None  # unit before it was matched to an existing Tandoor unit
 
 
 class Step(BaseModel):
@@ -44,6 +46,8 @@ class ExtractedRecipe(BaseModel):
     cook_time_minutes: Optional[int] = None
     total_time_minutes: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
+    tag_status: dict[str, str] = Field(default_factory=dict)    # tag -> "exists" | "matched" | "new" (import_matching)
+    tag_original: dict[str, str] = Field(default_factory=dict)  # matched tag -> the tag as the AI wrote it
     ingredients: list[Ingredient] = Field(default_factory=list)
     steps: list[Step] = Field(default_factory=list)
     source_page_start: int
