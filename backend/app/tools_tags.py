@@ -511,12 +511,13 @@ def tag_vocabulary(all_tags, recipes, food_names=frozenset()) -> list[str]:
     """Existing tag names, most-used first, so the MAX_VOCABULARY cap keeps
     the ones that matter instead of whatever sorts first alphabetically.
     Tags that are just an ingredient's name ("Blumenkohl") are left out, so
-    they aren't offered for reuse."""
+    they aren't offered for reuse - and so are tag groups ("Diet"), which
+    hold tags rather than being put on recipes."""
     usage = {}
     for recipe in recipes:
         for kw in recipe.get("keywords", []):
             usage[kw.get("name")] = usage.get(kw.get("name"), 0) + 1
-    names = [t["name"] for t in all_tags if t["name"].strip().casefold() not in food_names]
+    names = [t["name"] for t in all_tags if t["name"].strip().casefold() not in food_names and not t.get("numchild")]
     return sorted(names, key=lambda n: -usage.get(n, 0))[:MAX_VOCABULARY]
 
 

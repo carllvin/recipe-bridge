@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -107,6 +107,17 @@ def start_refresh() -> bool:
     return True
 
 
+def _unused_items(recipes, foods, units, keywords, unit_conversions) -> dict:
+    used = tools_unused.used_ids(recipes)
+    protected = {"unit": tools_unused.protected_unit_ids(foods.values(), unit_conversions)}
+    items = {"food": list(foods.values()), "unit": units, "keyword": keywords}
+    return {
+        metric: [{"key": str(i["id"]), "name": i.get("name", "")}
+                 for i in tools_unused.find_unused(endpoint, items[endpoint], used[endpoint], protected.get(endpoint, ()))]
+        for endpoint, (metric, _) in tools_unused.KINDS.items()
+    }
+
+
 def _compute() -> None:
     started = time.time()  # changes during the run make the result stale again
     try:
@@ -120,6 +131,8 @@ def _compute() -> None:
                 for r in recipes for step in r.get("steps", []) for ing in step.get("ingredients", [])
             } - {None}
             units = tools_conversions._fetch_all(client, "unit")
+            keywords = tools_conversions._fetch_all(client, "keyword")
+            unit_conversions = tools_conversions._fetch_all(client, "unit-conversion")
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
             general, to_estimate = tools_conversions.find_missing(
                 client, tools_conversions.recipe_pairs(recipes), respect_ignored=False)
@@ -149,6 +162,9 @@ def _compute() -> None:
             "missing_conversions": conversion_items,
             "foods_duplicates": [{"key": p["key"], "name": p["name"]} for p in duplicates.food_duplicates(foods.values())],
             "units_duplicates": [{"key": p["key"], "name": p["name"]} for p in duplicates.unit_duplicates(units)],
+            **_unused_items(recipes, foods, units, keywords, unit_conversions),
+            "keywords_ungrouped": [{"key": str(k["id"]), "name": k.get("name", "")}
+                                   for k in tools_tag_groups.ungrouped(keywords)],
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),

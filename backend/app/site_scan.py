@@ -7,12 +7,13 @@ How pages are found:
   (from robots.txt, or the usual /sitemap.xml locations), recipe-looking
   URLs first;
 - a start URL with a path (e.g. a category page) - or no sitemap: follow the
-  links on that page (same domain), two levels deep, pagination included.
+  links on that page (same domain), 1-4 levels deep (chosen per scan, two
+  by default), pagination included.
 A page counts as a recipe when it embeds schema.org Recipe data (JSON-LD),
 which nearly every recipe site does; title, photo and time come from there.
 
 Polite by design: robots.txt is respected, one request per REQUEST_DELAY
-seconds, at most MAX_CHECK pages per scan, same domain only."""
+seconds, at most MAX_CHECK_BY_DEPTH pages per scan, same domain only."""
 from __future__ import annotations
 
 import difflib
@@ -35,9 +36,11 @@ from .url_processor import HEADERS, MAX_PAGE_BYTES, _find_recipe, _image_url, _t
 log = logging.getLogger("tandoor-helper")
 
 REQUEST_DELAY = 1.0
-MAX_CHECK = 300
 MAX_SITEMAPS = 15
-MAX_DEPTH = 2
+# How many link levels are followed from the start page (chosen per scan),
+# and how many pages are checked at most for that depth.
+DEFAULT_DEPTH = 2
+MAX_CHECK_BY_DEPTH = {1: 150, 2: 300, 3: 600, 4: 1000}
 USER_AGENT_TOKEN = "TandoorHelper"
 RECIPE_HINTS = ("rezept", "recipe", "recette", "ricetta", "receta", "recept")
 SKIP_PARTS = ("/tag/", "/author/", "/autor/", "/wp-admin", "/wp-json", "/feed", "/login", "/cart", "/warenkorb",
@@ -156,13 +159,20 @@ def _in_tandoor(title, existing) -> bool:
     return t in existing or bool(difflib.get_close_matches(t, existing, n=1, cutoff=0.9))
 
 
-def start(url: str) -> str:
+def start(url: str, depth: int = DEFAULT_DEPTH) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("Please enter a full web address starting with http:// or https://")
+    try:
+        depth = int(depth)
+    except (TypeError, ValueError):
+        depth = DEFAULT_DEPTH
+    if depth not in MAX_CHECK_BY_DEPTH:
+        raise ValueError(f"The depth must be between 1 and {max(MAX_CHECK_BY_DEPTH)}.")
     scan_id = uuid.uuid4().hex[:10]
     state = {"id": scan_id, "url": url, "status": "scanning", "phase": "start", "checked": 0, "total": 0,
-             "found": [], "error": None, "cancel": False, "started_at": time.time(), "source": None}
+             "found": [], "error": None, "cancel": False, "started_at": time.time(), "source": None,
+             "depth": depth, "max_check": MAX_CHECK_BY_DEPTH[depth]}
     with _lock:
         _scans[scan_id] = state
     threading.Thread(target=_run, args=(state,), daemon=True).start()
@@ -185,6 +195,7 @@ def _run(state) -> None:
     parsed = urlparse(start_url)
     host = parsed.netloc.lower().removeprefix("www.")
     homepage = parsed.path in ("", "/")
+    max_depth, max_check = state["depth"], state["max_check"]
     try:
         with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=20) as client:
             robots = robotparser.RobotFileParser()
@@ -199,7 +210,7 @@ def _run(state) -> None:
                 state["phase"] = "sitemap"
                 sitemaps = robots.site_maps() or [f"{parsed.scheme}://{parsed.netloc}/{p}" for p in
                                                   ("sitemap.xml", "sitemap_index.xml", "wp-sitemap.xml")]
-                candidates = [(u, MAX_DEPTH) for u in _recipe_first(_sitemap_urls(client, sitemaps, host, state))]
+                candidates = [(u, max_depth) for u in _recipe_first(_sitemap_urls(client, sitemaps, host, state))]
             state["source"] = "sitemap" if candidates else "links"
             if not candidates:
                 candidates = [(start_url, 0)]
@@ -207,8 +218,8 @@ def _run(state) -> None:
             existing = _existing_titles()
             state["phase"] = "pages"
             seen, queue = set(), candidates
-            state["total"] = min(len(queue), MAX_CHECK)
-            while queue and state["checked"] < MAX_CHECK and not state["cancel"]:
+            state["total"] = min(len(queue), max_check)
+            while queue and state["checked"] < max_check and not state["cancel"]:
                 url, depth = queue.pop(0)
                 if url in seen:
                     continue
@@ -226,12 +237,12 @@ def _run(state) -> None:
                     if not any(f["url"] == item["url"] for f in state["found"]):
                         item["in_tandoor"] = _in_tandoor(item["title"], existing)
                         state["found"].append(item)
-                elif depth < MAX_DEPTH:
+                elif depth < max_depth:
                     queued = {u for u, _ in queue}
                     queue.extend((u, depth + 1) for u in _recipe_first(_links(soup, str(got[0]), host))
                                  if u not in seen and u not in queued)
-                    del queue[MAX_CHECK * 3:]  # enough to choose from
-                state["total"] = min(state["checked"] + len(queue), MAX_CHECK)
+                    del queue[max_check * 3:]  # enough to choose from
+                state["total"] = min(state["checked"] + len(queue), max_check)
         state["status"] = "cancelled" if state["cancel"] else "done"
     except Exception as exc:  # noqa: BLE001
         log.info("Site scan of %s failed: %s", start_url, exc)

@@ -223,6 +223,7 @@ function clearPhotos() {
   photoState.files.forEach((p) => URL.revokeObjectURL(p.url));
   photoState.files = [];
   el('photo-single').checked = false;
+  el('photo-handwriting').checked = false;
   renderPhotos();
 }
 
@@ -236,8 +237,9 @@ el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);
   if (!files.length) return;
   const single = el('photo-single').checked;
+  const handwriting = el('photo-handwriting').checked;
   clearPhotos();
-  uploadFiles(files, { singleRecipe: single });
+  uploadFiles(files, { singleRecipe: single, handwriting });
 });
 
 async function uploadFiles(files, options = {}) {
@@ -253,6 +255,7 @@ async function uploadFiles(files, options = {}) {
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
   if (options.singleRecipe) formData.append('single_recipe', 'true');
+  if (options.handwriting) formData.append('handwriting', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
@@ -338,7 +341,8 @@ function updateSmartForm() {
   el('smart-import').disabled = !mode;
   el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
   el('smart-scan').classList.toggle('hidden', mode !== 'url');
-  el('smart-hint').textContent = mode === 'url' ? t('smartHintUrl') : mode === 'text' ? t('smartHintText') : '';
+  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url');
+  el('smart-hint').textContent = mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
 function clearSmartForm() {
@@ -450,7 +454,9 @@ el('smart-scan').addEventListener('click', async () => {
   if (mode !== 'url') return;
   el('upload-error').classList.add('hidden');
   try {
-    const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const depth = Number(el('smart-depth').value) || 2;
+    try { localStorage.setItem('th.scanDepth', String(depth)); } catch (e) { /* not available */ }
+    const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, depth }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     openPickList('scan', tf('pickTitleScan', { host: hostOf(url) }), [], hostOf(url));
@@ -1299,6 +1305,10 @@ function openAreaStart(area) {
 document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
+  tags_groups: 'toolTagGroupsTitle',
+  unused_foods: 'toolUnusedFoodsTitle',
+  unused_units: 'toolUnusedUnitsTitle',
+  unused_keywords: 'toolUnusedKeywordsTitle',
   new_recipes: 'toolNewRecipesTitle',
   meal_plan: 'toolMealPlanTitle',
   ingredients_review: 'toolIngredientsReviewTitle',
@@ -1742,6 +1752,7 @@ async function loadSettings() {
     el('set-budget-block').checked = data.budget.block_manual;
     renderBudget(data.budget_status);
     renderMaintStatus(data.maintenance_status);
+    renderNotifyStatus();
     clearTimeout(loadSettings.timer);
     if (data.maintenance_status.running && currentArea === 'maintain') loadSettings.timer = setTimeout(loadSettings, 5000);
   } catch (e) { /* optional panel */ }
@@ -1761,6 +1772,25 @@ el('settings-save').addEventListener('click', async () => {
   el('settings-saved').textContent = res.ok ? t('settingsSaved') : `${t('toolStatusError')}: HTTP ${res.status}`;
   setTimeout(() => { el('settings-saved').textContent = ''; }, 3000);
   loadSettings();
+});
+
+function renderNotifyStatus() {
+  const channels = APP_CONFIG.notify_channels || [];
+  el('notify-status').textContent = channels.length ? tf('notifyOn', { channels: channels.join(', ') }) : t('notifyOff');
+  el('notify-test').classList.toggle('hidden', !channels.length);
+}
+
+el('notify-test').addEventListener('click', async () => {
+  el('notify-test').disabled = true;
+  el('notify-result').textContent = '';
+  try {
+    const data = await (await fetch('/api/notify/test', { method: 'POST' })).json();
+    el('notify-result').textContent = data.errors.length ? data.errors.join(' · ') : tf('notifySent', { channels: data.sent.join(', ') });
+  } catch (e) {
+    el('notify-result').textContent = e.message;
+  } finally {
+    el('notify-test').disabled = false;
+  }
 });
 
 el('set-maint-run').addEventListener('click', async () => {
@@ -1783,19 +1813,24 @@ const HEALTH_METRICS = [
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
   { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
+  { key: 'foods_unused', tool: 'unused_foods', endpoint: '/api/tools/unused/food' },
+  { key: 'units_unused', tool: 'unused_units', endpoint: '/api/tools/unused/unit' },
+  { key: 'keywords_unused', tool: 'unused_keywords', endpoint: '/api/tools/unused/keyword' },
+  { key: 'keywords_ungrouped', tool: 'tags_groups', endpoint: '/api/tools/tags/groups' },
 ];
 
 // Tiles grouped by what they're about, each group with its "whole
 // collection" tool (for what the counts can't see: typos, same meaning ...).
 const HEALTH_GROUPS = [
   { key: 'foods', titleKey: 'healthGroupFoods',
-    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions'],
+    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions', 'foods_unused'],
     tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'groupToolFoods', descKey: 'toolIngredientsReviewDesc' } },
-  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates'],
+  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
     metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
-      'recipes_without_servings', 'recipes_without_image'],
+      'recipes_without_servings', 'recipes_without_image'] },
+  { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
 ];
 
@@ -1853,7 +1888,7 @@ function renderHealth(data) {
         <h4>${t(g.titleKey)}</h4>
         ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
           title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
-        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>
+        ${g.tool ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
       </div>
       ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;
@@ -2659,9 +2694,11 @@ if ('serviceWorker' in navigator) {
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
+  try { el('smart-depth').value = localStorage.getItem('th.scanDepth') || '2'; } catch (e) { /* default */ }
   updateSmartForm();
   // Installing (and so the share menu) needs HTTPS or localhost.
   el('more-way-insecure').classList.toggle('hidden', window.isSecureContext);
+  el('logout-link').classList.toggle('hidden', !APP_CONFIG.auth_enabled);
   el('more-way-folder').textContent = APP_CONFIG.watch_dir
     ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();

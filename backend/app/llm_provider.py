@@ -156,3 +156,64 @@ def complete_tool_text(system_prompt: Optional[str], user_content: str, max_toke
     """complete_text() with the cheaper tools model - used by the maintenance
     tools and scripts (matching, tagging, plurals, nutrition, seasons)."""
     return complete_text(system_prompt, user_content, max_tokens, tools=True)
+
+
+def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000) -> tuple[str, TokenUsage]:
+    """Sends one photo (JPEG bytes) with an instruction to the configured
+    provider's main model - all three read images. Used to transcribe
+    handwritten recipes, which Tesseract reads poorly."""
+    import base64
+
+    provider = _active_provider()
+    model = _model(provider, tools=False)
+    b64 = base64.b64encode(jpeg).decode("ascii")
+    usage = TokenUsage()
+    if provider == "openai":
+        from openai import OpenAI
+        if not settings.openai_api_key:
+            raise RuntimeError(missing_key_hint())
+        client = OpenAI(api_key=settings.openai_api_key)
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+        ]}]
+        try:
+            response = client.chat.completions.create(model=model, max_completion_tokens=max_tokens, messages=messages)
+        except Exception:
+            response = client.chat.completions.create(model=model, max_tokens=max_tokens, messages=messages)
+        if getattr(response, "usage", None) is not None:
+            usage.input_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            usage.output_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+        return response.choices[0].message.content or "", usage
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        if not settings.gemini_api_key:
+            raise RuntimeError(missing_key_hint())
+        client = genai.Client(api_key=settings.gemini_api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=[types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt],
+            config=types.GenerateContentConfig(max_output_tokens=max_tokens),
+        )
+        meta = getattr(response, "usage_metadata", None)
+        if meta is not None:
+            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+        return response.text or "", usage
+    import anthropic
+    if not settings.anthropic_api_key:
+        raise RuntimeError(missing_key_hint())
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+            {"type": "text", "text": prompt},
+        ]}],
+    )
+    if getattr(response, "usage", None) is not None:
+        usage.input_tokens = getattr(response.usage, "input_tokens", 0) or 0
+        usage.output_tokens = getattr(response.usage, "output_tokens", 0) or 0
+    return "".join(block.text for block in response.content if block.type == "text"), usage

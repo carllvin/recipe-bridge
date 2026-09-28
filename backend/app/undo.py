@@ -5,7 +5,9 @@ While a suggestion is applied, the Tandoor client records every write
 - PATCH/PUT /<endpoint>/<id>/ -> the object's previous values of exactly the
   fields that were sent ("restore"),
 - DELETE /<endpoint>/<id>/     -> the whole object before deleting ("recreate"),
-- POST /<endpoint>/            -> the new object's id ("delete").
+- POST /<endpoint>/            -> the new object's id ("delete"),
+- PUT /<endpoint>/<id>/move/<parent>/ (tag/food trees) -> the previous
+  parent ("move").
 That journal is saved per suggestion in the data volume. Undoing replays it
 backwards; objects that get recreated get a new id in Tandoor, so references
 to the old id in later steps (an ingredient's food, a recipe's keywords ...)
@@ -35,6 +37,7 @@ RETENTION_DAYS = 14
 _local = threading.local()
 
 _ITEM_PATH = re.compile(r"^/([a-z][a-z\-]*)/(\d+)/?$")
+_MOVE_PATH = re.compile(r"^/([a-z][a-z\-]*)/(\d+)/move/(\d+)/?$")  # tree entries (tags, foods)
 _LIST_PATH = re.compile(r"^/([a-z][a-z\-]*)/?$")
 
 # Keys whose value is a reference to another object (keep its id), and the
@@ -80,6 +83,15 @@ def before_write(client, method: str, path: str, payload) -> dict | None:
     """Called by RecordingClient before a write; returns the pending entry
     (completed by after_write) or None when it can't be undone."""
     method = method.upper()
+    move = _MOVE_PATH.match(path)
+    if method == "PUT" and move:
+        endpoint, obj_id = move.group(1), int(move.group(2))
+        resp = client.get(f"/{endpoint}/{obj_id}/")
+        if resp.status_code != 200:
+            return None
+        parent = resp.json().get("parent")
+        parent = parent.get("id") if isinstance(parent, dict) else parent
+        return {"op": "move", "endpoint": endpoint, "id": obj_id, "parent": parent}
     item = _ITEM_PATH.match(path)
     if method in ("PATCH", "PUT", "DELETE") and item:
         endpoint, obj_id = item.group(1), int(item.group(2))
@@ -220,6 +232,12 @@ def revert(client, job_id: str, suggestion_id: str) -> None:
             for other in journal[:-1]:
                 if other["endpoint"] == endpoint and other["id"] == entry["id"]:
                     other["id"] = remap[(endpoint, entry["id"])]
+        elif entry["op"] == "move":
+            parent = entry.get("parent")
+            parent = remap.get((endpoint, parent), parent) if parent else 0
+            resp = client.put(f"/{endpoint}/{obj_id}/move/{parent}/")
+            if resp.status_code >= 400 and resp.status_code != 404:
+                raise RuntimeError(f"Could not move {endpoint} #{obj_id} back: {resp.status_code} {resp.text[:200]}")
         else:  # restore
             payload = _remap(entry["data"], remap)
             resp = client.patch(f"/{endpoint}/{obj_id}/", json=payload)

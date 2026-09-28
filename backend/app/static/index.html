@@ -158,6 +158,12 @@
               <p id="usage-total" class="settings-hint"></p>
               <div id="usage-by-source" class="usage-by-source"></div>
             </div>
+            <div class="settings-block">
+              <h4 data-i18n="notifyTitle">Notifications</h4>
+              <p id="notify-status" class="settings-hint"></p>
+              <button id="notify-test" class="btn secondary" type="button" data-i18n="notifyTest">Send a test</button>
+              <p id="notify-result" class="settings-hint"></p>
+            </div>
           </div>
           <div class="settings-actions">
             <button id="settings-save" class="btn" type="button" data-i18n="settingsSave">Save</button>
@@ -216,6 +222,7 @@
         <p class="settings-hint" data-i18n="photoCollectorHint">Order = page order. Take or add more photos, then import them together.</p>
         <div id="photo-thumbs" class="photo-thumbs"></div>
         <label class="settings-check"><input id="photo-single" type="checkbox" /> <span data-i18n="photoSingle">All photos show one single recipe (e.g. ingredients and method on different pages)</span></label>
+        <label class="settings-check"><input id="photo-handwriting" type="checkbox" /> <span data-i18n="photoHandwriting">Handwritten – the AI reads the photos (better for recipe cards, costs a little more)</span></label>
         <div class="photo-collector-actions">
           <button id="photo-clear" class="btn secondary" type="button" data-i18n="photoClear">Discard</button>
           <button id="photo-import" class="btn" type="button"></button>
@@ -228,6 +235,15 @@
         <div class="smart-actions">
           <button id="smart-import" class="btn" type="submit" disabled data-i18n="smartImport">Import</button>
           <button id="smart-scan" class="btn secondary hidden" type="button" data-i18n="smartScan">🌐 Scan the whole website</button>
+          <label id="smart-depth-wrap" class="smart-depth hidden">
+            <span data-i18n="scanDepth">Depth</span>
+            <select id="smart-depth">
+              <option value="1" data-i18n="scanDepth1">1 level</option>
+              <option value="2" data-i18n="scanDepth2">2 levels</option>
+              <option value="3" data-i18n="scanDepth3">3 levels</option>
+              <option value="4" data-i18n="scanDepth4">4 levels</option>
+            </select>
+          </label>
         </div>
         <p id="smart-hint" class="smart-hint"></p>
       </form>
@@ -270,6 +286,7 @@
           <h4 data-i18n="moreWayFolderTitle">📂 Watched folder</h4>
           <p id="more-way-folder"></p>
         </div>
+        <a id="logout-link" class="logout-link hidden" href="/logout" data-i18n="logout">Sign out on this device</a>
       </details>
     </div>
 
@@ -329,6 +346,20 @@
     </div>
   </div>
 
+  <script>
+    // Signed out meanwhile (e.g. the password was changed): back to the login.
+    (() => {
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const res = await origFetch(...args);
+        if (res.status === 401 && res.headers.get('content-type')?.includes('json')) {
+          const data = await res.clone().json().catch(() => ({}));
+          if (data.login) location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+        }
+        return res;
+      };
+    })();
+  </script>
   <script src="/i18n.js"></script>
   <script src="/app.js"></script>
 </body>

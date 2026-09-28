@@ -59,6 +59,18 @@ class FakeTandoor:
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api")
         self.requests.append((request.method, path))
+        move = re.match(r"^/([a-z\-]+)/(\d+)/move/(\d+)/$", path)
+        if move and request.method == "PUT":  # tree entries (tags): new parent, 0 = top level
+            store = self.db.setdefault(move.group(1), {})
+            obj_id, parent = int(move.group(2)), int(move.group(3)) or None
+            if obj_id not in store or (parent and parent not in store):
+                return httpx.Response(404, json={})
+            old = store[obj_id].get("parent")
+            store[obj_id]["parent"] = parent
+            for pid, delta in ((old, -1), (parent, 1)):
+                if pid in store:
+                    store[pid]["numchild"] = (store[pid].get("numchild") or 0) + delta
+            return httpx.Response(200, json=store[obj_id])
         match = re.match(r"^/([a-z\-]+)/(?:(\d+)/)?$", path)
         if not match:
             return httpx.Response(404, json={})

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tags, tools_units
+from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -45,6 +45,10 @@ async def revalidate_static_files(request, call_next):
     if not request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+# Registered after the one above, so it runs first: nothing is served
+# before the password check (see auth.py; off without APP_PASSWORD).
+app.middleware("http")(auth.middleware)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -125,7 +129,7 @@ SINGLE_RECIPE_NOTE = (
 
 
 def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
-                    single_recipe: bool = False) -> None:
+                    single_recipe: bool = False, handwriting: bool = False) -> None:
     job = jobs.get_job(job_id)
     if job is None:
         return
@@ -141,9 +145,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
             result = process_epub(source_paths[0], images_dir)
         elif doc_type == "images":
-            job.progress_label = "Running OCR on uploaded photo(s) …"
+            job.progress_label = ("Reading the handwriting with the AI …" if handwriting
+                                  else "Running OCR on uploaded photo(s) …")
             jobs.save_job(job)
-            result = process_images(source_paths, images_dir)
+            result = process_images(source_paths, images_dir, handwriting=handwriting)
+            job.token_usage.input_tokens += result["usage"].input_tokens
+            job.token_usage.output_tokens += result["usage"].output_tokens
         elif doc_type == "url":
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
@@ -230,6 +237,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
     finally:
         if doc_type != "links":  # _run_link_list records its own usage
             usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+            notify.import_finished(job)
         jobs.save_job(job)
 
 
@@ -293,6 +301,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.error = str(exc)
     finally:
         usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        notify.import_finished(job)
         jobs.save_job(job)
 
 
@@ -325,9 +334,11 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 
 @app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False)):
+async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False),
+                       handwriting: bool = Form(False)):
     """single_recipe: the uploaded photos all show one recipe (e.g. across a
-    double page) - the AI is told to return exactly one."""
+    double page) - the AI is told to return exactly one. handwriting: the AI
+    reads the photos instead of OCR (handwritten recipe cards)."""
     _check_budget()
     filenames = [f.filename or "" for f in files]
     doc_type, error = _classify_upload(filenames)
@@ -336,7 +347,7 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
 
     job = jobs.create_job(_display_name(filenames))
     source_paths = await _save_uploads(files, _job_dir(job.id))
-    _launch_extraction(job, source_paths, doc_type, single_recipe)
+    _launch_extraction(job, source_paths, doc_type, single_recipe, handwriting)
     return {"job_id": job.id}
 
 
@@ -365,10 +376,12 @@ async def _save_uploads(files, job_dir: str) -> list[str]:
     return source_paths
 
 
-def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recipe: bool = False) -> None:
+def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recipe: bool = False,
+                       handwriting: bool = False) -> None:
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr,
-                                                    single_recipe and doc_type == "images"), daemon=True).start()
+                                                    single_recipe and doc_type == "images",
+                                                    handwriting and doc_type == "images"), daemon=True).start()
 
 
 def _start_url_job(url: str, source: str | None = None):
@@ -493,7 +506,7 @@ async def import_links(body: dict = Body(...)):
 async def start_site_scan(body: dict = Body(...)):
     """Scans a website for recipe pages (no AI) - poll GET /api/scan/{id}."""
     try:
-        return {"scan_id": site_scan.start((body.get("url") or "").strip())}
+        return {"scan_id": site_scan.start((body.get("url") or "").strip(), body.get("depth") or site_scan.DEFAULT_DEPTH)}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -544,6 +557,11 @@ async def put_app_settings(body: dict = Body(...)):
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, f"Invalid settings: {exc}")
     return await get_app_settings()
+
+
+@app.post("/api/notify/test")
+async def notify_test():
+    return await asyncio.to_thread(notify.test)
 
 
 @app.post("/api/maintenance/run")
@@ -931,6 +949,10 @@ _TOOL_SCANS = {
     "meal_plan": tools_meal_plan.run_scan,
     "recipes_servings": tools_recipe_details.run_servings_scan,
     "recipes_images": tools_recipe_details.run_images_scan,
+    "unused_foods": tools_unused.run_scan,
+    "unused_units": tools_unused.run_scan,
+    "unused_keywords": tools_unused.run_scan,
+    "tags_groups": tools_tag_groups.run_scan,
 }
 
 # tool name -> the apply_suggestion(job_id, suggestion_id) function for that tool
@@ -950,6 +972,10 @@ _TOOL_APPLY = {
     "meal_plan": tools_meal_plan.apply_suggestion,
     "recipes_servings": tools_recipe_details.apply_servings_suggestion,
     "recipes_images": tools_recipe_details.apply_image_suggestion,
+    "unused_foods": tools_unused.apply_suggestion,
+    "unused_units": tools_unused.apply_suggestion,
+    "unused_keywords": tools_unused.apply_suggestion,
+    "tags_groups": tools_tag_groups.apply_suggestion,
 }
 
 
@@ -1014,6 +1040,19 @@ async def start_units_review(body: dict | None = Body(None)):
     listed in the health overview instead of every entry."""
     focus = (body or {}).get("focus")
     return _start_tool_job("units_review", {"focus": focus} if focus == "duplicates" else None)
+
+
+@app.post("/api/tools/tags/groups")
+async def start_tag_groups():
+    return _start_tool_job("tags_groups")
+
+
+@app.post("/api/tools/unused/{endpoint}")
+async def start_unused(endpoint: str):
+    """endpoint: food | unit | keyword - entries no recipe uses (no AI)."""
+    if endpoint not in tools_unused.KINDS:
+        raise HTTPException(404, "Unknown kind.")
+    return _start_tool_job(tools_unused.KINDS[endpoint][1])
 
 
 @app.post("/api/tools/recipes/servings")
@@ -1304,6 +1343,40 @@ async def suggestion_actions_status(batch: str | None = None):
     return apply_queue.status(batch)
 
 
+@app.get("/api/ping")
+async def ping():
+    """Open without signing in: the container health check, and the login
+    page's language."""
+    return {"ok": True, "language_code": get_ui_language_code(settings.output_language)}
+
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"), headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/login")
+async def login(request: Request, body: dict = Body(...)):
+    if not auth.enabled():
+        return {"ok": True}
+    wait = auth.locked_for(request)
+    if wait:
+        raise HTTPException(429, f"Too many wrong passwords - please wait {wait // 60 + 1} minutes.")
+    if not auth.check_password(request, str(body.get("password") or "")):
+        await asyncio.sleep(1)  # slows down guessing
+        raise HTTPException(401, "Wrong password.")
+    response = JSONResponse({"ok": True})
+    auth.set_cookie(request, response)
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(auth.COOKIE)
+    return response
+
+
 @app.get("/api/config")
 async def get_config():
     return {
@@ -1314,6 +1387,8 @@ async def get_config():
         "supported_extensions": sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS),
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "image_gen_available": image_gen.is_configured(),
+        "auth_enabled": auth.enabled(),
+        "notify_channels": notify.channels(),
         "watch_dir": settings.watch_dir if settings.watch_dir and os.path.isdir(settings.watch_dir) else None,
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.
