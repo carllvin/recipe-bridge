@@ -291,7 +291,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             job.recipes.extend(recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")
-        jobs.match_images_to_recipes(job)
+        # Each link is its own "page": only that page's photos belong to its
+        # recipes (no neighbouring pages as for a cookbook's photo spreads).
+        jobs.match_images_to_recipes(job, page_margin=0)
         # Recipes from different websites don't belong to one cookbook by default.
         job.suggested_cookbook_name = job.cookbook_name = None
         _finish_extraction(job)
