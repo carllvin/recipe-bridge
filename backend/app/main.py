@@ -129,7 +129,7 @@ SINGLE_RECIPE_NOTE = (
 
 
 def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
-                    single_recipe: bool = False) -> None:
+                    single_recipe: bool = False, handwriting: bool = False) -> None:
     job = jobs.get_job(job_id)
     if job is None:
         return
@@ -145,9 +145,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
             result = process_epub(source_paths[0], images_dir)
         elif doc_type == "images":
-            job.progress_label = "Running OCR on uploaded photo(s) …"
+            job.progress_label = ("Reading the handwriting with the AI …" if handwriting
+                                  else "Running OCR on uploaded photo(s) …")
             jobs.save_job(job)
-            result = process_images(source_paths, images_dir)
+            result = process_images(source_paths, images_dir, handwriting=handwriting)
+            job.token_usage.input_tokens += result["usage"].input_tokens
+            job.token_usage.output_tokens += result["usage"].output_tokens
         elif doc_type == "url":
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
@@ -329,9 +332,11 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 
 @app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False)):
+async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False),
+                       handwriting: bool = Form(False)):
     """single_recipe: the uploaded photos all show one recipe (e.g. across a
-    double page) - the AI is told to return exactly one."""
+    double page) - the AI is told to return exactly one. handwriting: the AI
+    reads the photos instead of OCR (handwritten recipe cards)."""
     _check_budget()
     filenames = [f.filename or "" for f in files]
     doc_type, error = _classify_upload(filenames)
@@ -340,7 +345,7 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
 
     job = jobs.create_job(_display_name(filenames))
     source_paths = await _save_uploads(files, _job_dir(job.id))
-    _launch_extraction(job, source_paths, doc_type, single_recipe)
+    _launch_extraction(job, source_paths, doc_type, single_recipe, handwriting)
     return {"job_id": job.id}
 
 
@@ -369,10 +374,12 @@ async def _save_uploads(files, job_dir: str) -> list[str]:
     return source_paths
 
 
-def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recipe: bool = False) -> None:
+def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recipe: bool = False,
+                       handwriting: bool = False) -> None:
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, source_paths, doc_type, settings.force_ocr,
-                                                    single_recipe and doc_type == "images"), daemon=True).start()
+                                                    single_recipe and doc_type == "images",
+                                                    handwriting and doc_type == "images"), daemon=True).start()
 
 
 def _start_url_job(url: str, source: str | None = None):

@@ -223,6 +223,7 @@ function clearPhotos() {
   photoState.files.forEach((p) => URL.revokeObjectURL(p.url));
   photoState.files = [];
   el('photo-single').checked = false;
+  el('photo-handwriting').checked = false;
   renderPhotos();
 }
 
@@ -236,8 +237,9 @@ el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);
   if (!files.length) return;
   const single = el('photo-single').checked;
+  const handwriting = el('photo-handwriting').checked;
   clearPhotos();
-  uploadFiles(files, { singleRecipe: single });
+  uploadFiles(files, { singleRecipe: single, handwriting });
 });
 
 async function uploadFiles(files, options = {}) {
@@ -253,6 +255,7 @@ async function uploadFiles(files, options = {}) {
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
   if (options.singleRecipe) formData.append('single_recipe', 'true');
+  if (options.handwriting) formData.append('handwriting', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
