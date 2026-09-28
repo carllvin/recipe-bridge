@@ -97,6 +97,10 @@ el('tandoor-badge').addEventListener('click', () => {
   }
 });
 
+function isMealie() {
+  return !!APP_CONFIG.recipe_manager && APP_CONFIG.recipe_manager !== 'Tandoor';
+}
+
 // Link to a recipe imported into Tandoor (id) or Mealie (slug) - null without one.
 function importedRecipeUrl(id) {
   return id && APP_CONFIG.recipe_url_base ? `${APP_CONFIG.recipe_url_base}${id}` : null;
@@ -1422,7 +1426,7 @@ function showArea(area) {
   if (area === 'inbox') loadInbox();
   if (area === 'plan') { openPlanArea(); loadCooked(); loadSeason(); }
   if (area === 'maintain') {
-    loadNewRecipesStatus();
+    if (!isMealie()) loadNewRecipesStatus();
     loadUsage();
     loadHealth();
     loadSettings();
@@ -1888,7 +1892,7 @@ async function loadSettings() {
       return keys.length ? `<h5>${t(g.titleKey)}</h5>` + keys.map((k) => `
         <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('healthShort_' + k))}</label>`).join('') : '';
     }).join('');
-    settingsState.maint = m;
+    settingsState.maint = isMealie() ? null : m;  // no automatic maintenance with Mealie
     if (healthState.data) renderHealth(healthState.data);
     el('set-budget-limit').value = data.budget.monthly_tokens;
     el('set-budget-block').checked = data.budget.block_manual;
@@ -2014,8 +2018,10 @@ function renderHealth(data) {
       </div>
     </div>`;
   };
+  const available = APP_CONFIG.health_metrics;  // null = all (Tandoor)
   el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
-    const metrics = g.metrics.map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    const metrics = g.metrics.filter((k) => !available || available.includes(k)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    if (!metrics.length) return '';
     // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
     const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
     const open = metrics.filter((m) => !done(m));
@@ -2030,7 +2036,7 @@ function renderHealth(data) {
         <h4>${t(g.titleKey)}</h4>
         ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
           title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
-        ${g.tool ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
+        ${g.tool && !isMealie() ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
       </div>
       ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;
@@ -2067,8 +2073,8 @@ function closeHealthDetail() {
 }
 
 function healthRow(item) {
-  const link = item.recipe_id && APP_CONFIG.tandoor_url
-    ? ` <a href="${APP_CONFIG.tandoor_url}/view/recipe/${item.recipe_id}" target="_blank" rel="noopener" title="${escapeHtml(t('openInTandoorBtn'))}">↗</a>`
+  const link = importedRecipeUrl(item.recipe_id)
+    ? ` <a href="${escapeHtml(importedRecipeUrl(item.recipe_id))}" target="_blank" rel="noopener" title="${escapeHtml(t('openInTandoorBtn'))}">↗</a>`
     : '';
   return `<label class="health-row" data-name="${escapeHtml(item.name.toLowerCase())}">
     <input type="checkbox" data-key="${escapeHtml(item.key)}" data-name="${escapeHtml(item.name)}" />
@@ -2504,6 +2510,7 @@ el('plan-apply-btn').addEventListener('click', async () => {
 });
 
 async function loadNewRecipesStatus() {
+  if (isMealie()) return;  // Tandoor only
   const label = el('new-recipes-status');
   const btn = el('new-recipes-start-btn');
   btn.disabled = true;
@@ -2856,9 +2863,12 @@ if ('serviceWorker' in navigator) {
 
 (async function init() {
   await initI18n();
-  if (APP_CONFIG.recipe_manager && APP_CONFIG.recipe_manager !== 'Tandoor') {
-    // Maintaining and planning work on Tandoor's data only.
-    document.querySelectorAll('.nav-btn[data-area="maintain"], .nav-btn[data-area="plan"]').forEach((b) => b.classList.add('hidden'));
+  if (isMealie()) {
+    // Planning works on Tandoor's data only; Maintain shows the tiles that
+    // also work with Mealie (APP_CONFIG.health_metrics).
+    document.querySelectorAll('.nav-btn[data-area="plan"]').forEach((b) => b.classList.add('hidden'));
+    document.querySelectorAll('.tandoor-only').forEach((elm) => elm.classList.add('hidden'));
+    document.querySelector('#settings-card > summary h3').textContent = t('settingsTitleMealie');
   }
   await tryRestoreJobFromUrl();
   showArea('import');

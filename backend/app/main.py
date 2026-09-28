@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -1006,11 +1006,16 @@ def _check_budget() -> None:
 
 def _start_tool_job(tool: str, meta: dict | None = None):
     _check_budget()
+    if target.is_mealie() and tool not in mealie_maintenance.TOOLS:
+        raise HTTPException(400, "This tool needs Tandoor - it isn't available with Mealie.")
     job = tool_jobs.create_tool_job(tool)
     if meta:
         job.meta.update(meta)
-        tool_jobs.save_tool_job(job)
-    threading.Thread(target=_TOOL_SCANS[tool], args=(job.id,), daemon=True).start()
+    if target.is_mealie():
+        job.meta["target"] = "mealie"  # scanned and applied by mealie_maintenance
+    tool_jobs.save_tool_job(job)
+    scan = mealie_maintenance.run_scan if target.is_mealie() else _TOOL_SCANS[tool]
+    threading.Thread(target=scan, args=(job.id,), daemon=True).start()
     return {"job_id": job.id}
 
 
@@ -1284,7 +1289,8 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
             tool_jobs.save_tool_job(job)
         action = "apply"
     if action == "apply":
-        apply_fn = _TOOL_APPLY.get(job.tool)
+        apply_fn = (mealie_maintenance.apply_suggestion if job.meta.get("target") == "mealie"
+                    else _TOOL_APPLY.get(job.tool))
         if apply_fn is None:
             raise LookupError(f"Unknown tool: {job.tool}")
         before = next((s.status for s in job.suggestions if s.id == suggestion_id), None)
@@ -1442,6 +1448,8 @@ async def get_config():
         "recipe_manager": target.name(),
         "manager_url": target.base_url(),
         "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
+        # the tiles that work with Mealie (None = all of them, Tandoor)
+        "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
     }
 
 

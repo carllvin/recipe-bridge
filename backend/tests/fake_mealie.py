@@ -38,6 +38,25 @@ class FakeMealie:
             return httpx.Response(401, json={"detail": "Not authenticated"})
         if path == "/users/self":
             return httpx.Response(200, json={"username": "cook", "groupSlug": "home"})
+        merge = re.match(r"^/(foods|units)/merge$", path)
+        if merge and request.method == "PUT":
+            kind = "food" if merge.group(1) == "foods" else "unit"
+            body = json.loads(request.content)
+            src, dst = (body["fromFood"], body["toFood"]) if kind == "food" else (body["fromUnit"], body["toUnit"])
+            if src not in self.db[kind] or dst not in self.db[kind]:
+                return httpx.Response(500, json={"detail": "Failed to merge"})
+            for recipe in self.recipes.values():
+                for ing in recipe.get("recipeIngredient", []):
+                    if (ing.get(kind) or {}).get("id") == src:
+                        ing[kind] = {"id": dst, "name": self.db[kind][dst]["name"]}
+            del self.db[kind][src]
+            return httpx.Response(200, json={"message": "merged"})
+        item = re.match(r"^(/foods|/units|/organizers/tags)/([^/]+)$", path)
+        if item and request.method == "DELETE":
+            kind = LISTS[item.group(1)]
+            if item.group(2) not in self.db[kind]:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=self.db[kind].pop(item.group(2)))
         if path in LISTS:
             kind = LISTS[path]
             if request.method == "GET":
@@ -49,14 +68,16 @@ class FakeMealie:
                 return httpx.Response(201, json=self.add(kind, body["name"]))
         if path == "/recipes":
             if request.method == "GET":
-                return self._page([{"name": r["name"], "slug": r["slug"]} for r in self.recipes.values()], request)
+                return self._page([{k: r.get(k) for k in ("name", "slug", "image", "recipeServings", "tags", "description")}
+                                   for r in self.recipes.values()], request)
             if request.method == "POST":
                 name = json.loads(request.content)["name"]
                 slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
                 while slug in self.recipes:
                     slug += "-1"
-                self.recipes[slug] = {"id": str(uuid.uuid4()), "name": name, "slug": slug,
-                                      "recipeIngredient": [], "recipeInstructions": [], "tags": [], "recipeCategory": []}
+                self.recipes[slug] = {"id": str(uuid.uuid4()), "name": name, "slug": slug, "image": None,
+                                      "recipeServings": 0, "recipeIngredient": [], "recipeInstructions": [],
+                                      "tags": [], "recipeCategory": []}
                 return httpx.Response(201, json=slug)
         m = re.match(r"^/recipes/([^/]+)(/image)?$", path)
         if m:
@@ -67,6 +88,7 @@ class FakeMealie:
                 content = request.content.decode("latin-1")
                 ext = re.search(r'name="extension"\r\n\r\n([^\r]+)', content)
                 self.images[slug] = (ext.group(1) if ext else "", request.content)
+                self.recipes[slug]["image"] = "1"
                 return httpx.Response(200, json={"image": "1"})
             if request.method == "GET":
                 return httpx.Response(200, json=copy.deepcopy(self.recipes[slug]))
@@ -104,3 +126,16 @@ class FakeMealie:
             if tag["id"] not in self.db["tag"]:
                 return f"unknown tag {tag}"
         return None
+
+    def add_recipe(self, name, ingredients=(), tags=(), servings=0, image=None):
+        """ingredients: [(food item, unit item or None)]"""
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        self.recipes[slug] = {
+            "id": str(uuid.uuid4()), "name": name, "slug": slug, "image": image, "recipeServings": servings,
+            "recipeIngredient": [{"referenceId": str(uuid.uuid4()), "quantity": 1, "note": "",
+                                  "food": {"id": f["id"], "name": f["name"]},
+                                  "unit": {"id": u["id"], "name": u["name"]} if u else None} for f, u in ingredients],
+            "recipeInstructions": [], "tags": [{"id": t["id"], "name": t["name"], "slug": t["slug"]} for t in tags],
+            "recipeCategory": [],
+        }
+        return self.recipes[slug]

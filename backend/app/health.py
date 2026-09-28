@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, mealie_client, mealie_maintenance, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -118,8 +118,28 @@ def _unused_items(recipes, foods, units, keywords, unit_conversions) -> dict:
     }
 
 
+def _write(started, metrics, item_lists, recipe_versions=None) -> None:
+    os.makedirs(settings.data_dir, exist_ok=True)
+    tmp = _path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"computed_at": started, "metrics": metrics, "items": item_lists,
+                   "recipe_versions": recipe_versions}, f, ensure_ascii=False)
+    os.replace(tmp, _path())
+
+
 def _compute() -> None:
     started = time.time()  # changes during the run make the result stale again
+    if target.is_mealie():  # the tiles that work with Mealie (mealie_maintenance)
+        try:
+            with mealie_client.get_client() as client:
+                metrics, item_lists = mealie_maintenance.compute(client)
+            _write(started, metrics, item_lists)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Health overview (Mealie) failed")
+            _state["error"] = str(exc)
+        finally:
+            _state["running"] = False
+        return
     try:
         with tandoor_client.get_client() as client:
             recipes = fetch_all_recipes_full(client)
@@ -178,12 +198,7 @@ def _compute() -> None:
         metrics = {"recipes_total": len(recipes), "foods_used": len(used_foods)}
         # lets the recipe tools read only what changed since (recipe_scope.py)
         recipe_versions = {str(r["id"]): r.get("updated_at") for r in recipes}
-        os.makedirs(settings.data_dir, exist_ok=True)
-        tmp = _path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"computed_at": started, "metrics": metrics, "items": item_lists,
-                       "recipe_versions": recipe_versions}, f, ensure_ascii=False)
-        os.replace(tmp, _path())
+        _write(started, metrics, item_lists, recipe_versions)
     except Exception as exc:  # noqa: BLE001
         log.exception("Health overview failed")
         _state["error"] = str(exc)
