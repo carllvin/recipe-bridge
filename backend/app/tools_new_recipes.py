@@ -18,7 +18,11 @@ Per run, for the new recipes only:
 4. Suggest a season tag and further tags.
 Steps 2-4 become suggestions that are applied after review. The recipes are
 recorded as handled once every suggestion is applied or skipped - so if the
-container restarts before that, they simply show up again next time."""
+container restarts before that, they simply show up again next time.
+
+After an import through this app the review already covered translation,
+structure, matching (import_matching) and tags (added while reading the
+recipe) - only step 3 runs, and it is applied right away (_apply_all)."""
 from __future__ import annotations
 
 import asyncio
@@ -472,7 +476,8 @@ def run_scan(job_id: str) -> None:
                                 if ref and ref.get("id") is not None:
                                     used[entity][ref["id"]] = ref
 
-                candidates = {
+                candidates = {} if from_import else {
+                    # (after an import the review already matched them)
                     # Units have no recipe filter in Tandoor's API, and the
                     # list is small - so all units of the new recipes go in.
                     "unit": list(used["unit"].values()),
@@ -481,7 +486,7 @@ def run_scan(job_id: str) -> None:
                                 if _only_used_by(client, "keywords", k["id"], recipe_ids)],
                 }
                 for entity in ("unit", "food", "keyword"):
-                    if job.cancel_requested or not candidates[entity]:
+                    if job.cancel_requested or not candidates.get(entity):
                         continue
                     all_items = (tools_ingredients.fetch_all_foods_full(client) if entity == "food"
                                  else tandoor_client.fetch_all_items(client, entity))
@@ -554,11 +559,11 @@ def run_scan(job_id: str) -> None:
                                        for kw in r.get("keywords", [])]}
                     for r in recipes
                 ]
-                if not job.cancel_requested:
+                if not job.cancel_requested and not from_import:  # tagged while reading the recipe
                     suggestions += tools_tags.season_suggestions(
                         job, [r for r in recipes if not tools_tags.has_season_tag(r)]
                     )
-                if not job.cancel_requested:
+                if not job.cancel_requested and not from_import:
                     all_tags = tandoor_client.fetch_all_items(client, "keyword")
                     food_names = tools_tags.food_name_set(client)
                     suggestions += tools_tags.suggest_tags_suggestions(
@@ -566,9 +571,13 @@ def run_scan(job_id: str) -> None:
                     )
 
             job.suggestions = suggestions
+            if from_import:
+                job.meta["notified"] = True  # applied below - nothing waits for review
             job.status = "cancelled" if job.cancel_requested else "ready"
             job.progress_label = None
             tool_jobs.save_tool_job(job)
+            if from_import and job.status == "ready":
+                _apply_all(job)
             after_action(job)
 
     except Exception as exc:  # noqa: BLE001
@@ -576,6 +585,36 @@ def run_scan(job_id: str) -> None:
         job.status = "error"
         job.error = str(exc)
         tool_jobs.save_tool_job(job)
+
+
+# main.py hands in its apply function (records undo data and "recently
+# applied" like a click in the UI) - see configure().
+_apply_fn = None
+
+
+def configure(apply_fn) -> None:
+    global _apply_fn
+    _apply_fn = apply_fn
+
+
+def _apply_all(job) -> None:
+    """After an import through this app: the ingredient data (plural,
+    nutrition, category, gram conversions) is filled in without review -
+    it's data, not a matter of taste, and every change shows under "recently
+    applied" with undo. Suggestions that fail stay in Review as failed."""
+    if _apply_fn is None:
+        return
+    job.progress_label = "Filling in the new ingredients..."
+    tool_jobs.save_tool_job(job)
+    for suggestion in list(job.suggestions):
+        if suggestion.status != "pending":
+            continue
+        try:
+            _apply_fn(job.id, suggestion.id, "apply")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Auto-apply after import failed for %s: %s", suggestion.id, exc)
+    job.progress_label = None
+    tool_jobs.save_tool_job(job)
 
 
 def after_action(job) -> None:

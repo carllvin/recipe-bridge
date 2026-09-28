@@ -50,9 +50,9 @@ TEXT = {
         "test": ("Test", "Les notifications de Tandoor Helper arrivent."),
     },
     "it": {
-        "import_ready": ("Importazione pronta", "{name}: {n} ricetta/e da controllare in Controlla → Nuove importazioni."),
+        "import_ready": ("Importazione pronta", "{name}: {n} ricetta/e da controllare in Verifica → Nuove importazioni."),
         "import_failed": ("Importazione non riuscita", "{name}: {error}"),
-        "suggestions": ("Nuovi suggerimenti", "Le esecuzioni automatiche hanno preparato {n} suggerimento/i – aspettano in Controlla."),
+        "suggestions": ("Nuovi suggerimenti", "Le esecuzioni automatiche hanno preparato {n} suggerimento/i – aspettano in Verifica."),
         "budget_warn": ("Budget IA quasi esaurito", "È stato usato il {pct} % del budget IA mensile."),
         "budget_exceeded": ("Budget IA esaurito", "Le esecuzioni automatiche sono in pausa fino a fine mese."),
         "test": ("Test", "Le notifiche di Tandoor Helper arrivano."),

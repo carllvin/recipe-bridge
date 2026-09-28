@@ -681,6 +681,21 @@ async def inbox_count():
     return {"count": count + sum(1 for i in _pending_imports() if i["status"] != "processing"), "running": running}
 
 
+@app.get("/api/tandoor/tags")
+async def tandoor_tags():
+    """Existing tag names (not tag groups) - offered when adding a tag to a
+    recipe in the import review."""
+    def load():
+        with tandoor_client.get_client() as client:
+            return sorted((k["name"] for k in tandoor_client.fetch_all_items(client, "keyword") if not k.get("numchild")),
+                          key=str.casefold)
+    try:
+        return {"tags": await asyncio.to_thread(load)}
+    except Exception as exc:  # noqa: BLE001
+        log.info("Tag list unavailable: %s", exc)
+        return {"tags": []}
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str):
     job = jobs.get_job(job_id)
@@ -1264,6 +1279,9 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
         tool_jobs.save_tool_job(job)
         tools_new_recipes.after_action(job)
     return suggestion
+
+
+tools_new_recipes.configure(_perform_suggestion_action)
 
 
 def _remember_applied(job, suggestion, journal) -> None:

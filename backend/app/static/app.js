@@ -831,6 +831,38 @@ function matchBadgeHtml(ing) {
   return '';
 }
 
+function unitBadgeHtml(ing) {
+  if (!ing.unit) return '';
+  if (ing.unit_match === 'matched') {
+    return `<span class="ing-match matched unit-match" role="button" title="${escapeHtml(tf('unitMatchedTitle', { original: ing.original_unit || '' }))}">↺</span>`;
+  }
+  if (ing.unit_match === 'new') {
+    return `<span class="ing-match new unit-match" title="${escapeHtml(t('unitNewTitle'))}">${t('matchNewLabel')}</span>`;
+  }
+  return '';
+}
+
+// Existing tag names in Tandoor, loaded once for the "add a tag" field.
+const tagState = { names: null };
+async function loadExistingTags() {
+  if (tagState.names) return tagState.names;
+  try {
+    tagState.names = (await (await fetch('/api/tandoor/tags')).json()).tags || [];
+  } catch (e) {
+    tagState.names = [];
+  }
+  el('tag-options').innerHTML = tagState.names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('');
+  return tagState.names;
+}
+
+function tagChipHtml(r, tag, i) {
+  const status = (r.tag_status || {})[tag];
+  const original = (r.tag_original || {})[tag];
+  const marker = status === 'new' ? `<span class="tag-new">${t('matchNewLabel')}</span>`
+    : status === 'matched' ? `<button type="button" class="tag-revert" data-idx="${i}" title="${escapeHtml(tf('tagMatchedTitle', { original: original || '' }))}">↺</button>` : '';
+  return `<span class="tag ${status || ''}">${escapeHtml(tag)}${marker}<button type="button" class="tag-remove" data-idx="${i}" aria-label="${escapeHtml(t('tagRemove'))}">×</button></span>`;
+}
+
 function renderDetail(r) {
   const detail = el('recipe-detail');
 
@@ -840,7 +872,10 @@ function renderDetail(r) {
     <div class="ingredient-row" data-idx="${i}" draggable="true">
       <span class="ing-drag-handle" title="${t('dragToReorder')}">⠿</span>
       <input class="ing-amount" value="${ing.amount ?? ''}" placeholder="${t('placeholderAmount')}" />
-      <input class="ing-unit" value="${escapeHtml(ing.unit ?? '')}" placeholder="${t('placeholderUnit')}" />
+      <div class="ing-unit-wrap">
+        <input class="ing-unit" value="${escapeHtml(ing.unit ?? '')}" placeholder="${t('placeholderUnit')}" />
+        ${unitBadgeHtml(ing)}
+      </div>
       <div class="ing-name-wrap">
         <input class="ing-name" value="${escapeHtml(ing.name)}" placeholder="${t('placeholderIngredient')}" />
         ${matchBadgeHtml(ing)}
@@ -864,7 +899,8 @@ function renderDetail(r) {
     </div>
   `).join('') || `<p style="color:#8f9689;font-size:0.88rem;">${t('noSteps')}</p>`;
 
-  const tagsHtml = r.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('') || `<span style="color:#8f9689;font-size:0.85rem;">${t('noTags')}</span>`;
+  const tagsHtml = r.tags.map((tag, i) => tagChipHtml(r, tag, i)).join('')
+    + `<input class="tag-add" list="tag-options" placeholder="${escapeHtml(t('tagAddPlaceholder'))}" />`;
 
   const generateTileHtml = APP_CONFIG.image_gen_available
     ? `<div class="image-choice generate-tile" data-generate="1" title="${t('generateImageBtn')}">
@@ -960,9 +996,13 @@ function renderDetail(r) {
       // Keep the Tandoor match info only while the name is untouched - a
       // hand-edited name hasn't been checked against Tandoor.
       const unchanged = name === before.name;
+      const unit = row.querySelector('.ing-unit').value || null;
+      const unitUnchanged = unit === (before.unit ?? null);
       return {
         amount: numOrNull(row.querySelector('.ing-amount').value),
-        unit: row.querySelector('.ing-unit').value || null,
+        unit,
+        unit_match: unitUnchanged ? (before.unit_match ?? null) : null,
+        original_unit: unitUnchanged ? (before.original_unit ?? null) : null,
         name,
         note: row.querySelector('.ing-note').value || null,
         group: null,
@@ -997,8 +1037,61 @@ function renderDetail(r) {
     sel.addEventListener('change', save);
   });
 
+  // Undo a unit match: back to the unit as extracted (a new unit).
+  detail.querySelectorAll('.unit-match.matched').forEach((badge) => {
+    badge.addEventListener('click', () => {
+      const ing = r.ingredients[Number(badge.closest('.ingredient-row').dataset.idx)];
+      if (!ing || !ing.original_unit) return;
+      ing.unit = ing.original_unit;
+      ing.original_unit = null;
+      ing.unit_match = 'new';
+      patchRecipe(r.id, { ingredients: r.ingredients });
+      renderDetail(r);
+    });
+  });
+
+  // Tags: remove, undo a match, add (existing ones offered while typing).
+  const saveTags = () => {
+    patchRecipe(r.id, { tags: r.tags, tag_status: r.tag_status || {}, tag_original: r.tag_original || {} });
+    renderDetail(r);
+  };
+  detail.querySelectorAll('.tag-remove').forEach((b) => b.addEventListener('click', () => {
+    const [tag] = r.tags.splice(Number(b.dataset.idx), 1);
+    delete (r.tag_status || {})[tag];
+    delete (r.tag_original || {})[tag];
+    saveTags();
+  }));
+  detail.querySelectorAll('.tag-revert').forEach((b) => b.addEventListener('click', () => {
+    const i = Number(b.dataset.idx);
+    const tag = r.tags[i];
+    const original = (r.tag_original || {})[tag];
+    if (!original) return;
+    r.tags[i] = original;
+    delete r.tag_original[tag];
+    delete r.tag_status[tag];
+    r.tag_status[original] = 'new';
+    saveTags();
+  }));
+  const tagInput = detail.querySelector('.tag-add');
+  loadExistingTags();
+  const addTag = async () => {
+    const value = tagInput.value.trim();
+    if (!value) return;
+    const names = await loadExistingTags();
+    const existing = names.find((n) => n.toLowerCase() === value.toLowerCase());
+    const tag = existing || value;
+    if (!r.tags.some((x) => x.toLowerCase() === tag.toLowerCase())) {
+      r.tags.push(tag);
+      r.tag_status = { ...(r.tag_status || {}), [tag]: existing ? 'exists' : 'new' };
+    }
+    saveTags();
+    detail.querySelector('.tag-add')?.focus();
+  };
+  tagInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
+  tagInput.addEventListener('change', addTag);
+
   // Undo a match: back to the extracted name, which becomes a new ingredient.
-  detail.querySelectorAll('.ing-match.matched').forEach((badge) => {
+  detail.querySelectorAll('.ing-match.matched:not(.unit-match)').forEach((badge) => {
     badge.addEventListener('click', () => {
       const ing = r.ingredients[Number(badge.closest('.ingredient-row').dataset.idx)];
       if (!ing || !ing.original_name) return;
