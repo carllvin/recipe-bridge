@@ -1314,6 +1314,7 @@ async def get_config():
         "supported_extensions": sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS),
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "image_gen_available": image_gen.is_configured(),
+        "watch_dir": settings.watch_dir if settings.watch_dir and os.path.isdir(settings.watch_dir) else None,
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.
         "tandoor_url": settings.tandoor_url.rstrip("/") if settings.tandoor_url else None,

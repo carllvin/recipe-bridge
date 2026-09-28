@@ -49,9 +49,9 @@
 
     <!-- Meal plan -->
     <div id="area-plan" class="area-screen hidden">
-      <h1 data-i18n="toolMealPlanTitle">Meal plan &amp; shopping list</h1>
-      <p class="lede" data-i18n="toolMealPlanDesc">Picks one of your recipes per day.</p>
-      <p id="season-now" class="season-now hidden"></p>
+      <h1 data-i18n="planHeadline">Plan</h1>
+      <p class="lede" data-i18n="planLede">What to cook today – and this week?</p>
+      <div id="season-now" class="season-now hidden"></div>
       <section id="cooked-card" class="tool-card cooked-card hidden">
         <h3 data-i18n="cookedTitle">How was it?</h3>
         <p class="settings-hint" data-i18n="cookedHint">Rate what you cooked – Tandoor keeps it as a cook log, and the weekly plan prefers well-rated recipes you haven't had for a while.</p>
@@ -59,38 +59,41 @@
       </section>
       <section class="tool-card cook-today-card">
         <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
-        <p class="settings-hint" data-i18n="cookTodayHint">Type what you have at home – finds matching recipes in your collection (no AI).</p>
         <form id="cook-today-form" class="cook-today-form">
           <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
           <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
         </form>
+        <p class="settings-hint ct-hint">ⓘ <span data-i18n="cookTodayHint">Salt, pepper, oil … count as at home.</span></p>
         <p id="ct-status" class="settings-hint"></p>
         <div id="ct-results" class="ct-results"></div>
       </section>
-      <div class="tool-card plan-form-card">
+      <section class="tool-card plan-card">
+        <h3 data-i18n="weekPlanTitle">Weekly plan</h3>
         <form id="meal-plan-form" class="meal-plan-form">
           <label><span data-i18n="mealPlanStart">Start</span><input id="mp-start" type="date" required /></label>
           <label><span data-i18n="mealPlanDays">Days</span><input id="mp-days" type="number" min="1" max="14" value="7" required /></label>
           <label><span data-i18n="mealPlanMeal">Meal</span><select id="mp-meal" required></select></label>
           <label class="mp-wide"><span data-i18n="mealPlanWishes">Wishes</span><input id="mp-wishes" type="text" data-i18n-placeholder="mealPlanWishesPlaceholder" placeholder="e.g. 2x vegetarian, quick on weekdays" /></label>
-          <label class="mp-wide mp-check"><input id="mp-shopping" type="checkbox" checked /> <span data-i18n="mealPlanShopping">Add ingredients to the shopping list</span></label>
+          <div class="mp-wide mp-foot">
+            <label class="mp-check"><input id="mp-shopping" type="checkbox" checked /> <span data-i18n="mealPlanShopping">Add ingredients to the shopping list</span></label>
+            <button id="mp-start-btn" class="btn" type="submit" data-i18n="mealPlanStartBtn">Plan the week</button>
+          </div>
           <p id="mp-hint" class="new-recipes-auto hidden mp-wide"></p>
-          <button id="mp-start-btn" class="btn" type="submit" data-i18n="mealPlanStartBtn">Plan</button>
         </form>
-      </div>
-      <div id="plan-progress" class="tools-run-progress hidden">
-        <div class="spinner"></div>
-        <div class="status-text" data-i18n="planRunning">Planning …</div>
-      </div>
-      <div id="plan-error" class="error-banner hidden"></div>
-      <!-- The action bar sticks to the bottom only while the week is in view. -->
-      <div class="plan-week-wrap">
-        <div id="plan-week" class="plan-week"></div>
-        <div id="plan-actions" class="plan-actions hidden">
-          <span id="plan-status" class="tools-bulk-status"></span>
-          <button id="plan-apply-btn" class="btn" type="button"></button>
+        <div id="plan-progress" class="tools-run-progress hidden">
+          <div class="spinner"></div>
+          <div class="status-text" data-i18n="planRunning">Planning …</div>
         </div>
-      </div>
+        <div id="plan-error" class="error-banner hidden"></div>
+        <!-- The action bar sticks to the bottom only while the week is in view. -->
+        <div class="plan-week-wrap">
+          <div id="plan-week" class="plan-week"></div>
+          <div id="plan-actions" class="plan-actions hidden">
+            <span id="plan-status" class="tools-bulk-status"></span>
+            <button id="plan-apply-btn" class="btn" type="button"></button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <!-- Maintain (tools) -->
@@ -98,35 +101,36 @@
       <div id="tools-cards-view">
         <h1 data-i18n="maintainHeadline">Maintain</h1>
         <p class="lede" data-i18n="maintainLede">Keep your Tandoor collection tidy. Every tool shows suggestions first - you review them under "Review".</p>
-        <div class="maintain-top">
-          <div class="tool-card tool-card-featured">
-            <div class="tool-card-icon">🆕</div>
-            <h3 data-i18n="toolNewRecipesTitle">Process new recipes</h3>
-            <p data-i18n="toolNewRecipesDesc">For recipes added since the last run (via Tandoor or this app): translates them automatically, then suggests revising their structure (steps, ingredients per step, servings, times), matching their ingredients, units and tags to existing ones, filling in ingredient details, and adding tags.</p>
-            <p id="new-recipes-status" class="new-recipes-status"></p>
-            <p id="new-recipes-auto" class="new-recipes-auto hidden"></p>
-            <div id="new-recipes-open-jobs" class="new-recipes-open-jobs"></div>
+        <section class="new-recipes-bar">
+          <div class="new-recipes-main">
+            <span class="new-recipes-icon">🆕</span>
+            <div class="new-recipes-text">
+              <h3 data-i18n="toolNewRecipesTitle">Process new recipes</h3>
+              <p id="new-recipes-status" class="new-recipes-status"></p>
+              <p id="new-recipes-auto" class="new-recipes-auto hidden"></p>
+            </div>
             <button id="new-recipes-start-btn" class="btn tool-start-btn" data-tool="new_recipes" data-endpoint="/api/tools/new-recipes/process" data-i18n="toolStartBtn" disabled>Start</button>
           </div>
-          <div class="tool-card usage-card">
-            <div class="tool-card-icon">📊</div>
-            <h3 data-i18n="usageTitle">AI usage (30 days)</h3>
-            <p id="usage-total" class="new-recipes-status"></p>
-            <p id="usage-budget" class="usage-budget hidden"></p>
-            <div id="usage-by-source" class="usage-by-source"></div>
-          </div>
-        </div>
+          <div id="new-recipes-open-jobs" class="new-recipes-open-jobs"></div>
+          <details class="new-recipes-info">
+            <summary data-i18n="newRecipesWhat">What does this do?</summary>
+            <p data-i18n="toolNewRecipesDesc">For recipes added since the last run (via Tandoor or this app): translates them automatically, then suggests revising their structure, matching their ingredients, units and tags, filling in ingredient details, and adding tags.</p>
+          </details>
+        </section>
         <section class="tool-card health-card">
           <div class="health-head">
             <h3 data-i18n="healthTitle">State of your collection</h3>
             <span id="health-when" class="new-recipes-auto"></span>
             <button id="health-refresh-btn" class="btn secondary" type="button" data-i18n="healthRefresh">Refresh</button>
           </div>
-          <div id="health-grid" class="health-grid"></div>
+          <div id="health-grid" class="health-groups"></div>
           <div id="health-detail" class="health-detail hidden"></div>
         </section>
-        <section class="tool-card settings-card">
-          <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+        <details id="settings-card" class="tool-card settings-card">
+          <summary>
+            <h3 data-i18n="settingsTitle">Automation &amp; budget</h3>
+            <span id="settings-summary" class="settings-summary"></span>
+          </summary>
           <div class="settings-grid">
             <div class="settings-block">
               <h4 data-i18n="maintTitle">Automatic maintenance</h4>
@@ -150,30 +154,14 @@
               <div class="budget-bar"><div id="budget-fill"></div></div>
               <p id="budget-text" class="settings-hint"></p>
               <p class="settings-hint" data-i18n="budgetHint">Once reached, automatic runs (new recipes, post-processing after imports, automatic maintenance) no longer start.</p>
+              <h4 class="usage-head" data-i18n="usageTitle">AI usage (30 days)</h4>
+              <p id="usage-total" class="settings-hint"></p>
+              <div id="usage-by-source" class="usage-by-source"></div>
             </div>
           </div>
           <div class="settings-actions">
             <button id="settings-save" class="btn" type="button" data-i18n="settingsSave">Save</button>
             <span id="settings-saved" class="settings-hint"></span>
-          </div>
-        </section>
-        <details class="more-tools">
-          <summary data-i18n="moreToolsTitle">More tools</summary>
-          <p class="more-tools-hint" data-i18n="moreToolsHint">Run over the whole collection.</p>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolIngredientsReviewTitle">Ingredients: review &amp; clean up</h3>
-              <p data-i18n="toolIngredientsReviewDesc">Fixes prepared-form names, translates, and merges duplicates.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="ingredients_review" data-endpoint="/api/tools/ingredients/review" data-i18n="toolStartBtn">Start</button>
-          </div>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolUnitsTitle">Units: review &amp; clean up</h3>
-              <p data-i18n="toolUnitsDesc">Unifies spellings, translates, and fills in missing plurals.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="units_review" data-endpoint="/api/tools/units/review" data-i18n="toolStartBtn">Start</button>
-          </div>
-          <div class="more-tool-row">
-            <div><h3 data-i18n="toolTagsCleanupTitle">Tags: translate &amp; simplify</h3>
-              <p data-i18n="toolTagsCleanupDesc">Translates tags and merges ones that mean the same thing - in one pass.</p></div>
-            <button class="btn secondary tool-start-btn" data-tool="tags_cleanup" data-endpoint="/api/tools/tags/cleanup" data-i18n="toolStartBtn">Start</button>
           </div>
         </details>
       </div>
@@ -197,6 +185,7 @@
             <button id="tools-apply-selected-btn" class="btn" type="button" disabled></button>
           </div>
         </div>
+        <div id="tools-skipped-note" class="tools-skipped-note hidden"></div>
         <div id="tools-suggestions-list" class="tools-suggestions-list"></div>
       </div>
     </div>
@@ -232,36 +221,16 @@
           <button id="photo-import" class="btn" type="button"></button>
         </div>
       </section>
-      <div class="import-more">
-        <div class="import-tabs" role="tablist">
-          <button type="button" class="import-tab active" data-pane="url" data-i18n="importTabUrl">🔗 Link</button>
-          <button type="button" class="import-tab" data-pane="scan" data-i18n="importTabScan">🌐 Scan a website</button>
-          <button type="button" class="import-tab" data-pane="text" data-i18n="importTabText">📝 Paste text</button>
+      <!-- One field for everything that isn't a file: a link (one recipe, or
+           scan the whole site) or a pasted recipe text - detected while typing. -->
+      <form id="smart-form" class="smart-form">
+        <textarea id="smart-input" rows="1" data-i18n-placeholder="smartPlaceholder" placeholder="Paste a link or a recipe text …"></textarea>
+        <div class="smart-actions">
+          <button id="smart-import" class="btn" type="submit" disabled data-i18n="smartImport">Import</button>
+          <button id="smart-scan" class="btn secondary hidden" type="button" data-i18n="smartScan">🌐 Scan the whole website</button>
         </div>
-        <form id="url-form" class="url-form import-pane" data-pane="url">
-          <span class="url-form-or" data-i18n="urlImportOr">Import a single recipe from a website</span>
-          <div class="url-form-row">
-            <input id="url-input" type="url" inputmode="url" placeholder="https://…" required />
-            <button class="btn" type="submit" data-i18n="urlImportBtn">Import</button>
-          </div>
-          <p class="bookmarklet-hint">
-            <a id="bookmarklet" class="bookmarklet" href="#" draggable="true" data-i18n="bookmarkletLabel">📥 Send to Tandoor Helper</a>
-            <span data-i18n="bookmarkletHint">Drag this button to your bookmarks bar – clicking it on a recipe page sends the page here.</span>
-          </p>
-        </form>
-        <form id="scan-form" class="url-form import-pane hidden" data-pane="scan">
-          <span class="url-form-or" data-i18n="scanHint">Finds the recipes on a site (homepage or a category page) – you pick which to import.</span>
-          <div class="url-form-row">
-            <input id="scan-input" type="url" inputmode="url" placeholder="https://…" required />
-            <button class="btn" type="submit" data-i18n="scanBtn">Scan</button>
-          </div>
-        </form>
-        <form id="text-form" class="url-form import-pane hidden" data-pane="text">
-          <span class="url-form-or" data-i18n="textHint">Paste a recipe from a message, an email or a note.</span>
-          <textarea id="text-input" rows="7" data-i18n-placeholder="textPlaceholder" placeholder="Title, ingredients, steps …"></textarea>
-          <button class="btn" type="submit" data-i18n="textImportBtn">Import text</button>
-        </form>
-      </div>
+        <p id="smart-hint" class="smart-hint"></p>
+      </form>
       <section id="pick-panel" class="pick-panel hidden">
         <div class="pick-head">
           <h3 id="pick-title"></h3>
@@ -285,6 +254,23 @@
         <h3 data-i18n="recentImportsTitle">Recent imports</h3>
         <div id="recent-imports-list" class="new-recipes-open-jobs"></div>
       </div>
+      <details class="more-ways">
+        <summary data-i18n="moreWaysTitle">More ways to import</summary>
+        <div class="more-way">
+          <h4 data-i18n="moreWayBookmarkletTitle">🔖 Bookmark button</h4>
+          <p><span data-i18n="bookmarkletHint">Drag this button to your bookmarks bar – clicking it on a recipe page sends the page here.</span></p>
+          <a id="bookmarklet" class="bookmarklet" href="#" draggable="true" data-i18n="bookmarkletLabel">📥 Send to Tandoor Helper</a>
+        </div>
+        <div class="more-way">
+          <h4 data-i18n="moreWayShareTitle">📱 Share from the phone</h4>
+          <p id="more-way-insecure" class="more-way-warn hidden" data-i18n="moreWayInsecure">This address is not HTTPS – the browser won’t install the app.</p>
+          <p data-i18n="moreWayShareText">Install the helper on your phone (browser menu → "Install app" / "Add to home screen"). It then shows up in the share menu – links, text and photos land right here. Needs HTTPS.</p>
+        </div>
+        <div class="more-way">
+          <h4 data-i18n="moreWayFolderTitle">📂 Watched folder</h4>
+          <p id="more-way-folder"></p>
+        </div>
+      </details>
     </div>
 
     <!-- Processing -->

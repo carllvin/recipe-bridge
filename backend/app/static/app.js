@@ -313,24 +313,54 @@ async function startImportRequest(endpoint, body, loadingText, onStarted) {
   }
 }
 
-el('url-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const url = el('url-input').value.trim();
-  if (!url) return;
-  startImportRequest('/api/import-url', { url }, t('urlImportLoading'), () => { el('url-input').value = ''; });
+// ---------- One field for links and pasted text ----------
+
+// "www.site.de/rezept" or "site.de/..." without https:// counts as a link too.
+function smartLink(value) {
+  if (/^https?:\/\/\S+$/i.test(value)) return value;
+  if (/^(www\.)?[\w-]+(\.[\w-]+)*\.[a-z]{2,}(\/\S*)?$/i.test(value)) return 'https://' + value;
+  return null;
+}
+
+function smartMode() {
+  const value = el('smart-input').value.trim();
+  const link = !value.includes('\n') ? smartLink(value) : null;
+  if (link) return { mode: 'url', value: link };
+  if (value.length >= 20) return { mode: 'text', value };
+  return { mode: null, value };
+}
+
+function updateSmartForm() {
+  const input = el('smart-input');
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight, 320)}px`;
+  const { mode } = smartMode();
+  el('smart-import').disabled = !mode;
+  el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
+  el('smart-scan').classList.toggle('hidden', mode !== 'url');
+  el('smart-hint').textContent = mode === 'url' ? t('smartHintUrl') : mode === 'text' ? t('smartHintText') : '';
+}
+
+function clearSmartForm() {
+  el('smart-input').value = '';
+  updateSmartForm();
+}
+
+el('smart-input').addEventListener('input', updateSmartForm);
+// Enter imports a link; in a recipe text it's a new line.
+el('smart-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && smartMode().mode === 'url') {
+    e.preventDefault();
+    el('smart-form').requestSubmit();
+  }
 });
 
-el('text-form').addEventListener('submit', (e) => {
+el('smart-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const text = el('text-input').value.trim();
-  if (!text) return;
-  startImportRequest('/api/import-text', { text }, t('textImportLoading'), () => { el('text-input').value = ''; });
+  const { mode, value } = smartMode();
+  if (mode === 'url') startImportRequest('/api/import-url', { url: value }, t('urlImportLoading'), clearSmartForm);
+  else if (mode === 'text') startImportRequest('/api/import-text', { text: value }, t('textImportLoading'), clearSmartForm);
 });
-
-document.querySelectorAll('.import-tab').forEach((tab) => tab.addEventListener('click', () => {
-  document.querySelectorAll('.import-tab').forEach((x) => x.classList.toggle('active', x === tab));
-  document.querySelectorAll('.import-pane').forEach((pane) => pane.classList.toggle('hidden', pane.dataset.pane !== tab.dataset.pane));
-}));
 
 // ---------- Pick list: recipes found on a website, or browser bookmarks ----------
 
@@ -415,10 +445,9 @@ el('pick-import').addEventListener('click', () => {
 });
 
 // Website scan: runs on the server (no AI); results show up while it's running.
-el('scan-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const url = el('scan-input').value.trim();
-  if (!url) return;
+el('smart-scan').addEventListener('click', async () => {
+  const { mode, value: url } = smartMode();
+  if (mode !== 'url') return;
   el('upload-error').classList.add('hidden');
   try {
     const res = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
@@ -572,6 +601,8 @@ function hostOf(url) {
 }
 
 function showReview() {
+  // also when a finished import is opened straight from the address (?job=)
+  el('upload-screen').classList.add('hidden');
   el('processing-screen').classList.add('hidden');
   el('review-screen').classList.remove('hidden');
   el('action-bar').classList.remove('hidden');
@@ -632,6 +663,10 @@ function renderRecipeList() {
         return;
       }
       selectRecipe(r.id);
+      // phones: the recipe shows below the list - bring it into view
+      if (window.matchMedia('(max-width: 800px)').matches) {
+        el('recipe-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
     item.querySelector('.select-cb').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1630,11 +1665,29 @@ function renderBudget(budget) {
   el('budget-text').textContent = budget.limit
     ? tf('budgetUsed', { used: budget.used.toLocaleString(), limit: budget.limit.toLocaleString(), pct })
     : tf('budgetUsedNoLimit', { used: budget.used.toLocaleString() });
-  const line = el('usage-budget');
-  line.classList.toggle('hidden', !budget.warn);
-  line.classList.toggle('over', budget.exceeded);
-  line.textContent = budget.exceeded ? t('budgetExceeded') : budget.warn ? tf('budgetWarn', { pct }) : '';
+  settingsState.budget = budget;
+  renderSettingsSummary();
 }
+
+// Collapsed "automation & budget": when it runs and how much budget is used.
+function renderSettingsSummary() {
+  const { maint, budget } = settingsState;
+  const parts = [];
+  if (maint) {
+    const time = `${String(maint.hour).padStart(2, '0')}:00`;
+    parts.push(!maint.enabled ? t('maintSummaryOff')
+      : maint.every_days === 1 ? tf('maintSummaryDaily', { time }) : tf('maintSummaryEvery', { n: maint.every_days, time }));
+  }
+  if (budget) {
+    const pct = budget.limit ? Math.min(100, Math.round((budget.used / budget.limit) * 100)) : 0;
+    parts.push(budget.exceeded ? t('budgetExceeded')
+      : budget.limit ? tf('budgetSummary', { pct }) : tf('budgetSummaryNone', { used: budget.used.toLocaleString() }));
+  }
+  el('settings-summary').textContent = parts.join(' · ');
+  el('settings-summary').classList.toggle('over', !!(budget && (budget.exceeded || budget.warn)));
+}
+
+const settingsState = { maint: null, budget: null };
 
 function renderMaintStatus(st) {
   const parts = [];
@@ -1659,8 +1712,14 @@ async function loadSettings() {
     el('set-maint-enabled').checked = m.enabled;
     el('set-maint-hour').value = String(m.hour);
     el('set-maint-days').value = String(m.every_days);
-    el('set-maint-metrics').innerHTML = data.metrics.map((k) => `
-      <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('health_' + k))}</label>`).join('');
+    // grouped like the tiles
+    el('set-maint-metrics').innerHTML = HEALTH_GROUPS.map((g) => {
+      const keys = g.metrics.filter((k) => data.metrics.includes(k));
+      return keys.length ? `<h5>${t(g.titleKey)}</h5>` + keys.map((k) => `
+        <label><input type="checkbox" value="${k}" ${m.metrics.includes(k) ? 'checked' : ''}> ${escapeHtml(t('healthShort_' + k))}</label>`).join('') : '';
+    }).join('');
+    settingsState.maint = m;
+    if (healthState.data) renderHealth(healthState.data);
     el('set-budget-limit').value = data.budget.monthly_tokens;
     el('set-budget-block').checked = data.budget.block_manual;
     renderBudget(data.budget_status);
@@ -1708,6 +1767,20 @@ const HEALTH_METRICS = [
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
 ];
 
+// Tiles grouped by what they're about, each group with its "whole
+// collection" tool (for what the counts can't see: typos, same meaning ...).
+const HEALTH_GROUPS = [
+  { key: 'foods', titleKey: 'healthGroupFoods',
+    metrics: ['foods_duplicates', 'foods_without_nutrition', 'foods_without_category', 'missing_conversions'],
+    tool: { tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', titleKey: 'toolIngredientsReviewTitle', descKey: 'toolIngredientsReviewDesc' } },
+  { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates'],
+    tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'toolUnitsTitle', descKey: 'toolUnitsDesc' } },
+  { key: 'recipes', titleKey: 'healthGroupRecipes',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
+      'recipes_without_servings', 'recipes_without_image'],
+    tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'toolTagsCleanupTitle', descKey: 'toolTagsCleanupDesc' } },
+];
+
 const healthState = { open: null, data: null };
 
 function renderHealth(data) {
@@ -1718,7 +1791,8 @@ function renderHealth(data) {
     : data.error ? `${t('toolStatusError')}: ${data.error}`
     : data.computed_at ? tf('healthComputedAt', { when: shortWhen(data.computed_at) }) : t('healthNever');
   if (!data.computed_at) { el('health-grid').innerHTML = ''; closeHealthDetail(); return; }
-  el('health-grid').innerHTML = HEALTH_METRICS.map((m) => {
+  const auto = settingsState.maint && settingsState.maint.enabled ? settingsState.maint.metrics : [];
+  const tile = (m) => {
     const value = data.metrics[m.key] ?? 0;
     const ignoredCount = (data.ignored || {})[m.key] || 0;
     // A run of this tool that is still going or waiting for review replaces
@@ -1733,8 +1807,9 @@ function renderHealth(data) {
         ? `<button class="btn secondary health-fix" type="button" disabled title="${escapeHtml(t('healthImageGenOff'))}">${t('healthFix')}</button>`
       : value ? `<button class="btn secondary health-fix" type="button" data-metric="${m.key}">${t('healthFix')}</button>` : '';
     return `<div class="health-tile ${value ? 'todo' : 'ok'} ${healthState.open === m.key ? 'open' : ''} ${running ? 'refreshing' : ''}">
+      ${auto.includes(m.key) ? `<span class="health-auto" title="${escapeHtml(t('healthAuto'))}">🔁</span>` : ''}
       <div class="health-value">${value ? value.toLocaleString() : '✓'}</div>
-      <div class="health-label">${t('health_' + m.key)}</div>
+      <div class="health-label" title="${escapeHtml(t('health_' + m.key))}">${t('healthShort_' + m.key)}</div>
       ${ignoredCount ? `<div class="health-ignored-count">${tf('healthIgnoredCount', { n: ignoredCount })}</div>` : ''}
       ${pendingHtml}
       ${value && m.needsImageGen && !APP_CONFIG.image_gen_available ? `<div class="health-ignored-count">${t('healthImageGenOff')}</div>` : ''}
@@ -1743,7 +1818,28 @@ function renderHealth(data) {
         ${value || ignoredCount ? `<button class="btn secondary health-entries" type="button" data-metric="${m.key}">${t('healthEntries')}</button>` : ''}
       </div>
     </div>`;
+  };
+  el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
+    const metrics = g.metrics.map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
+    const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
+    const open = metrics.filter((m) => !done(m));
+    const fine = metrics.filter(done);
+    return `<div class="health-group">
+      <h4>${t(g.titleKey)}</h4>
+      ${open.length ? `<div class="health-grid">${open.map(tile).join('')}</div>` : ''}
+      <div class="health-group-foot">
+        ${fine.length ? `<span class="health-ok-line">✓ ${t('healthOkLine')} ${fine.map((m) => ((data.ignored || {})[m.key]
+          ? `<button type="button" class="health-entries" data-metric="${m.key}" title="${escapeHtml(tf('healthIgnoredCount', { n: data.ignored[m.key] }))}">${t('healthShort_' + m.key)}</button>`
+          : escapeHtml(t('healthShort_' + m.key)))).join(' · ')}</span>` : ''}
+        <button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">→ ${t(g.tool.titleKey)}</button>
+      </div>
+    </div>`;
   }).join('');
+  el('health-grid').querySelectorAll('.health-group-tool').forEach((b) => b.addEventListener('click', () => {
+    const g = HEALTH_GROUPS.find((x) => x.key === b.dataset.group);
+    startTool(g.tool.endpoint, toolTitle(g.tool.tool));
+  }));
   el('health-grid').querySelectorAll('.health-fix').forEach((b) => b.addEventListener('click', () => {
     const m = HEALTH_METRICS.find((x) => x.key === b.dataset.metric);
     startTool(m.endpoint, toolTitle(m.tool), m.body);
@@ -1761,7 +1857,9 @@ function closeHealthDetail() {
   healthState.open = null;
   el('health-detail').classList.add('hidden');
   el('health-detail').innerHTML = '';
-  el('health-grid').querySelectorAll('.health-tile.open').forEach((tile) => tile.classList.remove('open'));
+  // re-render: a finished tile that was only open for its ignored entries
+  // goes back into the "all fine" line
+  if (healthState.data && healthState.data.computed_at) renderHealth(healthState.data);
 }
 
 function healthRow(item) {
@@ -1878,12 +1976,26 @@ function nextMonday() {
 
 // ---------- In season now ----------
 
+const SEASON_SHOWN = 6;
+
 async function loadSeason() {
   try {
     const data = await (await fetch('/api/season')).json();
-    el('season-now').textContent = `🌱 ${t('seasonNow')}: ${data.produce.join(', ')}`;
-    el('season-now').classList.toggle('hidden', !data.produce.length);
+    renderSeason(data.produce, false);
   } catch (e) { /* optional */ }
+}
+
+// The first few, the rest behind "+n".
+function renderSeason(produce, all) {
+  const box = el('season-now');
+  box.classList.toggle('hidden', !produce.length);
+  const month = new Date().toLocaleDateString(LANG_CODE, { month: 'long' });
+  const shown = all ? produce : produce.slice(0, SEASON_SHOWN);
+  const rest = produce.length - SEASON_SHOWN;
+  box.innerHTML = `🌱 ${escapeHtml(tf('seasonIn', { month }))}: ${escapeHtml(shown.join(' · '))}${rest > 0
+    ? `<button type="button">${all ? t('seasonLess') : `+${rest}`}</button>` : ''}`;
+  const btn = box.querySelector('button');
+  if (btn) btn.addEventListener('click', () => renderSeason(produce, !all));
 }
 
 // ---------- How was it? (cook log) ----------
@@ -1944,9 +2056,11 @@ async function searchCookToday() {
     el('ct-results').innerHTML = data.results.map((r) => {
       const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
       const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
+      // What's there is what you typed (and the score says how much) - so
+      // only what's missing is spelled out.
       const meta = [
-        `<span class="ct-have">✓ ${escapeHtml(r.matched.join(', '))}</span>`,
-        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}` : t('cookTodayComplete'),
+        r.missing.length ? `${t('cookTodayMissing')}: ${escapeHtml(r.missing.slice(0, 6).join(', '))}${r.missing.length > 6 ? ' …' : ''}`
+          : `<span class="ct-have">✓ ${t('cookTodayComplete')}</span>`,
         r.minutes ? `${r.minutes} min` : '',
         r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',
@@ -2256,6 +2370,7 @@ function resetToolRunView(title) {
   el('tools-run-usage').classList.add('hidden');
   el('tools-run-error').classList.add('hidden');
   el('tools-cancelled-note').classList.add('hidden');
+  el('tools-skipped-note').classList.add('hidden');
   el('tools-cancel-btn').disabled = false;
   el('tools-cancel-btn').textContent = t('toolCancelBtn');
   el('tools-suggestions-list').innerHTML = '';
@@ -2342,6 +2457,22 @@ function renderToolUsage(job) {
 // bar above the list applies/skips all checked ones. They're sent one after
 // another (not in parallel) - merges touch shared recipes, and running them
 // sequentially keeps the same order and safety as clicking them one by one.
+// Recipes a run looked at but made no suggestion for - with the reason, so
+// a recipe listed in a tile doesn't silently disappear.
+function renderToolSkipped(job) {
+  const skipped = (job.meta && job.meta.skipped) || [];
+  const box = el('tools-skipped-note');
+  box.classList.toggle('hidden', !skipped.length);
+  if (!skipped.length) { box.innerHTML = ''; return; }
+  const unchanged = skipped.filter((s) => s.reason === 'unchanged');
+  const failed = skipped.filter((s) => s.reason === 'failed');
+  box.innerHTML = [
+    unchanged.length ? `<p>${escapeHtml(tf('toolSkippedUnchanged', { names: unchanged.map((s) => s.name).join(', ') }))}</p>` : '',
+    failed.length ? `<p>${escapeHtml(t('toolSkippedFailed'))}</p><ul>${failed.map((s) =>
+      `<li><strong>${escapeHtml(s.name)}</strong>: ${escapeHtml(s.error || '')}</li>`).join('')}</ul>` : '',
+  ].join('');
+}
+
 function renderToolSuggestions(job) {
   toolsState.job = job;
   const list = el('tools-suggestions-list');
@@ -2349,6 +2480,7 @@ function renderToolSuggestions(job) {
   // Drop selections that are no longer pending (applied/skipped/failed).
   toolsState.selected.forEach((id) => { if (!pendingIds.has(id)) toolsState.selected.delete(id); });
 
+  renderToolSkipped(job);
   if (job.suggestions.length === 0) {
     el('tools-bulk-bar').classList.add('hidden');
     list.innerHTML = `<p style="color:#8f9689;">${t('toolNoSuggestions')}</p>`;
@@ -2496,6 +2628,11 @@ if ('serviceWorker' in navigator) {
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
+  updateSmartForm();
+  // Installing (and so the share menu) needs HTTPS or localhost.
+  el('more-way-insecure').classList.toggle('hidden', window.isSecureContext);
+  el('more-way-folder').textContent = APP_CONFIG.watch_dir
+    ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();
   setInterval(checkTandoor, 15000);
   updateInboxBadge();

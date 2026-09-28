@@ -76,7 +76,11 @@ def recipe_text_blob(recipe: dict) -> str:
 
 def _is_language(text: str, expected_code: str) -> bool:
     try:
-        from langdetect import detect
+        from langdetect import DetectorFactory, detect
+        # langdetect is random by default - without a fixed seed a borderline
+        # text could count as translated in the health tile and not in the
+        # tool (or the other way round).
+        DetectorFactory.seed = 0
         return detect(text) == expected_code
     except Exception:  # noqa: BLE001 - langdetect raises its own exception type for "can't tell"
         return False
@@ -218,7 +222,7 @@ def run_scan(job_id: str) -> None:
             job.cost_estimate = format_cost_estimate(len(needing), "per_recipe_translate")
             tool_jobs.save_tool_job(job)
 
-            suggestions = []
+            suggestions, skipped = [], []
             for i, recipe in enumerate(needing, 1):
                 if job.cancel_requested:
                     break
@@ -231,10 +235,15 @@ def run_scan(job_id: str) -> None:
                     job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Translation failed for recipe %s: %s", recipe.get("id"), exc)
+                    skipped.append({"name": recipe.get("name", ""), "reason": "failed", "error": str(exc)[:300]})
                     continue
                 preview = describe_changes(recipe, translated)
                 if not preview:
-                    continue  # nothing actually changed
+                    # The AI found nothing to translate - the language check
+                    # was wrong. Ignored in the tile, so it isn't listed again.
+                    ignored.add("recipes_not_translated", [{"key": str(recipe["id"]), "name": recipe.get("name", "")}])
+                    skipped.append({"name": recipe.get("name", ""), "reason": "unchanged"})
+                    continue
                 suggestions.append(ToolSuggestion(
                     id=uuid.uuid4().hex[:10], kind="translate_recipe",
                     summary=f"translate {recipe.get('name', '')!r} -> {translated['title']!r}",
@@ -243,6 +252,7 @@ def run_scan(job_id: str) -> None:
                 ))
 
             job.suggestions = suggestions
+            job.meta["skipped"] = skipped
             job.status = "cancelled" if job.cancel_requested else "ready"
             job.progress_label = None
             tool_jobs.save_tool_job(job)
