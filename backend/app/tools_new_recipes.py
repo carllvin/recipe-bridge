@@ -388,16 +388,22 @@ def run_scan(job_id: str) -> None:
                 if resp.status_code == 200:
                     recipes.append(resp.json())
             job.cost_estimate = (
+                f"{len(recipes)} new recipe(s): a few batched AI calls for ingredients, units and tags."
+                if job.meta.get("trigger") == "import" else
                 f"{len(recipes)} new recipe(s): up to one AI call per recipe needing translation and one per "
                 f"recipe needing a structural revision, plus a few batched calls for ingredients, units and tags."
             )
             tool_jobs.save_tool_job(job)
             suggestions: list[ToolSuggestion] = []
+            # Recipes imported through this app were already translated and
+            # structured by the AI while reading them - steps 1 and 1b are only
+            # for recipes added in Tandoor itself.
+            from_import = job.meta.get("trigger") == "import"
 
             # 1. Translate - applied right away.
             expected_code = get_language_code(settings.output_language)
             for i, recipe in enumerate(list(recipes)):
-                if job.cancel_requested:
+                if job.cancel_requested or from_import:
                     break
                 if tools_recipes.already_in_target_language(recipe, expected_code):
                     continue
@@ -434,7 +440,7 @@ def run_scan(job_id: str) -> None:
             # for recipes that need it (decided locally); reviewed, not
             # auto-applied.
             for recipe in recipes:
-                if job.cancel_requested:
+                if job.cancel_requested or from_import:
                     break
                 if not recipe_restructure.needs_restructure(recipe):
                     continue
