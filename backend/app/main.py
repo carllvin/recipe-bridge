@@ -1106,8 +1106,11 @@ async def start_ingredients_review(body: dict | None = Body(None)):
 
 
 @app.post("/api/tools/ingredients/enrich")
-async def start_ingredients_enrich():
-    return _start_tool_job("ingredients_enrich")
+async def start_ingredients_enrich(body: dict | None = Body(None)):
+    """Optional body {"focus": "tiles"}: only the ingredients the overview
+    lists as without nutrition / supermarket category."""
+    focus = (body or {}).get("focus")
+    return _start_tool_job("ingredients_enrich", {"focus": focus} if focus == "tiles" else None)
 
 
 @app.post("/api/tools/tags/cleanup")

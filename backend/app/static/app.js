@@ -2063,8 +2063,8 @@ el('set-maint-run').addEventListener('click', async () => {
 // metric -> the tool that fixes it (endpoint + optional request body)
 const HEALTH_METRICS = [
   { key: 'foods_duplicates', tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', body: { focus: 'duplicates' } },
-  { key: 'foods_without_nutrition', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich' },
-  { key: 'foods_without_category', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich' },
+  { key: 'foods_without_nutrition', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich', body: { focus: 'tiles' } },
+  { key: 'foods_without_category', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich', body: { focus: 'tiles' } },
   { key: 'missing_conversions', tool: 'conversions', endpoint: '/api/tools/conversions' },
   { key: 'units_duplicates', tool: 'units_review', endpoint: '/api/tools/units/review', body: { focus: 'duplicates' } },
   { key: 'recipes_not_translated', tool: 'recipes_translate', endpoint: '/api/tools/recipes/translate' },

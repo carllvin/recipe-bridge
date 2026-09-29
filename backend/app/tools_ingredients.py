@@ -432,6 +432,24 @@ def enrich_suggestions(job, targets, categories) -> list[ToolSuggestion]:
     return suggestions
 
 
+ENRICH_TILES = ("foods_without_nutrition", "foods_without_category")
+
+
+def tile_food_ids() -> set[str] | None:
+    """Ingredients listed in the overview's "without nutrition" and "without
+    supermarket category" tiles (not the ignored ones) - None without an
+    overview."""
+    from . import health, ignored
+    items = health._read().get("items")
+    if not items or not any(m in items for m in ENRICH_TILES):
+        return None
+    ids = set()
+    for metric in ENRICH_TILES:
+        skip = ignored.keys(metric)
+        ids |= {i["key"] for i in items.get(metric, []) if i["key"] not in skip}
+    return ids
+
+
 def run_enrich_scan(job_id: str) -> None:
     """Finds foods without a plural, nutrition and/or supermarket category
     and asks the AI for them in batches of ENRICH_CHUNK_SIZE foods per call.
@@ -455,7 +473,13 @@ def run_enrich_scan(job_id: str) -> None:
             except tandoor_client.TandoorError as exc:
                 log.warning("Nutrition skipped - property types unavailable: %s", exc)
                 nutrition_available = False
-            targets = enrich_targets(fetch_all_foods_full(client), categories, nutrition_available)
+            foods = fetch_all_foods_full(client)
+            listed = tile_food_ids() if job.meta.get("focus") == "tiles" else None
+            if listed is not None:
+                # Started from a tile: only the ingredients the overview
+                # lists there, not every ingredient of the collection.
+                foods = [f for f in foods if str(f["id"]) in listed]
+            targets = enrich_targets(foods, categories, nutrition_available)
             job.progress_total = len(targets)
             job.cost_estimate = format_cost_estimate(len(targets), "chunked_enrich")
             tool_jobs.save_tool_job(job)
