@@ -53,6 +53,89 @@ def build_recipe_image_prompt(title: str, description: Optional[str], tags: list
     return " ".join(parts)
 
 
+ENHANCE_PROMPT = (
+    "Enhance this food photograph like a professional photo editor: better lighting and exposure, "
+    "natural colors and white balance (no yellow or blue cast), more sharpness and less noise, "
+    "less glare, straightened if tilted. Keep the dish exactly as it is - the same food, the same "
+    "arrangement, portion, plate and background; do not add, remove or change any ingredient or "
+    "object. Photorealistic. No text, no watermark, no logo."
+)
+ENHANCE_MAX_SIDE = 1536
+
+
+def enhance_image(data: bytes) -> bytes:
+    """An improved version of an existing recipe photo (light, colors,
+    sharpness - the dish itself stays unchanged). Raises RuntimeError with a
+    clear message on any failure."""
+    import io
+
+    from PIL import Image, ImageOps
+
+    if not is_configured():
+        raise RuntimeError(missing_key_hint())
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    img.thumbnail((ENHANCE_MAX_SIDE, ENHANCE_MAX_SIDE))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    prompt = ENHANCE_PROMPT
+    if settings.image_gen_custom_instructions.strip():
+        prompt += " " + settings.image_gen_custom_instructions.strip()
+    if _active_provider() == "gemini":
+        return _enhance_gemini(buf.getvalue(), prompt)
+    return _enhance_openai(buf.getvalue(), prompt)
+
+
+def _enhance_openai(png: bytes, prompt: str) -> bytes:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+
+    def edit(**extra):
+        return client.images.edit(model=settings.openai_image_model, image=("photo.png", png, "image/png"),
+                                  prompt=prompt, n=1, **extra)
+    try:
+        try:
+            # keeps the dish's details as they are (gpt-image-1)
+            response = edit(input_fidelity="high")
+        except Exception as exc:  # noqa: BLE001
+            if "fidelity" not in str(exc).lower():
+                raise
+            response = edit()  # a model without that option
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"OpenAI image enhancement failed: {exc}") from exc
+    b64 = getattr(response.data[0], "b64_json", None) if response.data else None
+    if not b64:
+        raise RuntimeError("OpenAI did not return any image data.")
+    return base64.b64decode(b64)
+
+
+def _enhance_gemini(png: bytes, prompt: str) -> bytes:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    try:
+        response = client.models.generate_content(
+            model=settings.gemini_image_model,
+            contents=[types.Part.from_bytes(data=png, mime_type="image/png"), prompt],
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Gemini image enhancement failed: {exc}") from exc
+    return _gemini_image(response)
+
+
+def _gemini_image(response) -> bytes:
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        if content is None:
+            continue
+        for part in getattr(content, "parts", None) or []:
+            inline = getattr(part, "inline_data", None)
+            if inline is not None and getattr(inline, "data", None):
+                return inline.data
+    raise RuntimeError("Gemini did not return any image data.")
+
+
 def generate_image(prompt: str) -> bytes:
     """Generates one image and returns its raw bytes. Raises RuntimeError with a
     clear message on any failure."""
@@ -101,14 +184,4 @@ def _generate_gemini(prompt: str) -> bytes:
         )
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Gemini image generation failed: {exc}") from exc
-
-    for candidate in getattr(response, "candidates", None) or []:
-        content = getattr(candidate, "content", None)
-        if content is None:
-            continue
-        for part in getattr(content, "parts", None) or []:
-            inline = getattr(part, "inline_data", None)
-            if inline is not None and getattr(inline, "data", None):
-                return inline.data
-
-    raise RuntimeError("Gemini did not return any image data.")
+    return _gemini_image(response)

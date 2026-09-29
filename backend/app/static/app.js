@@ -635,7 +635,8 @@ function showReview() {
   el('processing-screen').classList.add('hidden');
   el('review-screen').classList.remove('hidden');
   el('action-bar').classList.remove('hidden');
-  el('cookbook-name-input').value = state.job.cookbook_name || state.job.suggested_cookbook_name || '';
+  setCookbook(state.job.cookbook_name || state.job.suggested_cookbook_name || '');
+  loadCookbooks();
   updateUsageDisplay(state.job.token_usage);
   // e.g. links of a link list that couldn't be read
   const notes = state.job.notes || [];
@@ -649,7 +650,47 @@ function showReview() {
   }
 }
 
-el('cookbook-name-input').addEventListener('blur', () => {
+// Cookbook: a choice of the existing ones plus "new cookbook …" (a name
+// field). #cookbook-name-input always holds the name that is used - for an
+// existing cookbook it's just hidden. Without the list (not reachable) only
+// the name field shows.
+const NEW_COOKBOOK = '__new__';
+const cookbookState = { names: null };
+
+async function loadCookbooks() {
+  if (cookbookState.names === null) {
+    try {
+      const data = await (await fetch('/api/cookbooks')).json();
+      cookbookState.names = data.error ? [] : data.names;
+    } catch (e) { cookbookState.names = []; }
+  }
+  setCookbook(el('cookbook-name-input').value.trim());
+}
+
+function setCookbook(name) {
+  const select = el('cookbook-select');
+  const input = el('cookbook-name-input');
+  const names = cookbookState.names || [];
+  input.value = name;
+  if (!names.length) {  // no list: just the name field
+    select.classList.add('hidden');
+    input.classList.remove('hidden');
+    el('cookbook-hint').classList.remove('hidden');
+    return;
+  }
+  const existing = names.find((n) => n.toLowerCase() === name.toLowerCase());
+  select.innerHTML = `<option value="">${escapeHtml(t('cookbookNone'))}</option>`
+    + names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')
+    + `<option value="${NEW_COOKBOOK}">${escapeHtml(t('cookbookNew'))}</option>`;
+  select.value = existing || (name ? NEW_COOKBOOK : '');
+  if (existing) input.value = existing;
+  const isNew = select.value === NEW_COOKBOOK;
+  select.classList.remove('hidden');
+  input.classList.toggle('hidden', !isNew);
+  el('cookbook-hint').classList.toggle('hidden', !isNew);
+}
+
+function saveCookbook() {
   const value = el('cookbook-name-input').value.trim();
   state.job.cookbook_name = value;
   fetch(`/api/jobs/${state.jobId}`, {
@@ -657,7 +698,29 @@ el('cookbook-name-input').addEventListener('blur', () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookbook_name: value }),
   }).catch(() => {});
+}
+
+el('cookbook-select').addEventListener('change', () => {
+  const value = el('cookbook-select').value;
+  const input = el('cookbook-name-input');
+  if (value === NEW_COOKBOOK) {
+    // start from the suggested name unless it is one of the existing ones
+    const suggested = state.job.suggested_cookbook_name || '';
+    const known = (cookbookState.names || []).some((n) => n.toLowerCase() === suggested.toLowerCase());
+    input.value = known ? '' : suggested;
+    input.classList.remove('hidden');
+    el('cookbook-hint').classList.remove('hidden');
+    input.focus();
+    input.select();
+  } else {
+    input.value = value;
+    input.classList.add('hidden');
+    el('cookbook-hint').classList.add('hidden');
+  }
+  saveCookbook();
 });
+
+el('cookbook-name-input').addEventListener('blur', saveCookbook);
 
 function imageUrl(imageId) {
   if (!imageId) return null;
@@ -938,10 +1001,15 @@ function renderDetail(r) {
        </div>`
     : '';
 
-  const imageChoicesHtml = r.candidate_image_ids.map((iid) => `
-    <div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
-         style="background-image:url('${imageUrl(iid)}')"></div>
-  `).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
+  const imageChoicesHtml = r.candidate_image_ids.map((iid) => {
+    const ai = ((state.job.images || {})[iid] || {}).ai;
+    const badge = ai ? `<span class="image-ai-badge">${t(ai === 'enhanced' ? 'imageBadgeEnhanced' : 'imageBadgeGenerated')}</span>` : '';
+    // The selected photo from the source can be improved by the image AI.
+    const enhance = APP_CONFIG.image_gen_available && !ai && iid === r.selected_image_id
+      ? `<button type="button" class="image-enhance-btn" data-enhance="${iid}" title="${escapeHtml(t('enhanceImageBtn'))}"><span>✨</span></button>` : '';
+    return `<div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
+         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>`;
+  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
 
   const duplicateNotice = r.duplicate_match
     ? `<div class="error-banner duplicate-banner" style="margin-bottom:20px;">${escapeHtml(
@@ -995,6 +1063,11 @@ function renderDetail(r) {
     <div class="section-title">${t('fieldSteps')}</div>
     <div id="steps-wrap">${stepsHtml}</div>
   `;
+
+  detail.querySelectorAll('.image-enhance-btn').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    enhanceImage(r, b);
+  }));
 
   // Image selection / AI generation tile
   detail.querySelectorAll('.image-choice').forEach((elm) => {
@@ -1227,6 +1300,25 @@ async function triggerImageGeneration(recipe, tileEl) {
   }
 }
 
+async function enhanceImage(recipe, btn) {
+  btn.classList.add('loading');
+  btn.disabled = true;
+  btn.closest('.image-choice').parentElement.querySelectorAll('.image-choice').forEach((x) => { x.style.pointerEvents = 'none'; });
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${recipe.id}/enhance-image`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_id: btn.dataset.enhance }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    Object.assign(recipe, data.recipe);
+    state.job.images[data.image_id] = data.image;
+  } catch (e) {
+    alert(`${t('imageEnhanceFailed')}: ${e.message}`);
+  }
+  renderRecipeList();
+  if (state.activeRecipeId === recipe.id) renderDetail(recipe);
+}
+
 function numOrNull(v) {
   if (v === '' || v === null || v === undefined) return null;
   const n = Number(v);
@@ -1271,7 +1363,8 @@ async function runImport(recipeIds) {
     const res = await fetch(`/api/jobs/${jobId}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipe_ids: recipeIds, cookbook_name: cookbookName }),
+      body: JSON.stringify({ recipe_ids: recipeIds, cookbook_name: cookbookName,
+        enhance_photos: APP_CONFIG.image_gen_available && el('enhance-photos').checked }),
     });
     const data = await res.json();
     if (state.jobId !== jobId) return;  // left the review meanwhile - the import still ran
@@ -1283,6 +1376,8 @@ async function runImport(recipeIds) {
       r.tandoor_recipe_id = result.tandoor_recipe_id;
     });
     showImportSummary(data.results, data.cookbook_name, data.cookbook_warning, data.post_processing_job_id);
+    cookbookState.names = null;  // a new cookbook may exist now
+    loadCookbooks();
   } catch (e) {
     alert(`${t('importFailedAlertPrefix')} ${e.message}`);
   } finally {
@@ -1295,6 +1390,15 @@ async function runImport(recipeIds) {
     }
   }
 }
+
+// "Improve photos with AI" at import - only with an image AI; remembered per browser.
+function initEnhancePhotos() {
+  el('enhance-photos-wrap').classList.toggle('hidden', !APP_CONFIG.image_gen_available);
+  try { el('enhance-photos').checked = localStorage.getItem('th.enhancePhotos') === '1'; } catch (e) { /* optional */ }
+}
+el('enhance-photos').addEventListener('change', () => {
+  try { localStorage.setItem('th.enhancePhotos', el('enhance-photos').checked ? '1' : '0'); } catch (e) { /* optional */ }
+});
 
 el('import-btn').addEventListener('click', () => {
   const selectedIds = state.job.recipes.filter((r) => r.selected).map((r) => r.id);
@@ -2950,6 +3054,7 @@ if ('serviceWorker' in navigator) {
       elm.textContent = t('cookedHintMealie');
     });
   }
+  initEnhancePhotos();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

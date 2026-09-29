@@ -244,22 +244,19 @@ Mealie's fixed ones (breakfast, lunch, dinner, …).
 ## Setup
 
 You need Docker (with Compose), a running Tandoor or Mealie instance and an
-API key for one AI provider.
+API key for one AI provider. The app comes as a ready-made image
+(`ghcr.io/carllvin/recipe-bridge`, for amd64 and arm64 – e.g. a Raspberry
+Pi or a Synology), so there's nothing to build.
 
-1. **Get the code**
-
-   ```bash
-   git clone https://github.com/carllvin/recipe-bridge.git
-   cd recipe-bridge
-   ```
-
-2. **Create `.env`**
+1. **Get the two files** into a new folder:
 
    ```bash
-   cp .env.example .env
+   mkdir recipe-bridge && cd recipe-bridge
+   curl -O https://raw.githubusercontent.com/carllvin/recipe-bridge/main/docker-compose.yml
+   curl -o .env https://raw.githubusercontent.com/carllvin/recipe-bridge/main/.env.example
    ```
 
-   Fill in at least:
+2. **Fill in `.env`** – at least:
    - `AI_PROVIDER` – `anthropic` (Claude), `openai` (ChatGPT) or `gemini` (Google)
    - the matching API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`)
    - **Tandoor:** `TANDOOR_URL` (**without** a trailing slash) and
@@ -273,43 +270,62 @@ API key for one AI provider.
 3. **Start it**
 
    ```bash
-   docker compose up -d --build
+   docker compose up -d
    ```
 
 4. Open **http://localhost:8420** (change the port in `docker-compose.yml`
    if you like). The badge in the top right shows whether your recipe
    manager is reachable.
 
+With Portainer, Unraid, Synology Container Manager & co., paste
+`docker-compose.yml` as a new stack and put the settings from `.env.example`
+into its environment / `.env`.
+
+`:latest` follows the main branch; for a fixed version use e.g.
+`image: ghcr.io/carllvin/recipe-bridge:1.0` (see the
+[packages page](https://github.com/carllvin/recipe-bridge/pkgs/container/recipe-bridge)
+for the versions).
+
 **Access from outside:** set `APP_PASSWORD` – each device then signs in once
 and stays signed in. For the phone's share menu and app install the app
 must be reachable via **HTTPS**, e.g. behind the same reverse proxy as your
 recipe manager.
 
+**Building it yourself** (e.g. to change the code or add Tesseract
+languages): clone the repository, create `.env` as above and run
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
 ## Updating
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Your data (settings, open suggestions, undo history …) lives in a Docker
 volume and survives updates – see [Data and backups](#data-and-backups).
+If you build it yourself: `git pull` and the build command above.
 
 ### Coming from "Tandoor Helper"
 
-The app, its container, Compose service and data volume were renamed. To
-keep your settings, open suggestions and history, move the old volume's
-content over once:
+The app, its container, Compose service and data volume were renamed, and
+the app now comes as a ready-made image. In your existing folder (the old
+clone):
 
 ```bash
 docker compose down          # before pulling: stops the old container
-git pull
+git pull                     # the new docker-compose.yml uses the image and your .env
 docker volume ls | grep tandoor_helper_data   # the old volume, usually tandoor-helper_tandoor_helper_data
 docker volume create recipe_bridge_data
 docker run --rm -v tandoor-helper_tandoor_helper_data:/from -v recipe_bridge_data:/to alpine cp -a /from/. /to/
-docker compose up -d --build --remove-orphans
+docker compose pull
+docker compose up -d --remove-orphans
 ```
 
+The last steps move your settings, open suggestions and history over once.
 Once everything works, the old volume can be removed
 (`docker volume rm tandoor-helper_tandoor_helper_data`). If you changed the
 repository's remote: `git remote set-url origin
@@ -434,7 +450,8 @@ volume.
 
 A few operations deliberately need a terminal – mostly destructive ones for
 test setups. They work with **Tandoor** only, live in
-[`backend/scripts/`](backend/scripts/) and run inside the container, e.g.:
+[`backend/scripts/`](backend/scripts/) (they're part of the image) and run
+inside the container, e.g.:
 
 ```bash
 docker compose exec recipe-bridge python scripts/manage_ingredients.py --help
@@ -534,6 +551,10 @@ python -m pytest
 ```
 
 GitHub runs them on every pull request (`.github/workflows/tests.yml`).
+`.github/workflows/docker.yml` builds the image for amd64 and arm64 and
+publishes it to the GitHub Container Registry – `:latest` on every push to
+`main`, `:1.2.0` and `:1.2` for a tag `v1.2.0` – after the tests passed;
+for a pull request that touches the Dockerfile it only builds it.
 
 ## Known limitations
 

@@ -319,8 +319,9 @@
     <div id="review-screen" class="review-screen hidden">
       <div class="cookbook-bar">
         <label for="cookbook-name-input" data-i18n="cookbookLabel">Cookbook in Tandoor</label>
+        <select id="cookbook-select" class="hidden"></select>
         <input id="cookbook-name-input" type="text" data-i18n-placeholder="cookbookPlaceholder" placeholder="Cookbook name …" />
-        <span class="cookbook-hint" data-i18n="cookbookHint">Will be created if it does not exist yet.</span>
+        <span id="cookbook-hint" class="cookbook-hint" data-i18n="cookbookHint">Will be created if it does not exist yet.</span>
         <details id="review-notes" class="review-notes hidden">
           <summary id="review-notes-summary"></summary>
           <ul id="review-notes-list"></ul>
@@ -342,6 +343,8 @@
         <div class="action-bar-buttons">
           <button id="undo-all-btn" class="btn secondary hidden" data-i18n="undoAllBtn">Undo all imports</button>
           <button id="retry-failed-btn" class="btn secondary hidden" data-i18n="retryFailedBtn">Retry failed</button>
+          <label id="enhance-photos-wrap" class="enhance-check hidden" data-i18n-title="enhancePhotosHint" title="">
+            <input type="checkbox" id="enhance-photos" /> <span data-i18n="enhancePhotosOnImport">✨ Improve photos with AI</span></label>
           <button id="import-btn" class="btn" data-i18n="importBtn">Import to Tandoor</button>
         </div>
       </div>
