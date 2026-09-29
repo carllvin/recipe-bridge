@@ -21,7 +21,7 @@ from . import tool_jobs
 from .config import settings
 from .tandoor_helpers import fetch_all_recipes_full, fetch_recipe_overview, fetch_recipes_full
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def _health() -> dict:

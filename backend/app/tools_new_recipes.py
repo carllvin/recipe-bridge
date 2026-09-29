@@ -39,7 +39,7 @@ from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import find_recipes_by_filter, resolve_name_collisions
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 _store_lock = threading.Lock()
 

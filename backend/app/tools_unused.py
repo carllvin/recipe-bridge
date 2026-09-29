@@ -16,7 +16,7 @@ from .schemas import ToolSuggestion
 from .tandoor_helpers import fetch_all_recipes_full
 from .tools_conversions import _fetch_all
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 # endpoint -> (health metric, tool)
 KINDS = {

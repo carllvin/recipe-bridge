@@ -21,7 +21,7 @@ from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, fetch_all_recipes_full
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 CONVERSION_ENDPOINT = "unit-conversion"
 BATCH_SIZE = 40

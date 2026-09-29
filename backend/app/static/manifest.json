@@ -1,6 +1,6 @@
 {
-  "name": "Tandoor Helper",
-  "short_name": "Tandoor Helper",
+  "name": "Recipe Bridge",
+  "short_name": "Recipe Bridge",
   "description": "Import recipes into Tandoor, keep the collection tidy and plan meals.",
   "start_url": "/",
   "scope": "/",

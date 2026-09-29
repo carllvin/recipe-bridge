@@ -18,7 +18,7 @@ from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import format_cost_estimate, minimal_ref
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 SYSTEM_PROMPT = """You translate cookbook recipe text into {language}.
 

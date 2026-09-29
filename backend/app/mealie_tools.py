@@ -30,7 +30,7 @@ from .schemas import ToolSuggestion
 from .tandoor_client import TandoorError
 from .tandoor_helpers import chunked, format_cost_estimate, resolve_name_collisions, validate_actions
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 TAG_REVIEW_PROMPTS = {"tags_cleanup": tools_tags.CLEANUP_SYSTEM_PROMPT, "tags_simplify": tools_tags.SIMPLIFY_SYSTEM_PROMPT,
                       "tags_translate": tools_tags.TRANSLATE_SYSTEM_PROMPT}

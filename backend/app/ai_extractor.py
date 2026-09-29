@@ -12,7 +12,7 @@ from . import json_answer, llm_provider
 from .config import settings, get_language_code
 from .schemas import ExtractedRecipe, TokenUsage
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def _detect_source_language(pages: list[dict]) -> Optional[str]:

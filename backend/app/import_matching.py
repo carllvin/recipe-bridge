@@ -22,7 +22,7 @@ import logging
 from . import target, tools_tags
 from .tools_new_recipes import PICK_SYSTEM_PROMPT, _key, _prompt, _similar_candidates
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 PICK_BATCH_SIZE = 60  # names per AI call when a big cookbook has many "similar" ones
 

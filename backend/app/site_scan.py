@@ -33,7 +33,7 @@ from bs4 import BeautifulSoup
 from . import tandoor_client
 from .url_processor import HEADERS, MAX_PAGE_BYTES, _find_recipe, _image_url, _text
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 REQUEST_DELAY = 1.0
 MAX_SITEMAPS = 15
@@ -41,7 +41,7 @@ MAX_SITEMAPS = 15
 # and how many pages are checked at most for that depth.
 DEFAULT_DEPTH = 2
 MAX_CHECK_BY_DEPTH = {1: 150, 2: 300, 3: 600, 4: 1000}
-USER_AGENT_TOKEN = "TandoorHelper"
+USER_AGENT_TOKEN = "RecipeBridge"
 RECIPE_HINTS = ("rezept", "recipe", "recette", "ricetta", "receta", "recept")
 SKIP_PARTS = ("/tag/", "/author/", "/autor/", "/wp-admin", "/wp-json", "/feed", "/login", "/cart", "/warenkorb",
               "/impressum", "/datenschutz", "/privacy", "/kontakt", "/contact", "/search", "/suche", "?s=", "/comment")

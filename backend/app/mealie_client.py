@@ -25,7 +25,7 @@ from .config import settings
 from .schemas import ExtractedRecipe
 from .tandoor_client import TandoorError  # the import catches this error type for any target
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 PAGE_SIZE = 200
 MAX_PAGES = 100

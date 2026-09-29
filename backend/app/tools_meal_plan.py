@@ -18,7 +18,7 @@ from . import cook_today, llm_provider, mealie_plan, seasonal, tandoor_client, t
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 MAX_CANDIDATES = 300
 RECENTLY_COOKED_DAYS = 14

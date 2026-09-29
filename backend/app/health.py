@@ -16,7 +16,7 @@ from . import cook_today, duplicates, mealie_client, mealie_maintenance, target,
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 # changed_at: when a suggestion was last applied or recipes were imported -
 # a cached result computed before that is stale and the page refreshes it.

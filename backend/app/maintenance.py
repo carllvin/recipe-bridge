@@ -17,7 +17,7 @@ import time
 from . import app_settings, health, target, tool_jobs, usage_log
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 # health metric -> (tool, extra job meta)
 METRIC_TOOLS = {

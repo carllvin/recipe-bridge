@@ -2,7 +2,7 @@
 // of these languages is used. Languages not covered here fall back to English.
 const TRANSLATIONS = {
   de: {
-    pageTitle: 'Tandoor Helper',
+    pageTitle: 'Recipe Bridge',
     tandoorChecking: 'Tandoor wird geprüft …',
     tandoorConnected: 'Tandoor verbunden',
     tandoorOpenHint: 'Klicken, um Tandoor zu öffnen',
@@ -165,7 +165,7 @@ const TRANSLATIONS = {
     moreWayFolderOff: 'Aus – mit WATCH_DIR in der .env einschalten (siehe .env.example). Dateien im Ordner werden dann automatisch importiert.',
     toolSkippedUnchanged: 'Schon in der richtigen Sprache (die KI hat nichts geändert) – in der Kachel ignoriert: {names}',
     toolSkippedFailed: 'Übersetzung fehlgeschlagen – nochmal starten, um es erneut zu versuchen:',
-    bookmarkletLabel: '📥 An Tandoor Helper senden',
+    bookmarkletLabel: '📥 An Recipe Bridge senden',
     bookmarkletHint: 'Diesen Knopf in die Lesezeichenleiste ziehen – ein Klick darauf auf einer Rezeptseite schickt die Seite hierher.',
     bookmarkletClick: 'Nicht hier klicken: den Knopf in die Lesezeichenleiste ziehen und dann auf einer Rezeptseite anklicken.',
     inboxImportsTitle: 'Neue Importe',
@@ -419,7 +419,7 @@ const TRANSLATIONS = {
   },
 
   en: {
-    pageTitle: 'Tandoor Helper',
+    pageTitle: 'Recipe Bridge',
     tandoorChecking: 'Checking Tandoor …',
     tandoorConnected: 'Tandoor connected',
     tandoorOpenHint: 'Click to open Tandoor',
@@ -582,7 +582,7 @@ const TRANSLATIONS = {
     moreWayFolderOff: 'Off – turn it on with WATCH_DIR in .env (see .env.example). Files in the folder are then imported automatically.',
     toolSkippedUnchanged: 'Already in the right language (the AI changed nothing) – ignored in the tile: {names}',
     toolSkippedFailed: 'Translation failed – start again to retry:',
-    bookmarkletLabel: '📥 Send to Tandoor Helper',
+    bookmarkletLabel: '📥 Send to Recipe Bridge',
     bookmarkletHint: 'Drag this button to your bookmarks bar – clicking it on a recipe page sends the page here.',
     bookmarkletClick: 'Don’t click it here: drag the button to your bookmarks bar, then click it on a recipe page.',
     inboxImportsTitle: 'New imports',
@@ -836,7 +836,7 @@ const TRANSLATIONS = {
   },
 
   fr: {
-    pageTitle: 'Tandoor Helper',
+    pageTitle: 'Recipe Bridge',
     tandoorChecking: 'Vérification de Tandoor …',
     tandoorConnected: 'Tandoor connecté',
     tandoorOpenHint: 'Cliquer pour ouvrir Tandoor',
@@ -999,7 +999,7 @@ const TRANSLATIONS = {
     moreWayFolderOff: 'Désactivé – activez-le avec WATCH_DIR dans .env (voir .env.example). Les fichiers du dossier sont alors importés automatiquement.',
     toolSkippedUnchanged: 'Déjà dans la bonne langue (l’IA n’a rien changé) – ignoré dans la tuile : {names}',
     toolSkippedFailed: 'La traduction a échoué – relancez pour réessayer :',
-    bookmarkletLabel: '📥 Envoyer à Tandoor Helper',
+    bookmarkletLabel: '📥 Envoyer à Recipe Bridge',
     bookmarkletHint: 'Glissez ce bouton dans la barre de favoris – un clic sur une page de recette l’envoie ici.',
     bookmarkletClick: 'Ne cliquez pas ici : glissez le bouton dans la barre de favoris, puis cliquez dessus sur une page de recette.',
     inboxImportsTitle: 'Nouveaux imports',
@@ -1253,7 +1253,7 @@ const TRANSLATIONS = {
   },
 
   it: {
-    pageTitle: 'Tandoor Helper',
+    pageTitle: 'Recipe Bridge',
     tandoorChecking: 'Verifica di Tandoor …',
     tandoorConnected: 'Tandoor connesso',
     tandoorOpenHint: 'Clicca per aprire Tandoor',
@@ -1416,7 +1416,7 @@ const TRANSLATIONS = {
     moreWayFolderOff: 'Spenta – attivala con WATCH_DIR nel .env (vedi .env.example). I file nella cartella vengono poi importati automaticamente.',
     toolSkippedUnchanged: 'Già nella lingua giusta (l’IA non ha cambiato nulla) – ignorato nel riquadro: {names}',
     toolSkippedFailed: 'Traduzione non riuscita – riavvia per riprovare:',
-    bookmarkletLabel: '📥 Invia a Tandoor Helper',
+    bookmarkletLabel: '📥 Invia a Recipe Bridge',
     bookmarkletHint: 'Trascina questo pulsante nella barra dei preferiti – cliccandolo su una pagina di ricetta la invia qui.',
     bookmarkletClick: 'Non cliccare qui: trascina il pulsante nella barra dei preferiti e poi cliccalo su una pagina di ricetta.',
     inboxImportsTitle: 'Nuove importazioni',
@@ -1670,7 +1670,7 @@ const TRANSLATIONS = {
   },
 
   es: {
-    pageTitle: 'Tandoor Helper',
+    pageTitle: 'Recipe Bridge',
     tandoorChecking: 'Comprobando Tandoor …',
     tandoorConnected: 'Tandoor conectado',
     tandoorOpenHint: 'Haz clic para abrir Tandoor',
@@ -1833,7 +1833,7 @@ const TRANSLATIONS = {
     moreWayFolderOff: 'Apagada – actívala con WATCH_DIR en .env (ver .env.example). Los archivos de la carpeta se importan entonces automáticamente.',
     toolSkippedUnchanged: 'Ya está en el idioma correcto (la IA no cambió nada) – ignorado en la tarjeta: {names}',
     toolSkippedFailed: 'La traducción falló – vuelve a iniciar para reintentar:',
-    bookmarkletLabel: '📥 Enviar a Tandoor Helper',
+    bookmarkletLabel: '📥 Enviar a Recipe Bridge',
     bookmarkletHint: 'Arrastra este botón a la barra de marcadores – al pulsarlo en una página de receta, la envía aquí.',
     bookmarkletClick: 'No lo pulses aquí: arrastra el botón a la barra de marcadores y púlsalo en una página de receta.',
     inboxImportsTitle: 'Nuevas importaciones',
@@ -2093,11 +2093,11 @@ let APP_CONFIG = {};
 
 function t(key) {
   const text = (T && T[key] !== undefined) ? T[key] : ((TRANSLATIONS.en[key] !== undefined) ? TRANSLATIONS.en[key] : key);
-  // Imports to Mealie (RECIPE_MANAGER=mealie): "Tandoor" in the texts means
-  // the recipe manager - but the app's own name stays "Tandoor Helper".
+  // With Mealie (RECIPE_MANAGER=mealie) "Tandoor" in the texts means the
+  // recipe manager.
   const manager = APP_CONFIG.recipe_manager;
   return manager && manager !== 'Tandoor' && typeof text === 'string'
-    ? text.replace(/Tandoor(?! Helper)/g, manager) : text;
+    ? text.replace(/Tandoor/g, manager) : text;
 }
 
 function tf(key, params) {

@@ -19,7 +19,7 @@ from . import mealie_plan, seasonal, tandoor_client, target
 from .config import settings
 from .tandoor_helpers import fetch_all_recipes_full
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 INDEX_MAX_AGE_HOURS = 24
 MIN_PART_LEN = 4  # shorter words only match whole names ("Ei" must not match "Eis")

@@ -9,7 +9,7 @@ from PIL import Image
 from .config import settings
 from .ocr import ocr_image
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 MIN_IMAGE_SIDE_PX = 180  # ignore tiny images (icons, decoration)
 

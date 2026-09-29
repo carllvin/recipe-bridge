@@ -20,7 +20,7 @@ from collections import deque
 
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 MAX_BATCHES = 50  # finished batches kept for status queries
 

@@ -16,7 +16,7 @@ from PIL import Image
 
 from .text_processor import MAX_PAGE_CHARS
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"

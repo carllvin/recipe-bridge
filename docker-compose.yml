@@ -1,7 +1,9 @@
 services:
+  # The service and volume keep their old names (from "Tandoor Helper") so an
+  # update keeps the existing data and doesn't leave a second container behind.
   tandoor-helper:
     build: ./backend
-    container_name: tandoor-helper
+    container_name: recipe-bridge
     restart: unless-stopped
     ports:
       - "8420:8000"

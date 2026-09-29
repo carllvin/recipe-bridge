@@ -16,7 +16,7 @@ from .config import settings
 from .schemas import ToolSuggestion
 from .tools_conversions import _fetch_all
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 METRIC = "keywords_ungrouped"
 MAX_TAGS = 400  # most used first

@@ -29,9 +29,9 @@ from .docx_processor import process_docx
 from .schemas import ExtractedRecipe
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
-app = FastAPI(title="Tandoor Helper")
+app = FastAPI(title="Recipe Bridge")
 
 
 @app.middleware("http")

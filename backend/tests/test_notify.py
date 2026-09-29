@@ -39,7 +39,7 @@ def test_import_ready_goes_to_both_channels(sent):
     notify.import_finished(job)
     (ntfy_url, ntfy, _), (tg_url, tg, _) = sent
     assert ntfy_url == "https://ntfy.sh" and ntfy["topic"] == "meine-kueche"
-    assert ntfy["title"] == "Tandoor Helper: Import fertig" and "Omas Karten: 0 Rezept(e)" in ntfy["message"]
+    assert ntfy["title"] == "Recipe Bridge: Import fertig" and "Omas Karten: 0 Rezept(e)" in ntfy["message"]
     assert ntfy["click"] == "https://helper.example"
     assert tg_url == "https://api.telegram.org/bot123:abc/sendMessage" and tg["chat_id"] == "42"
     sent.clear()
@@ -67,7 +67,7 @@ def test_budget_once_per_level_and_month(sent, monkeypatch):
     notify.budget_changed(status)
     notify.budget_changed({**status, "used": 1000, "exceeded": True})
     titles = [c[1]["title"] for c in sent if "topic" in (c[1] or {})]
-    assert titles == ["Tandoor Helper: KI-Budget fast verbraucht", "Tandoor Helper: KI-Budget aufgebraucht"]
+    assert titles == ["Recipe Bridge: KI-Budget fast verbraucht", "Recipe Bridge: KI-Budget aufgebraucht"]
 
 
 def test_recording_usage_checks_the_budget(monkeypatch):

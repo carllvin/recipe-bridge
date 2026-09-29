@@ -9,7 +9,7 @@ from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, fetch_all_recipes_full, find_recipes_using_unit, format_cost_estimate, minimal_ref, resolve_name_collisions, validate_actions
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 REVIEW_SYSTEM_PROMPT = """You are cleaning up a home cook's unit-of-measure
 database. Its target language is {language}. You will receive a JSON array

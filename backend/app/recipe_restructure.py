@@ -24,7 +24,7 @@ from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import format_cost_estimate, minimal_ref
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 LONG_SINGLE_STEP_CHARS = 250   # a single step longer than this ...
 LONG_SINGLE_STEP_SENTENCES = 3  # ... or with at least this many sentences is probably several steps

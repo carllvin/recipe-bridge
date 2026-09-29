@@ -7,7 +7,7 @@ from PIL import Image, ImageOps
 
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def preprocess_for_ocr(img: "Image.Image") -> list["Image.Image"]:

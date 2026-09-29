@@ -11,7 +11,7 @@ import time
 
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 _lock = threading.Lock()
 
 

@@ -17,7 +17,7 @@ import threading
 from . import mealie_plan, tandoor_client, target
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 LOOKBACK_DAYS = 7
 _lock = threading.Lock()

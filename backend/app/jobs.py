@@ -9,7 +9,7 @@ import uuid
 
 from .schemas import Job
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 _jobs: dict[str, Job] = {}
 _lock = threading.Lock()

@@ -24,7 +24,7 @@ from .schemas import ToolSuggestion
 from .tandoor_client import TandoorError
 from .tools_unused import find_unused
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 METRICS = ["foods_duplicates", "units_duplicates", "foods_unused", "units_unused", "keywords_unused",
            "recipes_without_servings", "recipes_without_image", *mealie_tools.METRICS]
