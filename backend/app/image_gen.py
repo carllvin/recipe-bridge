@@ -6,7 +6,7 @@ from typing import Optional
 
 from .config import settings
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def _active_provider() -> str:

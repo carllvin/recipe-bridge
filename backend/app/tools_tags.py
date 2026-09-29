@@ -10,7 +10,7 @@ from .config import settings, get_language_code
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, fetch_all_recipes_full, find_recipes_by_filter, format_cost_estimate, resolve_name_collisions, validate_actions
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def _find_recipes_using_keyword(client, keyword_id):
@@ -476,7 +476,7 @@ def mark_diet_checked(recipe_ids) -> None:
     ids = diet_checked() | set(recipe_ids)
     os.makedirs(settings.data_dir, exist_ok=True)
     with open(_diet_checked_path(), "w", encoding="utf-8") as f:
-        json.dump(sorted(ids), f)
+        json.dump(sorted(ids, key=str), f)  # Tandoor ids and Mealie slugs
 
 MIN_TAGS_DEFAULT = 5
 # Recipes per AI call. The prompt and the tag vocabulary (the bulk of the

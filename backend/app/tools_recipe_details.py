@@ -19,7 +19,7 @@ from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 SERVINGS_BATCH_SIZE = 25
 MAX_INGREDIENT_LINES = 25

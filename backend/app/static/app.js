@@ -92,10 +92,29 @@ async function checkTandoor() {
 }
 
 el('tandoor-badge').addEventListener('click', () => {
-  if (APP_CONFIG.tandoor_url && el('tandoor-badge').classList.contains('ok')) {
-    window.open(APP_CONFIG.tandoor_url, '_blank', 'noopener');
+  if (APP_CONFIG.manager_url && el('tandoor-badge').classList.contains('ok')) {
+    window.open(APP_CONFIG.manager_url, '_blank', 'noopener');
   }
 });
+
+function isMealie() {
+  return !!APP_CONFIG.recipe_manager && APP_CONFIG.recipe_manager !== 'Tandoor';
+}
+
+// Tandoor's ids are numbers, Mealie's uuids (and its meal types words).
+function idValue(v) {
+  return /^\d+$/.test(String(v)) ? Number(v) : v;
+}
+
+// With Mealie only some tools exist (APP_CONFIG.available_tools; null = all).
+function toolAvailable(tool) {
+  return !APP_CONFIG.available_tools || APP_CONFIG.available_tools.includes(tool);
+}
+
+// Link to a recipe imported into Tandoor (id) or Mealie (slug) - null without one.
+function importedRecipeUrl(id) {
+  return id && APP_CONFIG.recipe_url_base ? `${APP_CONFIG.recipe_url_base}${id}` : null;
+}
 
 // ---------- Token usage badge ----------
 
@@ -654,7 +673,7 @@ function renderRecipeList() {
   recipes.forEach((r) => {
     const item = document.createElement('div');
     item.className = 'recipe-item' + (r.id === state.activeRecipeId ? ' active' : '');
-    const opensInTandoor = r.import_status === 'imported' && r.tandoor_recipe_id && APP_CONFIG.tandoor_url;
+    const opensInTandoor = r.import_status === 'imported' && importedRecipeUrl(r.tandoor_recipe_id);
     if (opensInTandoor) item.title = t('tandoorOpenRecipeHint');
     item.innerHTML = `
       <input type="checkbox" ${r.selected ? 'checked' : ''} data-id="${r.id}" class="select-cb" />
@@ -669,7 +688,7 @@ function renderRecipeList() {
     item.addEventListener('click', (e) => {
       if (e.target.classList.contains('select-cb')) return;
       if (opensInTandoor) {
-        window.open(`${APP_CONFIG.tandoor_url}/view/recipe/${r.tandoor_recipe_id}`, 'tandoorRecipePopup', 'width=900,height=850,noopener');
+        window.open(importedRecipeUrl(r.tandoor_recipe_id), 'tandoorRecipePopup', 'width=900,height=850,noopener');
         return;
       }
       selectRecipe(r.id);
@@ -831,6 +850,15 @@ function matchBadgeHtml(ing) {
   return '';
 }
 
+// What the AI read before the match with Tandoor ("Zwiebeln" -> "Zwiebel"),
+// shown under the ingredient.
+function originalLineHtml(ing) {
+  const parts = [];
+  if (ing.tandoor_match === 'matched' && ing.original_name && ing.original_name !== ing.name) parts.push(ing.original_name);
+  if (ing.unit_match === 'matched' && ing.original_unit && ing.original_unit !== ing.unit) parts.push(`${t('placeholderUnit')}: ${ing.original_unit}`);
+  return parts.length ? `<div class="ing-original">${escapeHtml(tf('matchOriginalLine', { original: parts.join(' · ') }))}</div>` : '';
+}
+
 function unitBadgeHtml(ing) {
   if (!ing.unit) return '';
   if (ing.unit_match === 'matched') {
@@ -860,7 +888,8 @@ function tagChipHtml(r, tag, i) {
   const original = (r.tag_original || {})[tag];
   const marker = status === 'new' ? `<span class="tag-new">${t('matchNewLabel')}</span>`
     : status === 'matched' ? `<button type="button" class="tag-revert" data-idx="${i}" title="${escapeHtml(tf('tagMatchedTitle', { original: original || '' }))}">↺</button>` : '';
-  return `<span class="tag ${status || ''}">${escapeHtml(tag)}${marker}<button type="button" class="tag-remove" data-idx="${i}" aria-label="${escapeHtml(t('tagRemove'))}">×</button></span>`;
+  const was = status === 'matched' && original ? `<span class="tag-original">(${escapeHtml(original)})</span>` : '';
+  return `<span class="tag ${status || ''}">${escapeHtml(tag)}${was}${marker}<button type="button" class="tag-remove" data-idx="${i}" aria-label="${escapeHtml(t('tagRemove'))}">×</button></span>`;
 }
 
 function renderDetail(r) {
@@ -869,7 +898,7 @@ function renderDetail(r) {
   const ingredientsHtml = r.ingredients.map((ing, i) => {
     const stepOptions = r.steps.map((s, si) => `<option value="${si}" ${((ing.step_index ?? 0) === si) ? 'selected' : ''}>${si + 1}</option>`).join('');
     return `
-    <div class="ingredient-row" data-idx="${i}" draggable="true">
+    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}" draggable="true">
       <span class="ing-drag-handle" title="${t('dragToReorder')}">⠿</span>
       <input class="ing-amount" value="${ing.amount ?? ''}" placeholder="${t('placeholderAmount')}" />
       <div class="ing-unit-wrap">
@@ -881,6 +910,7 @@ function renderDetail(r) {
         ${matchBadgeHtml(ing)}
       </div>
       <select class="ing-step" title="${t('fieldStepAssignment')}">${stepOptions || '<option value="0">1</option>'}</select>
+      ${originalLineHtml(ing)}
       <input class="ing-note" value="${escapeHtml(ing.note ?? '')}" placeholder="${t('placeholderNote')}" />
     </div>
   `;
@@ -919,8 +949,8 @@ function renderDetail(r) {
       )}</div>`
     : '';
 
-  const tandoorLink = (APP_CONFIG.tandoor_url && r.tandoor_recipe_id)
-    ? `<a class="btn secondary" href="${APP_CONFIG.tandoor_url}/view/recipe/${r.tandoor_recipe_id}" target="_blank" rel="noopener">${t('openInTandoorBtn')}</a>`
+  const tandoorLink = importedRecipeUrl(r.tandoor_recipe_id)
+    ? `<a class="btn secondary" href="${escapeHtml(importedRecipeUrl(r.tandoor_recipe_id))}" target="_blank" rel="noopener">${t('openInTandoorBtn')}</a>`
     : '';
 
   const importedNotice = r.import_status === 'imported'
@@ -1998,8 +2028,10 @@ function renderHealth(data) {
       </div>
     </div>`;
   };
+  const available = APP_CONFIG.health_metrics;  // null = all (Tandoor)
   el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
-    const metrics = g.metrics.map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    const metrics = g.metrics.filter((k) => !available || available.includes(k)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    if (!metrics.length) return '';
     // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
     const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
     const open = metrics.filter((m) => !done(m));
@@ -2014,7 +2046,7 @@ function renderHealth(data) {
         <h4>${t(g.titleKey)}</h4>
         ${status ? `<button type="button" class="health-ok-toggle" data-group="${g.key}"
           title="${escapeHtml(fine.map((m) => t('healthShort_' + m.key)).join(' · '))}">✓ ${escapeHtml(status)} ${showFine ? '▾' : '▸'}</button>` : ''}
-        ${g.tool ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
+        ${g.tool && toolAvailable(g.tool.tool) ? `<button type="button" class="link-btn health-group-tool" data-group="${g.key}" title="${escapeHtml(t(g.tool.descKey))}">${t(g.tool.titleKey)} →</button>` : ''}
       </div>
       ${open.length || showFine ? `<div class="health-grid">${open.map(tile).join('')}${showFine ? fine.map(tile).join('') : ''}</div>` : ''}
     </div>`;
@@ -2051,8 +2083,8 @@ function closeHealthDetail() {
 }
 
 function healthRow(item) {
-  const link = item.recipe_id && APP_CONFIG.tandoor_url
-    ? ` <a href="${APP_CONFIG.tandoor_url}/view/recipe/${item.recipe_id}" target="_blank" rel="noopener" title="${escapeHtml(t('openInTandoorBtn'))}">↗</a>`
+  const link = importedRecipeUrl(item.recipe_id)
+    ? ` <a href="${escapeHtml(importedRecipeUrl(item.recipe_id))}" target="_blank" rel="noopener" title="${escapeHtml(t('openInTandoorBtn'))}">↗</a>`
     : '';
   return `<label class="health-row" data-name="${escapeHtml(item.name.toLowerCase())}">
     <input type="checkbox" data-key="${escapeHtml(item.key)}" data-name="${escapeHtml(item.name)}" />
@@ -2156,10 +2188,11 @@ const toolsState = { jobId: null, pollTimer: null, job: null, selected: new Set(
 
 // ---------- Meal plan ----------
 
-function nextMonday() {
+// The plan starts on the shopping day: the coming Saturday (today if it is one).
+function nextSaturday() {
   const d = new Date();
-  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-  return d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ---------- In season now ----------
@@ -2206,7 +2239,7 @@ async function loadCooked() {
         row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
         const res2 = await fetch('/api/cooked', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: Number(row.dataset.plan), recipe_id: Number(row.dataset.recipe), date: row.dataset.date,
+          body: JSON.stringify({ plan_id: idValue(row.dataset.plan), recipe_id: idValue(row.dataset.recipe), date: row.dataset.date,
             servings: Number(row.dataset.servings), rating }),
         });
         if (res2.ok) {
@@ -2242,7 +2275,8 @@ async function searchCookToday() {
     }
     el('ct-status').textContent = data.results.length ? '' : t('cookTodayNone');
     el('ct-results').innerHTML = data.results.map((r) => {
-      const link = APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null;
+      const link = isMealie() ? importedRecipeUrl(r.slug)
+        : (APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${r.id}` : null);
       const name = link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>` : escapeHtml(r.name);
       // What's there is what you typed (and the score says how much) - so
       // only what's missing is spelled out.
@@ -2266,8 +2300,8 @@ async function searchCookToday() {
       const res = await fetch('/api/cook-today/plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipe: { id: Number(b.dataset.id), name: b.dataset.name },
-          meal_type: { id: Number(meal.value), name: meal.options[meal.selectedIndex].text },
+          recipe: { id: idValue(b.dataset.id), name: b.dataset.name },
+          meal_type: { id: idValue(meal.value), name: meal.options[meal.selectedIndex].text },
           add_to_shopping: el('mp-shopping').checked,
         }),
       });
@@ -2281,8 +2315,47 @@ async function searchCookToday() {
 
 el('cook-today-form').addEventListener('submit', (e) => { e.preventDefault(); searchCookToday(); });
 
+// Photo of the fridge / pantry: the AI lists what it sees, which goes into
+// the field (next to what was typed) - then the usual search runs.
+// Reads the ingredients on fridge / pantry photos and adds them to `input`.
+async function addIngredientsFromPhotos(files, input, status) {
+  if (!files.length) return false;
+  status.textContent = t('cookTodayPhotoReading');
+  const form = new FormData();
+  files.slice(0, 4).forEach((f) => form.append('files', f));
+  try {
+    const res = await fetch('/api/cook-today/photo', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    if (!data.ingredients.length) { status.textContent = t('cookTodayPhotoNone'); return false; }
+    const typed = input.value.split(',').map((x) => x.trim()).filter(Boolean);
+    const known = new Set(typed.map((x) => x.toLowerCase()));
+    input.value = [...typed, ...data.ingredients.filter((x) => !known.has(x.toLowerCase()))].join(', ');
+    status.textContent = '';
+    return true;
+  } catch (err) {
+    status.textContent = `${t('toolStatusError')}: ${err.message}`;
+    return false;
+  }
+}
+
+el('ct-photo').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (await addIngredientsFromPhotos(files, el('ct-have'), el('ct-status'))) searchCookToday();
+});
+
+el('mp-photo').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  const hint = el('mp-hint');
+  hint.classList.remove('hidden');
+  await addIngredientsFromPhotos(files, el('mp-have'), hint);
+  if (!hint.textContent) hint.classList.add('hidden');
+});
+
 async function loadMealPlanOptions() {
-  if (!el('mp-start').value) el('mp-start').value = nextMonday();
+  if (!el('mp-start').value) el('mp-start').value = nextSaturday();
   const select = el('mp-meal');
   const hint = el('mp-hint');
   try {
@@ -2309,7 +2382,7 @@ async function loadMealPlanOptions() {
 // The plan area shows one plan run as a week (one card per day) - checkbox
 // per day, "another recipe" per day, and one button to add the selected days
 // to Tandoor's meal plan. The last run is remembered per browser.
-const planState = { jobId: null, job: null, timer: null, selected: new Set(), busy: false };
+const planState = { jobId: null, job: null, timer: null, selected: new Set(), busy: false, changed: new Set() };
 
 function rememberPlan(jobId) {
   try { if (jobId) localStorage.setItem('th.planJob', jobId); else localStorage.removeItem('th.planJob'); } catch (e) { /* optional */ }
@@ -2337,8 +2410,9 @@ el('meal-plan-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({
         start_date: el('mp-start').value,
         days: Number(el('mp-days').value),
-        meal_type: { id: Number(select.value), name: select.options[select.selectedIndex]?.textContent || '' },
+        meal_type: { id: idValue(select.value), name: select.options[select.selectedIndex]?.textContent || '' },
         wishes: el('mp-wishes').value,
+        at_home: el('mp-have').value,
         add_to_shopping: el('mp-shopping').checked,
       }),
     });
@@ -2346,6 +2420,7 @@ el('meal-plan-form').addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     planState.jobId = data.job_id;
     planState.selected.clear();
+    planState.changed.clear();
     rememberPlan(data.job_id);
     pollPlan();
   } catch (err) {
@@ -2401,7 +2476,7 @@ function renderWeek(job) {
       <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>`;
     if (s.status === 'applied') return `<div class="plan-day applied">${head}${body}<div class="plan-done">✓ ${t('planApplied')}</div></div>`;
     const error = s.status === 'error' ? `<div class="inbox-error">${escapeHtml(s.error || '')}</div>` : '';
-    return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''}" data-id="${s.id}">
+    return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''} ${planState.changed.has(s.id) ? 'changed' : ''}" data-id="${s.id}">
       ${head}<label class="plan-check"><input type="checkbox" ${planState.selected.has(s.id) ? 'checked' : ''} ${planState.busy ? 'disabled' : ''}></label>
       ${body}${error}${reroll}</div>`;
   }).join('');
@@ -2418,7 +2493,52 @@ function renderWeek(job) {
   el('plan-apply-btn').textContent = tf('planApplySelected', { count: pending });
   el('plan-apply-btn').disabled = !pending || planState.busy;
   el('plan-actions').classList.toggle('hidden', !days.length);
+  renderPlanChat(job, days.length > 0);
 }
+
+// ---------- Changing the plan in a chat ----------
+
+function renderPlanChat(job, show) {
+  el('plan-chat').classList.toggle('hidden', !show || job.status !== 'ready');
+  const log = (job.meta && job.meta.chat) || [];
+  el('plan-chat-log').innerHTML = log.map((m) => {
+    const text = m.role === 'assistant' && m.changed ? `${m.text} (${tf('planChatChanged', { n: m.changed })})` : m.text;
+    return `<div class="plan-chat-msg ${m.role === 'user' ? 'user' : 'assistant'}">${escapeHtml(text)}</div>`;
+  }).join('') + (planState.chatPending ? `<div class="plan-chat-msg user">${escapeHtml(planState.chatPending)}</div>
+    <div class="plan-chat-msg assistant pending">${t('planChatThinking')}</div>` : '');
+}
+
+el('plan-chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = el('plan-chat-input');
+  const message = input.value.trim();
+  if (!message || planState.busy || !planState.jobId) return;
+  planState.busy = true;
+  planState.chatPending = message;
+  input.value = '';
+  el('plan-chat-send').disabled = true;
+  renderWeek(planState.job);
+  try {
+    const res = await fetch(`/api/tools/meal-plan/${planState.jobId}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    planState.changed = new Set(data.meta.last_changed || []);
+    planState.changed.forEach((id) => planState.selected.add(id));
+    planState.chatPending = null;
+    planState.busy = false;
+    renderWeek(data);
+  } catch (err) {
+    planState.chatPending = null;
+    planState.busy = false;
+    input.value = message;
+    renderWeek(planState.job);
+    el('plan-status').textContent = `${t('toolStatusError')}: ${err.message}`;
+  } finally {
+    el('plan-chat-send').disabled = false;
+  }
+});
 
 async function rerollDay(date) {
   if (planState.busy) return;
@@ -2817,6 +2937,19 @@ if ('serviceWorker' in navigator) {
 
 (async function init() {
   await initI18n();
+  if (isMealie()) {
+    // Maintain shows the tiles that also work with Mealie
+    // (APP_CONFIG.health_metrics); planning uses Mealie's meal plan.
+    document.querySelectorAll('.tandoor-only').forEach((elm) => elm.classList.add('hidden'));
+    document.querySelectorAll('[data-i18n="toolNewRecipesDesc"]').forEach((elm) => {
+      elm.setAttribute('data-i18n', 'toolNewRecipesDescMealie');
+      elm.textContent = t('toolNewRecipesDescMealie');
+    });
+    document.querySelectorAll('[data-i18n="cookedHint"]').forEach((elm) => {
+      elm.setAttribute('data-i18n', 'cookedHintMealie');
+      elm.textContent = t('cookedHintMealie');
+    });
+  }
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

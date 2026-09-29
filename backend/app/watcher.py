@@ -22,7 +22,7 @@ from . import usage_log
 from .config import settings
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 PROCESSED_DIR = "processed"
 FAILED_DIR = "failed"

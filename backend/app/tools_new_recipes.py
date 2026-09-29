@@ -34,12 +34,12 @@ import threading
 import time
 import uuid
 
-from . import llm_provider, nutrition_properties, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
+from . import llm_provider, nutrition_properties, recipe_restructure, tandoor_client, target, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import find_recipes_by_filter, resolve_name_collisions
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 _store_lock = threading.Lock()
 
@@ -47,7 +47,8 @@ _store_lock = threading.Lock()
 # ---------- Which recipes were already handled ----------
 
 def _store_path() -> str:
-    return os.path.join(settings.data_dir, "processed_recipes.json")
+    # Mealie's recipes have other ids (slugs) - its own list
+    return os.path.join(settings.data_dir, "processed_recipes_mealie.json" if target.is_mealie() else "processed_recipes.json")
 
 
 def _load_store() -> dict | None:
@@ -73,7 +74,10 @@ def mark_processed(recipe_ids) -> None:
         _save_store(store)
 
 
-def list_recipe_ids(client) -> list[int]:
+def list_recipe_ids(client) -> list:
+    if target.is_mealie():
+        from .mealie_tools import list_recipe_ids as mealie_ids
+        return mealie_ids(client)
     ids = []
     url, params = "/recipe/", {"page_size": 200}
     for _ in range(200):
@@ -109,7 +113,7 @@ def status() -> dict:
     """How many recipes are new (not handled and not already part of an
     open run), plus the open runs and the automatic-run schedule. Creates the
     baseline on first use: every recipe existing right now counts as handled."""
-    with tandoor_client.get_client() as client:
+    with target.client().get_client() as client:
         ids = list_recipe_ids(client)
     result = {
         "auto_interval_hours": settings.auto_process_interval_hours,
@@ -154,11 +158,13 @@ def auto_run_once() -> str | None:
         return None
     if any(job.status == "scanning" for job in open_jobs()):
         return None  # one run at a time
-    with tandoor_client.get_client() as client:
+    with target.client().get_client() as client:
         if not _new_recipe_ids(client):
             return None
     job = tool_jobs.create_tool_job("new_recipes")
     job.meta["auto"] = True
+    if target.is_mealie():
+        job.meta["target"] = "mealie"  # applied by mealie_maintenance
     tool_jobs.save_tool_job(job)
     log.info("Automatic new-recipes run started (job %s)", job.id)
     run_scan(job.id)
@@ -370,6 +376,9 @@ def _only_used_by(client, filter_param, item_id, recipe_ids) -> bool:
 # ---------- The scan ----------
 
 def run_scan(job_id: str) -> None:
+    if target.is_mealie():  # mealie_tools.new_recipes
+        from . import mealie_maintenance
+        return mealie_maintenance.run_scan(job_id)
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
         return

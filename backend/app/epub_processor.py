@@ -8,7 +8,7 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 SUPPORTED_EPUB_EXTENSIONS = {".epub"}
 

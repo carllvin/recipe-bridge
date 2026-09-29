@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title data-i18n="pageTitle">Tandoor Helper</title>
+  <title data-i18n="pageTitle">Recipe Bridge</title>
   <link rel="stylesheet" href="/style.css" />
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#1c211d" />
@@ -13,7 +13,7 @@
 <body>
   <div class="app">
     <div class="topbar">
-      <div class="brand" id="brand-link" role="button" tabindex="0"><em>Tandoor</em> Helper</div>
+      <div class="brand" id="brand-link" role="button" tabindex="0"><em>Recipe</em> Bridge</div>
       <nav class="main-nav" id="main-nav">
         <button type="button" class="nav-btn active" data-area="import"><span class="nav-icon">📥</span><span data-i18n="navImport">Import</span></button>
         <button type="button" class="nav-btn" data-area="inbox"><span class="nav-icon">✅</span><span data-i18n="navInbox">Review</span><span id="inbox-badge" class="nav-badge hidden">0</span></button>
@@ -61,6 +61,8 @@
         <h3 data-i18n="cookTodayTitle">What can I cook today?</h3>
         <form id="cook-today-form" class="cook-today-form">
           <input id="ct-have" type="text" data-i18n-placeholder="cookTodayPlaceholder" placeholder="e.g. zucchini, feta, rice" />
+          <label class="btn secondary ct-photo-btn" data-i18n-title="cookTodayPhotoTitle" title="Photo of the fridge">📷
+            <input id="ct-photo" type="file" accept="image/*" capture="environment" multiple hidden /></label>
           <button class="btn" type="submit" data-i18n="cookTodayBtn">Find recipes</button>
         </form>
         <p class="settings-hint ct-hint">ⓘ <span data-i18n="cookTodayHint">Salt, pepper, oil … count as at home.</span></p>
@@ -74,6 +76,12 @@
           <label><span data-i18n="mealPlanDays">Days</span><input id="mp-days" type="number" min="1" max="14" value="7" required /></label>
           <label><span data-i18n="mealPlanMeal">Meal</span><select id="mp-meal" required></select></label>
           <label class="mp-wide"><span data-i18n="mealPlanWishes">Wishes</span><input id="mp-wishes" type="text" data-i18n-placeholder="mealPlanWishesPlaceholder" placeholder="e.g. 2x vegetarian, quick on weekdays" /></label>
+          <div class="mp-wide mp-have">
+            <label><span data-i18n="mealPlanHave">Already at home (optional)</span><input id="mp-have" type="text" data-i18n-placeholder="mealPlanHavePlaceholder" placeholder="e.g. spinach, feta, salmon" /></label>
+            <label class="btn secondary ct-photo-btn" data-i18n-title="cookTodayPhotoTitle" title="Photo of the fridge">📷
+              <input id="mp-photo" type="file" accept="image/*" capture="environment" multiple hidden /></label>
+          </div>
+          <p class="mp-wide mp-fresh-hint" data-i18n="mealPlanFreshHint">The start is your shopping day: fresh fish, leafy greens and herbs come first, pantry and frozen dishes at the end of the week.</p>
           <div class="mp-wide mp-foot">
             <label class="mp-check"><input id="mp-shopping" type="checkbox" checked /> <span data-i18n="mealPlanShopping">Add ingredients to the shopping list</span></label>
             <button id="mp-start-btn" class="btn" type="submit" data-i18n="mealPlanStartBtn">Plan the week</button>
@@ -92,6 +100,14 @@
             <span id="plan-status" class="tools-bulk-status"></span>
             <button id="plan-apply-btn" class="btn" type="button"></button>
           </div>
+        </div>
+        <div id="plan-chat" class="plan-chat hidden">
+          <h4 data-i18n="planChatTitle">Change the plan</h4>
+          <div id="plan-chat-log" class="plan-chat-log"></div>
+          <form id="plan-chat-form" class="plan-chat-form">
+            <input id="plan-chat-input" type="text" autocomplete="off" maxlength="500" data-i18n-placeholder="planChatPlaceholder" placeholder="e.g. something with beef on Thursday" />
+            <button id="plan-chat-send" class="btn" type="submit" data-i18n="planChatSend">Send</button>
+          </form>
         </div>
       </section>
     </div>
@@ -275,7 +291,7 @@
         <div class="more-way">
           <h4 data-i18n="moreWayBookmarkletTitle">🔖 Bookmark button</h4>
           <p><span data-i18n="bookmarkletHint">Drag this button to your bookmarks bar – clicking it on a recipe page sends the page here.</span></p>
-          <a id="bookmarklet" class="bookmarklet" href="#" draggable="true" data-i18n="bookmarkletLabel">📥 Send to Tandoor Helper</a>
+          <a id="bookmarklet" class="bookmarklet" href="#" draggable="true" data-i18n="bookmarkletLabel">📥 Send to Recipe Bridge</a>
         </div>
         <div class="more-way">
           <h4 data-i18n="moreWayShareTitle">📱 Share from the phone</h4>

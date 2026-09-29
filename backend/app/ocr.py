@@ -8,7 +8,7 @@ import pytesseract
 from .config import settings
 from .image_preprocessing import preprocess_for_ocr
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def ocr_image(img: "Image.Image") -> str:

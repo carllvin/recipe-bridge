@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import logging
 
-from . import tandoor_client, tools_ingredients, tools_tags
+from . import target, tools_tags
 from .tools_new_recipes import PICK_SYSTEM_PROMPT, _key, _prompt, _similar_candidates
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 PICK_BATCH_SIZE = 60  # names per AI call when a big cookbook has many "similar" ones
 
@@ -93,11 +93,12 @@ def match_job_ingredients(job) -> None:
     """Updates job.recipes' ingredients, units and tags in place. Non-fatal:
     if Tandoor isn't reachable, the review screen simply shows no badges."""
     try:
-        with tandoor_client.get_client() as client:
-            foods = tools_ingredients.fetch_all_foods_full(client)
-            units = tandoor_client.fetch_all_items(client, "unit")
+        api = target.client()  # Tandoor or Mealie
+        with api.get_client() as client:
+            foods = target.fetch_foods(client)
+            units = api.fetch_all_items(client, "unit")
             # tag groups ("Diet") hold tags - they aren't put on recipes
-            keywords = [k for k in tandoor_client.fetch_all_items(client, "keyword") if not k.get("numchild")]
+            keywords = [k for k in api.fetch_all_items(client, "keyword") if not k.get("numchild")]
     except Exception as exc:  # noqa: BLE001
         log.info("Ingredient matching skipped (Tandoor unreachable/not configured): %s", exc)
         return

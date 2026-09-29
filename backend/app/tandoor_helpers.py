@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 
 def fetch_recipe_overview(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:

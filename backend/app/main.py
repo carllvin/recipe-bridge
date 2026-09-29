@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -29,9 +29,9 @@ from .docx_processor import process_docx
 from .schemas import ExtractedRecipe
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
-app = FastAPI(title="Tandoor Helper")
+app = FastAPI(title="Recipe Bridge")
 
 
 @app.middleware("http")
@@ -73,8 +73,8 @@ def _mark_duplicates(job) -> None:
     if not settings.check_duplicates:
         return
     try:
-        with tandoor_client.get_client() as client:
-            existing_names = tandoor_client.fetch_all_recipe_names(client)
+        with target.client().get_client() as client:
+            existing_names = target.client().fetch_all_recipe_names(client)
     except Exception as exc:  # noqa: BLE001
         log.info("Duplicate check skipped (Tandoor unreachable/not configured): %s", exc)
         return
@@ -114,8 +114,8 @@ def _fetch_existing_tags() -> list[str] | None:
     if not settings.reuse_existing_tags:
         return None
     try:
-        with tandoor_client.get_client() as client:
-            return tandoor_client.fetch_all_keyword_names(client)
+        with target.client().get_client() as client:
+            return target.client().fetch_all_keyword_names(client)
     except Exception as exc:  # noqa: BLE001
         log.info("Tag reuse lookup skipped (Tandoor unreachable/not configured): %s", exc)
         return None
@@ -549,7 +549,7 @@ async def token_usage(days: int = 30):
 @app.get("/api/settings")
 async def get_app_settings():
     return {**app_settings.get(), "budget_status": usage_log.budget_status(),
-            "maintenance_status": maintenance.status(), "metrics": app_settings.MAINTENANCE_METRICS}
+            "maintenance_status": maintenance.status(), "metrics": maintenance.available_metrics()}
 
 
 @app.put("/api/settings")
@@ -686,8 +686,8 @@ async def tandoor_tags():
     """Existing tag names (not tag groups) - offered when adding a tag to a
     recipe in the import review."""
     def load():
-        with tandoor_client.get_client() as client:
-            return sorted((k["name"] for k in tandoor_client.fetch_all_items(client, "keyword") if not k.get("numchild")),
+        with target.client().get_client() as client:
+            return sorted((k["name"] for k in target.client().fetch_all_items(client, "keyword") if not k.get("numchild")),
                           key=str.casefold)
     try:
         return {"tags": await asyncio.to_thread(load)}
@@ -766,12 +766,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     cookbook_warning = None
 
     try:
-        with tandoor_client.get_client() as client:
+        api = target.client()  # Tandoor or Mealie
+        with api.get_client() as client:
             cookbook_id = None
             cookbook_endpoint = None
             if cookbook_name:
                 try:
-                    cookbook_id, cookbook_endpoint = tandoor_client.get_or_create_cookbook(client, cookbook_name)
+                    cookbook_id, cookbook_endpoint = api.get_or_create_cookbook(client, cookbook_name)
                 except tandoor_client.TandoorError as exc:
                     cookbook_warning = str(exc)
                     log.warning("Could not create cookbook: %s", exc)
@@ -788,18 +789,18 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
 
                 warnings: list[str] = []
                 try:
-                    tandoor_id = tandoor_client.create_recipe(client, recipe)
+                    tandoor_id = api.create_recipe(client, recipe)
                     recipe.tandoor_recipe_id = tandoor_id
 
                     if image_path and os.path.exists(image_path):
                         try:
-                            tandoor_client.upload_image(client, tandoor_id, image_path)
+                            api.upload_image(client, tandoor_id, image_path)
                         except tandoor_client.TandoorError as exc:
                             warnings.append(f"Image upload failed: {exc}")
 
                     if cookbook_id is not None:
                         try:
-                            tandoor_client.add_recipe_to_cookbook(client, cookbook_id, cookbook_endpoint, tandoor_id)
+                            api.add_recipe_to_cookbook(client, cookbook_id, cookbook_endpoint, tandoor_id)
                         except tandoor_client.TandoorError as exc:
                             warnings.append(str(exc))
 
@@ -833,7 +834,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     # ...) - suggestions then wait under Tools. Never blocks the import.
     post_processing_job_id = None
     imported_ids = [r["tandoor_recipe_id"] for r in results if r["status"] == "imported" and r["tandoor_recipe_id"]]
-    if imported_ids:
+    if imported_ids and target.is_mealie():
+        # The review covered what a new-recipes run would do with Mealie
+        # (there's no ingredient data to fill in) - they don't count as new.
+        health.mark_changed()
+        if tools_new_recipes._load_store() is not None:
+            tools_new_recipes.mark_processed(imported_ids)
+    elif imported_ids:
         health.mark_changed()
         try:
             post_processing_job_id = await asyncio.to_thread(tools_new_recipes.start_after_import, imported_ids)
@@ -859,8 +866,8 @@ async def undo_import(job_id: str, recipe_id: str):
         raise HTTPException(400, "This recipe hasn't been imported (or was already undone).")
 
     try:
-        with tandoor_client.get_client() as client:
-            tandoor_client.delete_recipe(client, recipe.tandoor_recipe_id)
+        with target.client().get_client() as client:
+            target.client().delete_recipe(client, recipe.tandoor_recipe_id)
     except tandoor_client.TandoorError as exc:
         raise HTTPException(502, f"Could not undo the import: {exc}")
 
@@ -887,10 +894,10 @@ async def undo_all_imports(job_id: str):
 
     results = []
     try:
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             for recipe in imported:
                 try:
-                    tandoor_client.delete_recipe(client, recipe.tandoor_recipe_id)
+                    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
                     recipe.import_status = "pending"
                     recipe.tandoor_recipe_id = None
                     recipe.import_error = None
@@ -1005,11 +1012,16 @@ def _check_budget() -> None:
 
 def _start_tool_job(tool: str, meta: dict | None = None):
     _check_budget()
+    if target.is_mealie() and tool not in mealie_maintenance.TOOLS:
+        raise HTTPException(400, "This tool needs Tandoor - it isn't available with Mealie.")
     job = tool_jobs.create_tool_job(tool)
     if meta:
         job.meta.update(meta)
-        tool_jobs.save_tool_job(job)
-    threading.Thread(target=_TOOL_SCANS[tool], args=(job.id,), daemon=True).start()
+    if target.is_mealie():
+        job.meta["target"] = "mealie"  # scanned and applied by mealie_maintenance
+    tool_jobs.save_tool_job(job)
+    scan = mealie_maintenance.run_scan if target.is_mealie() else _TOOL_SCANS[tool]
+    threading.Thread(target=scan, args=(job.id,), daemon=True).start()
     return {"job_id": job.id}
 
 
@@ -1098,6 +1110,30 @@ async def in_season_now():
     return {"month": time.localtime().tm_mon, "produce": seasonal.display_names(seasonal.in_season())}
 
 
+MAX_FRIDGE_PHOTOS = 4
+
+
+@app.post("/api/cook-today/photo")
+async def cook_today_photo(files: list[UploadFile] = File(...)):
+    """Photos of the fridge / pantry -> the ingredients the AI sees in them."""
+    _check_budget()
+    if not llm_provider.is_configured():
+        raise HTTPException(400, llm_provider.missing_key_hint())
+    photos = []
+    for upload in files[:MAX_FRIDGE_PHOTOS]:
+        data = await upload.read(settings.max_upload_mb * 1024 * 1024 + 1)
+        if len(data) > settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"Photo larger than {settings.max_upload_mb} MB.")
+        photos.append(data)
+    try:
+        names, tokens_in, tokens_out = await asyncio.to_thread(cook_today.ingredients_from_photos, photos)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Fridge photo failed: %s", exc)
+        raise HTTPException(502, f"The AI could not read the photo: {exc}")
+    usage_log.record("cook_today_photo", tokens_in, tokens_out)
+    return {"ingredients": names}
+
+
 @app.post("/api/cook-today/plan")
 async def cook_today_plan(body: dict = Body(...)):
     """{"recipe": {"id", "name"}, "meal_type": {"id", "name"}, "date"?, "add_to_shopping"?} -
@@ -1108,13 +1144,18 @@ async def cook_today_plan(body: dict = Body(...)):
     date = body.get("date") or time.strftime("%Y-%m-%d")
 
     def create():
-        with tandoor_client.get_client() as client:
+        with target.client().get_client() as client:
             return tools_meal_plan.create_plan_entry(client, recipe, date, meal_type, bool(body.get("add_to_shopping")))
     try:
         await asyncio.to_thread(create)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc))
     return {"ok": True, "date": date}
+
+
+def _recipe_id(value):
+    """Tandoor's recipe ids are numbers, Mealie's uuids."""
+    return str(value) if target.is_mealie() else int(value)
 
 
 @app.get("/api/cooked/pending")
@@ -1129,7 +1170,7 @@ async def cooked_pending():
 async def cooked_answer(body: dict = Body(...)):
     """{"plan_id", "recipe_id", "date", "servings", "rating": 1-5 | null (not cooked)}"""
     try:
-        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], int(body["recipe_id"]), body["date"],
+        await asyncio.to_thread(cook_feedback.answer, body["plan_id"], _recipe_id(body["recipe_id"]), body["date"],
                                 body.get("servings"), body.get("rating"))
     except KeyError as exc:
         raise HTTPException(400, f"Missing field {exc}")
@@ -1159,6 +1200,7 @@ async def start_meal_plan(body: dict = Body(...)):
         "days": body.get("days") or 7,
         "meal_type": {"id": meal_type["id"], "name": meal_type.get("name", "")},
         "wishes": (body.get("wishes") or "")[:500],
+        "at_home": (body.get("at_home") or "")[:1000],
         "add_to_shopping": bool(body.get("add_to_shopping")),
     }
     tool_jobs.save_tool_job(job)
@@ -1172,6 +1214,23 @@ async def meal_plan_reroll(job_id: str, body: dict = Body(...)):
         job = await asyncio.to_thread(tools_meal_plan.reroll_day, job_id, body.get("date", ""))
     except tandoor_client.TandoorError as exc:
         raise HTTPException(400, str(exc))
+    return job.model_dump()
+
+
+@app.post("/api/tools/meal-plan/{job_id}/chat")
+async def meal_plan_chat(job_id: str, body: dict = Body(...)):
+    """{"message"} - changes the plan as asked; returns the run with the
+    changed days' ids in meta["last_changed"] and the chat in meta["chat"]."""
+    message = (body.get("message") or "").strip()[:500]
+    if not message:
+        raise HTTPException(400, "Empty message.")
+    _check_budget()
+    try:
+        job = await asyncio.to_thread(tools_meal_plan.chat, job_id, message)
+    except tandoor_client.TandoorError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
     return job.model_dump()
 
 
@@ -1259,7 +1318,8 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
             tool_jobs.save_tool_job(job)
         action = "apply"
     if action == "apply":
-        apply_fn = _TOOL_APPLY.get(job.tool)
+        apply_fn = (mealie_maintenance.apply_suggestion if job.meta.get("target") == "mealie"
+                    else _TOOL_APPLY.get(job.tool))
         if apply_fn is None:
             raise LookupError(f"Unknown tool: {job.tool}")
         before = next((s.status for s in job.suggestions if s.id == suggestion_id), None)
@@ -1413,13 +1473,20 @@ async def get_config():
         # Base URL only (never the token) - lets the UI link straight to an
         # imported recipe in Tandoor. None when Tandoor isn't configured at all.
         "tandoor_url": settings.tandoor_url.rstrip("/") if settings.tandoor_url else None,
+        # Where imports go (Tandoor or Mealie; with Mealie only the import area)
+        "recipe_manager": target.name(),
+        "manager_url": target.base_url(),
+        "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
+        # the tiles that work with Mealie (None = all of them, Tandoor)
+        "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
+        "available_tools": mealie_maintenance.TOOLS if target.is_mealie() else None,
     }
 
 
 @app.get("/api/tandoor/status")
 async def tandoor_status():
     try:
-        tandoor_client.test_connection()
+        await asyncio.to_thread(target.client().test_connection)
         return {"connected": True}
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"connected": False, "error": str(exc)}, status_code=200)
@@ -1450,6 +1517,8 @@ async def on_startup() -> None:
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()
     maintenance.configure(_TOOL_SCANS)
+    if target.is_mealie():
+        log.info("Recipes go to Mealie - the tools that need Tandoor's data model are off")
     asyncio.create_task(maintenance.loop())
     if settings.auto_process_interval_hours > 0:
         asyncio.create_task(tools_new_recipes.auto_run_loop())

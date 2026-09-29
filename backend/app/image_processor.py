@@ -12,7 +12,7 @@ from . import llm_provider
 from .ocr import ocr_image
 from .schemas import TokenUsage
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 pillow_heif.register_heif_opener()  # lets Pillow open .heic/.heif via Image.open()
 

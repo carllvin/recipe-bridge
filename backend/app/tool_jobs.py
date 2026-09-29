@@ -13,7 +13,7 @@ from . import usage_log
 from .config import settings
 from .schemas import ToolJob
 
-log = logging.getLogger("tandoor-helper")
+log = logging.getLogger("recipe-bridge")
 
 _tool_jobs: dict[str, ToolJob] = {}
 _lock = threading.Lock()

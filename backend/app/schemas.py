@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -57,7 +57,7 @@ class ExtractedRecipe(BaseModel):
     selected: bool = True
     import_status: str = "pending"  # pending | importing | imported | error
     import_error: Optional[str] = None
-    tandoor_recipe_id: Optional[int] = None
+    tandoor_recipe_id: Optional[Union[int, str]] = None  # Tandoor id, or Mealie slug (RECIPE_MANAGER=mealie)
     duplicate_match: Optional[str] = None    # name of the probably-already-existing Tandoor recipe
     duplicate_exact: bool = False            # True = (near-)exact title match, False = only similar
     source_url: Optional[str] = None         # web page the recipe was imported from (URL import) -> Tandoor's "source_url"
