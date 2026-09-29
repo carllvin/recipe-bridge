@@ -127,10 +127,20 @@
             </div>
             <button id="new-recipes-start-btn" class="btn tool-start-btn" data-tool="new_recipes" data-endpoint="/api/tools/new-recipes/process" data-i18n="toolStartBtn" disabled>Start</button>
           </div>
+          <div id="new-recipes-choice" class="new-recipes-choice hidden">
+            <p id="new-recipes-choice-text"></p>
+            <div class="new-recipes-choice-buttons">
+              <button id="new-recipes-existing-done" class="btn" type="button" data-i18n="newRecipesExistingDone">Yes, they count as done</button>
+              <button id="new-recipes-existing-new" class="btn secondary" type="button" data-i18n="newRecipesExistingNew">No, process them too</button>
+            </div>
+            <p id="new-recipes-choice-hint" class="new-recipes-auto"></p>
+          </div>
           <div id="new-recipes-open-jobs" class="new-recipes-open-jobs"></div>
           <details class="new-recipes-info">
             <summary data-i18n="newRecipesWhat">What does this do?</summary>
             <p data-i18n="toolNewRecipesDesc">For recipes added since the last run (via Tandoor or this app): translates them automatically, then suggests revising their structure, matching their ingredients, units and tags, filling in ingredient details, and adding tags.</p>
+            <p><span id="new-recipes-baseline-info"></span>
+              <button id="new-recipes-change-baseline" type="button" class="link-btn" data-i18n="newRecipesChangeBaseline">Change</button></p>
           </details>
         </section>
         <section class="tool-card health-card">

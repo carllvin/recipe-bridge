@@ -50,7 +50,7 @@ def test_import_into_mealie(mealie, tmp_path, monkeypatch):
     monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: started.append(ids))
     job = soup_job(tmp_path)
     api = TestClient(main.app)
-    assert tools_new_recipes.status()["baseline_created"]
+    assert not tools_new_recipes.set_baseline(True)["needs_choice"]
     data = api.post(f"/api/jobs/{job.id}/import", json={"cookbook_name": "Omas Kochbuch"}).json()
     assert [(r["status"], r["tandoor_recipe_id"]) for r in data["results"]] == [("imported", "zwiebelsuppe")]
     recipe = mealie.recipes["zwiebelsuppe"]

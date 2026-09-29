@@ -1326,6 +1326,16 @@ async def new_recipes_status():
         return JSONResponse({"error": str(exc)}, status_code=200)
 
 
+@app.post("/api/tools/new-recipes/baseline")
+async def new_recipes_baseline(body: dict = Body(...)):
+    """{"existing_done": true} - the recipes existing now count as handled;
+    false - the next run processes all of them."""
+    try:
+        return await asyncio.to_thread(tools_new_recipes.set_baseline, bool(body.get("existing_done")))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
+
+
 @app.post("/api/tools/new-recipes/process")
 async def start_new_recipes():
     return _start_tool_job("new_recipes")
