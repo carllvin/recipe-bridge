@@ -1,0 +1,6 @@
+# Builds the image from this clone instead of pulling the ready-made one:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  recipe-bridge:
+    image: recipe-bridge:local
+    build: ./backend
