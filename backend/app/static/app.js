@@ -938,10 +938,15 @@ function renderDetail(r) {
        </div>`
     : '';
 
-  const imageChoicesHtml = r.candidate_image_ids.map((iid) => `
-    <div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
-         style="background-image:url('${imageUrl(iid)}')"></div>
-  `).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
+  const imageChoicesHtml = r.candidate_image_ids.map((iid) => {
+    const ai = ((state.job.images || {})[iid] || {}).ai;
+    const badge = ai ? `<span class="image-ai-badge">${t(ai === 'enhanced' ? 'imageBadgeEnhanced' : 'imageBadgeGenerated')}</span>` : '';
+    // The selected photo from the source can be improved by the image AI.
+    const enhance = APP_CONFIG.image_gen_available && !ai && iid === r.selected_image_id
+      ? `<button type="button" class="image-enhance-btn" data-enhance="${iid}" title="${escapeHtml(t('enhanceImageBtn'))}"><span>✨</span></button>` : '';
+    return `<div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
+         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>`;
+  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
 
   const duplicateNotice = r.duplicate_match
     ? `<div class="error-banner duplicate-banner" style="margin-bottom:20px;">${escapeHtml(
@@ -995,6 +1000,11 @@ function renderDetail(r) {
     <div class="section-title">${t('fieldSteps')}</div>
     <div id="steps-wrap">${stepsHtml}</div>
   `;
+
+  detail.querySelectorAll('.image-enhance-btn').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    enhanceImage(r, b);
+  }));
 
   // Image selection / AI generation tile
   detail.querySelectorAll('.image-choice').forEach((elm) => {
@@ -1227,6 +1237,25 @@ async function triggerImageGeneration(recipe, tileEl) {
   }
 }
 
+async function enhanceImage(recipe, btn) {
+  btn.classList.add('loading');
+  btn.disabled = true;
+  btn.closest('.image-choice').parentElement.querySelectorAll('.image-choice').forEach((x) => { x.style.pointerEvents = 'none'; });
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${recipe.id}/enhance-image`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_id: btn.dataset.enhance }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    Object.assign(recipe, data.recipe);
+    state.job.images[data.image_id] = data.image;
+  } catch (e) {
+    alert(`${t('imageEnhanceFailed')}: ${e.message}`);
+  }
+  renderRecipeList();
+  if (state.activeRecipeId === recipe.id) renderDetail(recipe);
+}
+
 function numOrNull(v) {
   if (v === '' || v === null || v === undefined) return null;
   const n = Number(v);
@@ -1271,7 +1300,8 @@ async function runImport(recipeIds) {
     const res = await fetch(`/api/jobs/${jobId}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipe_ids: recipeIds, cookbook_name: cookbookName }),
+      body: JSON.stringify({ recipe_ids: recipeIds, cookbook_name: cookbookName,
+        enhance_photos: APP_CONFIG.image_gen_available && el('enhance-photos').checked }),
     });
     const data = await res.json();
     if (state.jobId !== jobId) return;  // left the review meanwhile - the import still ran
@@ -1295,6 +1325,15 @@ async function runImport(recipeIds) {
     }
   }
 }
+
+// "Improve photos with AI" at import - only with an image AI; remembered per browser.
+function initEnhancePhotos() {
+  el('enhance-photos-wrap').classList.toggle('hidden', !APP_CONFIG.image_gen_available);
+  try { el('enhance-photos').checked = localStorage.getItem('th.enhancePhotos') === '1'; } catch (e) { /* optional */ }
+}
+el('enhance-photos').addEventListener('change', () => {
+  try { localStorage.setItem('th.enhancePhotos', el('enhance-photos').checked ? '1' : '0'); } catch (e) { /* optional */ }
+});
 
 el('import-btn').addEventListener('click', () => {
   const selectedIds = state.job.recipes.filter((r) => r.selected).map((r) => r.id);
@@ -2950,6 +2989,7 @@ if ('serviceWorker' in navigator) {
       elm.textContent = t('cookedHintMealie');
     });
   }
+  initEnhancePhotos();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

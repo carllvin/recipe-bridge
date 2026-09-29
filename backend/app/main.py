@@ -764,6 +764,10 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
 
     results = []
     cookbook_warning = None
+    # AI-improve each recipe's selected photo first (only its own photos -
+    # generated ones and ones improved already are left as they are)
+    enhance_photos = bool(body.get("enhance_photos")) and image_gen.is_configured()
+    enhance_failed: list[str] = []
 
     try:
         api = target.client()  # Tandoor or Mealie
@@ -781,6 +785,12 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 recipe.import_status = "importing"
                 jobs.save_job(job)
 
+                if enhance_photos and recipe.selected_image_id in job.images:
+                    try:  # the original photo is used if this fails
+                        await asyncio.to_thread(_enhance_image, job, recipe, recipe.selected_image_id)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("Improving the photo of %r failed: %s", recipe.title, exc)
+                        enhance_failed.append(recipe.id)
                 image_path = None
                 if recipe.selected_image_id and recipe.selected_image_id in job.images:
                     image_path = os.path.join(
@@ -788,6 +798,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                     )
 
                 warnings: list[str] = []
+                if recipe.id in enhance_failed:
+                    warnings.append("The photo could not be improved - the original was used.")
                 try:
                     tandoor_id = api.create_recipe(client, recipe)
                     recipe.tandoor_recipe_id = tandoor_id
@@ -946,12 +958,59 @@ async def generate_recipe_image(job_id: str, recipe_id: str):
     except Exception:  # noqa: BLE001
         width, height = 0, 0
 
-    job.images[image_id] = {"page": recipe.source_page_start, "filename": filename}
+    job.images[image_id] = {"page": recipe.source_page_start, "filename": filename, "ai": "generated"}
     recipe.candidate_image_ids = list(recipe.candidate_image_ids) + [image_id]
     recipe.selected_image_id = image_id
     jobs.save_job(job)
 
     return {"image_id": image_id, "recipe": recipe.model_dump()}
+
+
+def _enhance_image(job, recipe, image_id: str) -> str:
+    """An AI-improved copy of one of the recipe's photos (blocking), added as
+    a candidate right after it and selected. An existing improved copy is
+    reused. Returns the new image id."""
+    info = job.images[image_id]
+    if info.get("ai"):
+        return image_id  # already generated or improved by the AI
+    done = next((iid for iid, other in job.images.items() if other.get("enhanced_from") == image_id), None)
+    if done is None:
+        with open(os.path.join(_job_dir(job.id), "images", info["filename"]), "rb") as f:
+            improved = image_gen.enhance_image(f.read())
+        done = uuid.uuid4().hex[:12]
+        with open(os.path.join(_job_dir(job.id), "images", f"{done}.png"), "wb") as f:
+            f.write(improved)
+        job.images[done] = {"page": info.get("page"), "filename": f"{done}.png", "ai": "enhanced",
+                            "enhanced_from": image_id}
+    ids = [i for i in recipe.candidate_image_ids if i != done]
+    ids.insert(ids.index(image_id) + 1 if image_id in ids else len(ids), done)
+    recipe.candidate_image_ids = ids
+    recipe.selected_image_id = done
+    return done
+
+
+@app.post("/api/jobs/{job_id}/recipes/{recipe_id}/enhance-image")
+async def enhance_recipe_image(job_id: str, recipe_id: str, body: dict = Body(default={})):
+    """{"image_id"?} (default: the selected photo) - adds an AI-improved copy
+    (light, colors, sharpness; the dish stays as it is) and selects it."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    recipe = next((r for r in job.recipes if r.id == recipe_id), None)
+    if recipe is None:
+        raise HTTPException(404, "Recipe not found.")
+    image_id = body.get("image_id") or recipe.selected_image_id
+    if not image_id or image_id not in job.images or image_id not in recipe.candidate_image_ids:
+        raise HTTPException(400, "No photo to improve.")
+    if not image_gen.is_configured():
+        raise HTTPException(400, image_gen.missing_key_hint())
+    _check_budget()
+    try:
+        new_id = await asyncio.to_thread(_enhance_image, job, recipe, image_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Image enhancement failed: {exc}")
+    jobs.save_job(job)
+    return {"image_id": new_id, "image": job.images[new_id], "recipe": recipe.model_dump()}
 
 
 # ---------- Maintenance tools (ingredients/tags/units cleanup against live Tandoor data) ----------
