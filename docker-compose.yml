@@ -1,7 +1,5 @@
 services:
-  # The service and volume keep their old names (from "Tandoor Helper") so an
-  # update keeps the existing data and doesn't leave a second container behind.
-  tandoor-helper:
+  recipe-bridge:
     build: ./backend
     container_name: recipe-bridge
     restart: unless-stopped
@@ -54,7 +52,7 @@ services:
       WATCH_DIR: ${WATCH_DIR:-}
       WATCH_INTERVAL_SECONDS: ${WATCH_INTERVAL_SECONDS:-30}
     volumes:
-      - tandoor_helper_data:/app/data
+      - recipe_bridge_data:/app/data
       # Watched folder: uncomment and set WATCH_DIR=/app/import in .env -
       # files put into ./import are imported on their own.
       # - ./import:/app/import
@@ -63,4 +61,7 @@ services:
     # service. Override interval/timeout/retries here if you need to.
 
 volumes:
-  tandoor_helper_data:
+  recipe_bridge_data:
+    # A fixed name, independent of the folder the project is in. Coming from
+    # "Tandoor Helper"? The README (Updating) shows how to move the old data.
+    name: recipe_bridge_data
