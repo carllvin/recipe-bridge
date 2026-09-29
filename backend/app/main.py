@@ -1200,6 +1200,7 @@ async def start_meal_plan(body: dict = Body(...)):
         "days": body.get("days") or 7,
         "meal_type": {"id": meal_type["id"], "name": meal_type.get("name", "")},
         "wishes": (body.get("wishes") or "")[:500],
+        "at_home": (body.get("at_home") or "")[:1000],
         "add_to_shopping": bool(body.get("add_to_shopping")),
     }
     tool_jobs.save_tool_job(job)
@@ -1213,6 +1214,23 @@ async def meal_plan_reroll(job_id: str, body: dict = Body(...)):
         job = await asyncio.to_thread(tools_meal_plan.reroll_day, job_id, body.get("date", ""))
     except tandoor_client.TandoorError as exc:
         raise HTTPException(400, str(exc))
+    return job.model_dump()
+
+
+@app.post("/api/tools/meal-plan/{job_id}/chat")
+async def meal_plan_chat(job_id: str, body: dict = Body(...)):
+    """{"message"} - changes the plan as asked; returns the run with the
+    changed days' ids in meta["last_changed"] and the chat in meta["chat"]."""
+    message = (body.get("message") or "").strip()[:500]
+    if not message:
+        raise HTTPException(400, "Empty message.")
+    _check_budget()
+    try:
+        job = await asyncio.to_thread(tools_meal_plan.chat, job_id, message)
+    except tandoor_client.TandoorError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc))
     return job.model_dump()
 
 

@@ -57,4 +57,4 @@ def test_weekly_plan_lines_mention_seasonal_ingredients(monkeypatch):
     monkeypatch.setattr(llm_provider, "complete_tool_text", fake)
     tools_meal_plan._pick(ToolJob(id="j", tool="meal_plan"), [{"id": 1, "name": "Saisonsuppe", "keywords": []}],
                           [dt.date.today()], {"meal_type": {"id": 1, "name": "Abendessen"}})
-    assert seen["recipes"][0].endswith("|" + produce) and seen["in_season"]
+    assert seen["recipes"][0].split("|")[6] == produce and seen["in_season"]

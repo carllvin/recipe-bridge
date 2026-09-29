@@ -2188,10 +2188,11 @@ const toolsState = { jobId: null, pollTimer: null, job: null, selected: new Set(
 
 // ---------- Meal plan ----------
 
-function nextMonday() {
+// The plan starts on the shopping day: the coming Saturday (today if it is one).
+function nextSaturday() {
   const d = new Date();
-  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-  return d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // ---------- In season now ----------
@@ -2316,29 +2317,45 @@ el('cook-today-form').addEventListener('submit', (e) => { e.preventDefault(); se
 
 // Photo of the fridge / pantry: the AI lists what it sees, which goes into
 // the field (next to what was typed) - then the usual search runs.
-el('ct-photo').addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
-  e.target.value = '';
-  if (!files.length) return;
-  el('ct-status').textContent = t('cookTodayPhotoReading');
+// Reads the ingredients on fridge / pantry photos and adds them to `input`.
+async function addIngredientsFromPhotos(files, input, status) {
+  if (!files.length) return false;
+  status.textContent = t('cookTodayPhotoReading');
   const form = new FormData();
   files.slice(0, 4).forEach((f) => form.append('files', f));
   try {
     const res = await fetch('/api/cook-today/photo', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    if (!data.ingredients.length) { el('ct-status').textContent = t('cookTodayPhotoNone'); return; }
-    const typed = el('ct-have').value.split(',').map((x) => x.trim()).filter(Boolean);
+    if (!data.ingredients.length) { status.textContent = t('cookTodayPhotoNone'); return false; }
+    const typed = input.value.split(',').map((x) => x.trim()).filter(Boolean);
     const known = new Set(typed.map((x) => x.toLowerCase()));
-    el('ct-have').value = [...typed, ...data.ingredients.filter((x) => !known.has(x.toLowerCase()))].join(', ');
-    searchCookToday();
+    input.value = [...typed, ...data.ingredients.filter((x) => !known.has(x.toLowerCase()))].join(', ');
+    status.textContent = '';
+    return true;
   } catch (err) {
-    el('ct-status').textContent = `${t('toolStatusError')}: ${err.message}`;
+    status.textContent = `${t('toolStatusError')}: ${err.message}`;
+    return false;
   }
+}
+
+el('ct-photo').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (await addIngredientsFromPhotos(files, el('ct-have'), el('ct-status'))) searchCookToday();
+});
+
+el('mp-photo').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  const hint = el('mp-hint');
+  hint.classList.remove('hidden');
+  await addIngredientsFromPhotos(files, el('mp-have'), hint);
+  if (!hint.textContent) hint.classList.add('hidden');
 });
 
 async function loadMealPlanOptions() {
-  if (!el('mp-start').value) el('mp-start').value = nextMonday();
+  if (!el('mp-start').value) el('mp-start').value = nextSaturday();
   const select = el('mp-meal');
   const hint = el('mp-hint');
   try {
@@ -2365,7 +2382,7 @@ async function loadMealPlanOptions() {
 // The plan area shows one plan run as a week (one card per day) - checkbox
 // per day, "another recipe" per day, and one button to add the selected days
 // to Tandoor's meal plan. The last run is remembered per browser.
-const planState = { jobId: null, job: null, timer: null, selected: new Set(), busy: false };
+const planState = { jobId: null, job: null, timer: null, selected: new Set(), busy: false, changed: new Set() };
 
 function rememberPlan(jobId) {
   try { if (jobId) localStorage.setItem('th.planJob', jobId); else localStorage.removeItem('th.planJob'); } catch (e) { /* optional */ }
@@ -2395,6 +2412,7 @@ el('meal-plan-form').addEventListener('submit', async (e) => {
         days: Number(el('mp-days').value),
         meal_type: { id: idValue(select.value), name: select.options[select.selectedIndex]?.textContent || '' },
         wishes: el('mp-wishes').value,
+        at_home: el('mp-have').value,
         add_to_shopping: el('mp-shopping').checked,
       }),
     });
@@ -2402,6 +2420,7 @@ el('meal-plan-form').addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     planState.jobId = data.job_id;
     planState.selected.clear();
+    planState.changed.clear();
     rememberPlan(data.job_id);
     pollPlan();
   } catch (err) {
@@ -2457,7 +2476,7 @@ function renderWeek(job) {
       <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>`;
     if (s.status === 'applied') return `<div class="plan-day applied">${head}${body}<div class="plan-done">✓ ${t('planApplied')}</div></div>`;
     const error = s.status === 'error' ? `<div class="inbox-error">${escapeHtml(s.error || '')}</div>` : '';
-    return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''}" data-id="${s.id}">
+    return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''} ${planState.changed.has(s.id) ? 'changed' : ''}" data-id="${s.id}">
       ${head}<label class="plan-check"><input type="checkbox" ${planState.selected.has(s.id) ? 'checked' : ''} ${planState.busy ? 'disabled' : ''}></label>
       ${body}${error}${reroll}</div>`;
   }).join('');
@@ -2474,7 +2493,52 @@ function renderWeek(job) {
   el('plan-apply-btn').textContent = tf('planApplySelected', { count: pending });
   el('plan-apply-btn').disabled = !pending || planState.busy;
   el('plan-actions').classList.toggle('hidden', !days.length);
+  renderPlanChat(job, days.length > 0);
 }
+
+// ---------- Changing the plan in a chat ----------
+
+function renderPlanChat(job, show) {
+  el('plan-chat').classList.toggle('hidden', !show || job.status !== 'ready');
+  const log = (job.meta && job.meta.chat) || [];
+  el('plan-chat-log').innerHTML = log.map((m) => {
+    const text = m.role === 'assistant' && m.changed ? `${m.text} (${tf('planChatChanged', { n: m.changed })})` : m.text;
+    return `<div class="plan-chat-msg ${m.role === 'user' ? 'user' : 'assistant'}">${escapeHtml(text)}</div>`;
+  }).join('') + (planState.chatPending ? `<div class="plan-chat-msg user">${escapeHtml(planState.chatPending)}</div>
+    <div class="plan-chat-msg assistant pending">${t('planChatThinking')}</div>` : '');
+}
+
+el('plan-chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = el('plan-chat-input');
+  const message = input.value.trim();
+  if (!message || planState.busy || !planState.jobId) return;
+  planState.busy = true;
+  planState.chatPending = message;
+  input.value = '';
+  el('plan-chat-send').disabled = true;
+  renderWeek(planState.job);
+  try {
+    const res = await fetch(`/api/tools/meal-plan/${planState.jobId}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    planState.changed = new Set(data.meta.last_changed || []);
+    planState.changed.forEach((id) => planState.selected.add(id));
+    planState.chatPending = null;
+    planState.busy = false;
+    renderWeek(data);
+  } catch (err) {
+    planState.chatPending = null;
+    planState.busy = false;
+    input.value = message;
+    renderWeek(planState.job);
+    el('plan-status').textContent = `${t('toolStatusError')}: ${err.message}`;
+  } finally {
+    el('plan-chat-send').disabled = false;
+  }
+});
 
 async function rerollDay(date) {
   if (planState.busy) return;

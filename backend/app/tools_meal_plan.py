@@ -1,6 +1,9 @@
 """Weekly plan: the AI picks one recipe per day from the user's collection
 (season, variety, the user's wishes; recipes cooked in the last two weeks
-and days that already have a plan are left out). Each day is a suggestion;
+and days that already have a plan are left out). The first day is the
+shopping day: recipes with quickly perishing ingredients (perishability.py)
+come first, pantry and frozen dishes last, and what is already at home is
+used up. A chat (chat()) then changes single days on request. Each day is a suggestion;
 applying it creates the entry in Tandoor's meal plan and - if wanted - puts
 the recipe's ingredients on Tandoor's shopping list (which groups them by
 the supermarket categories). With Mealie the same via mealie_plan.
@@ -14,7 +17,7 @@ import json
 import logging
 import uuid
 
-from . import cook_today, llm_provider, mealie_plan, seasonal, tandoor_client, target, tool_jobs
+from . import cook_today, json_answer, llm_provider, mealie_plan, perishability, seasonal, tandoor_client, target, tool_jobs
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
@@ -23,28 +26,61 @@ log = logging.getLogger("recipe-bridge")
 MAX_CANDIDATES = 300
 RECENTLY_COOKED_DAYS = 14
 
+# One recipe as the AI sees it (the "recipes" list of both prompts).
+RECIPE_LINE = """Each RECIPE is one line:
+"<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>|<perishable level 3/2 and those ingredients, or ->|<its ingredients that are at home, or ->"
+"""
+
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
 collection. Language for "reason": {language}. You will receive a JSON
 object: {"today": "YYYY-MM-DD", "meal": string, "days": ["YYYY-MM-DD (weekday)", ...],
-"wishes": string, "in_season": [string], "recipes": ["<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>", ...]}
-
-Pick exactly one recipe per day for that meal:
+"wishes": string, "in_season": [string], "at_home": [string], "recipes": [RECIPE, ...]}
+""" + RECIPE_LINE + """
+The first day of "days" is the shopping day. Pick exactly one recipe per day
+for that meal:
 - follow the wishes (e.g. "2x vegetarian", "quick on weekdays")
+- freshness: recipes with perishable level 3 (fresh fish and seafood, mince,
+  leafy greens, fresh herbs, berries, mushrooms) on the first two days,
+  level 2 (fresh meat and poultry, soft vegetables, fresh dairy) in the
+  middle, and recipes without perishable ingredients (pantry, frozen,
+  long-keeping) towards the end - this order comes before the weekday/weekend
+  preference below
+- prefer recipes that use what is already at home ("at_home"; the last field
+  of a recipe lists which of those it uses) - perishable things at home early
 - prefer well-rated recipes (4-5) and ones not cooked for a long time;
   avoid recipes rated 1-2 unless the wishes ask for them; mix in one or
   two never-cooked recipes so new ones get tried
 - prefer recipes that fit the current season - especially ones using the
-  produce that is in season now ("in_season"; the last field of a recipe
-  lists its in-season ingredients)
+  produce that is in season now ("in_season")
 - vary it: no recipe twice, don't repeat the same kind of dish on
   consecutive days
 - quicker recipes on weekdays, more elaborate ones on weekends, unless the
-  wishes say otherwise
+  wishes or the freshness order say otherwise
 - only pick recipes that make sense as that meal
 
 Respond with ONLY a JSON array (no explanation, no markdown fence), one
 element per day: {"date": "YYYY-MM-DD", "recipe_id": <id>, "reason": <a few words>}
 """
+
+CHAT_PROMPT = """You help a home cook adjust their weekly meal plan. Language
+for "reply" and "reason": {language}. You will receive a JSON object:
+{"meal": string, "plan": [{"date": "YYYY-MM-DD (weekday)", "recipe": {"id", "name"} or null,
+"locked": bool}, ...], "wishes": string, "at_home": [string], "recipes": [RECIPE, ...],
+"history": [{"role": "user"|"assistant", "text": string}], "message": string}
+""" + RECIPE_LINE + """
+Do what "message" asks, e.g. "swap Thursday's dinner with a beef recipe",
+"swap Monday and Wednesday", "something quicker on Tuesday", "no fish this
+week". Change only the days the request is about - never "locked" days -
+and use only recipes from "recipes" or ones already in the plan (to move
+them). Keep the rules of a good plan: no recipe twice, perishable
+ingredients early in the week, variety. If nothing fits, change nothing and
+say so.
+
+Respond with ONLY a JSON object (no explanation, no markdown fence):
+{"reply": <one or two short sentences for the cook>,
+ "changes": [{"date": "YYYY-MM-DD", "recipe_id": <id>, "reason": <a few words>}, ...]}
+"""
+
 
 
 def _fetch_all(client, endpoint, params=None) -> list[dict]:
@@ -100,57 +136,78 @@ def _days_since_cooked(recipe) -> int | None:
     return (dt.date.today() - cooked).days if cooked else None
 
 
-def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSuggestion]:
-    """One AI call picking a recipe for each of `days`; returns validated
-    suggestions (unknown recipes, repeats and wrong dates are dropped)."""
-    meal_type = params["meal_type"]
-    pool = [r for r in candidates if r["id"] not in exclude_ids]
-    by_id = {r["id"]: r for r in pool}
-    in_season = cook_today.seasonal_by_recipe()
+class _Lines:
+    """The recipe lines for the AI - with in-season, perishable and at-home
+    ingredients from the recipe index (cook_today)."""
 
-    def line(r):
+    def __init__(self, at_home_text):
+        self.in_season = cook_today.seasonal_by_recipe()
+        self.foods = cook_today.foods_by_recipe()
+        self.have = cook_today.parse_have(at_home_text)
+
+    def line(self, r) -> str:
         tags = ",".join(k.get("label") or k.get("name", "") for k in r.get("keywords") or [])
         rating = f"{r['rating']:g}" if r.get("rating") else "-"
         days = _days_since_cooked(r)
+        foods = self.foods.get(r["id"], [])
+        level, perishable = perishability.of_recipe(names[0] for names in foods)
+        home = cook_today.at_home_in(self.have, foods) if self.have else []
         return (f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
-                f"|{','.join(in_season.get(r['id'], []))}")
-    lines = [line(r) for r in pool]
-    text_out, usage = llm_provider.complete_tool_text(
-        SYSTEM_PROMPT.replace("{language}", settings.output_language),
-        json.dumps({
-            "today": dt.date.today().isoformat(),
-            "meal": meal_type["name"],
-            "days": [f"{d.isoformat()} ({d.strftime('%A')})" for d in days],
-            "wishes": params.get("wishes") or "",
-            "in_season": seasonal.display_names(seasonal.in_season()),
-            "recipes": lines,
-        }, ensure_ascii=False),
-        max_tokens=60 * len(days) + 200,
-    )
+                f"|{','.join(self.in_season.get(r['id'], []))}|{f'{level}:' + ','.join(perishable) if level else '-'}"
+                f"|{','.join(home) or '-'}")
+
+
+def _add_usage(job, usage) -> None:
     job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
     job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
-    text_out = text_out.strip().strip("`")
-    if text_out.startswith("json"):
-        text_out = text_out[4:]
-    answers = json.loads(text_out)
+
+
+def _suggestion(day: dt.date, recipe, reason, params) -> ToolSuggestion:
+    meal_type = params["meal_type"]
+    minutes = _minutes(recipe)
+    return ToolSuggestion(
+        id=uuid.uuid4().hex[:10], kind="meal_plan",
+        summary=(f"{day.strftime('%a %d.%m.')} · {meal_type['name']}: {recipe.get('name', '')}"
+                 + (f" ({minutes} min)" if minutes else "") + (f" – {reason}" if reason else "")),
+        detail={"date": day.isoformat(), "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
+                "minutes": minutes or None, "reason": reason or None,
+                "meal_type": meal_type, "add_to_shopping": bool(params.get("add_to_shopping"))},
+    )
+
+
+def _ask(job, prompt, payload, max_tokens):
+    def ask(system_prompt):
+        text_out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
+                                                          max_tokens=max_tokens)
+        _add_usage(job, usage)
+        return text_out, usage
+    return json_answer.complete(ask, prompt.replace("{language}", settings.output_language))[0]
+
+
+def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSuggestion]:
+    """One AI call picking a recipe for each of `days`; returns validated
+    suggestions (unknown recipes, repeats and wrong dates are dropped)."""
+    pool = [r for r in candidates if r["id"] not in exclude_ids]
+    by_id = {str(r["id"]): r for r in pool}
+    lines = _Lines(params.get("at_home"))
+    answers = _ask(job, SYSTEM_PROMPT, {
+        "today": dt.date.today().isoformat(),
+        "meal": params["meal_type"]["name"],
+        "days": [f"{d.isoformat()} ({d.strftime('%A')})" for d in days],
+        "wishes": params.get("wishes") or "",
+        "in_season": seasonal.display_names(seasonal.in_season()),
+        "at_home": [h.strip() for h in (params.get("at_home") or "").replace(";", ",").split(",") if h.strip()],
+        "recipes": [lines.line(r) for r in pool],
+    }, 60 * len(days) + 200)
 
     suggestions, used = [], set()
     for answer in answers if isinstance(answers, list) else []:
         day = _date(answer.get("date")) if isinstance(answer, dict) else None
-        recipe = by_id.get(answer.get("recipe_id")) if day else None
+        recipe = by_id.get(str(answer.get("recipe_id"))) if day else None
         if day not in days or recipe is None or recipe["id"] in used:
             continue  # invalid date, unknown recipe or a repeat
         used.add(recipe["id"])
-        minutes = _minutes(recipe)
-        reason = str(answer.get("reason") or "").strip()
-        suggestions.append(ToolSuggestion(
-            id=uuid.uuid4().hex[:10], kind="meal_plan",
-            summary=(f"{day.strftime('%a %d.%m.')} · {meal_type['name']}: {recipe.get('name', '')}"
-                     + (f" ({minutes} min)" if minutes else "") + (f" – {reason}" if reason else "")),
-            detail={"date": day.isoformat(), "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
-                    "minutes": minutes or None, "reason": reason or None,
-                    "meal_type": meal_type, "add_to_shopping": bool(params.get("add_to_shopping"))},
-        ))
+        suggestions.append(_suggestion(day, recipe, str(answer.get("reason") or "").strip(), params))
     return suggestions
 
 
@@ -223,6 +280,84 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
         raise tandoor_client.TandoorError("No other matching recipe found for that day.")
     job.suggestions = [s for s in job.suggestions if s.detail.get("date") != date] + picked
     job.suggestions.sort(key=lambda s: s.detail["date"])
+    tool_jobs.save_tool_job(job)
+    return job
+
+
+CHAT_HISTORY = 6  # earlier messages the AI sees
+
+
+def chat(job_id: str, message: str) -> ToolJob:
+    """Changes the finished plan as asked in `message` (one AI call): days
+    that aren't in the meal plan yet get another recipe, or two days swap.
+    The conversation is kept in job.meta["chat"]."""
+    job = tool_jobs.get_tool_job(job_id)
+    if job is None or job.tool != "meal_plan" or job.status != "ready":
+        raise tandoor_client.TandoorError("There's no finished plan to change.")
+    params = job.meta.get("params", {})
+    days = [_date(d) for d in job.meta.get("days", [])]
+    taken = set(job.meta.get("taken_days", []))
+    current = {}
+    for s in job.suggestions:
+        if s.status != "skipped":
+            current[s.detail["date"]] = s
+    with target.client().get_client() as client:
+        candidates = _candidates(client)
+    by_id = {str(r["id"]): r for r in candidates}
+    for s in current.values():  # recipes already in the plan can move even when not in the list
+        by_id.setdefault(str(s.detail["recipe"]["id"]), {"id": s.detail["recipe"]["id"], "name": s.detail["recipe"]["name"],
+                                                          "working_time": s.detail.get("minutes") or 0})
+
+    def locked(day):
+        return day.isoformat() in taken or getattr(current.get(day.isoformat()), "status", None) == "applied"
+    lines = _Lines(params.get("at_home"))
+    history = job.meta.get("chat", [])
+    answer = _ask(job, CHAT_PROMPT, {
+        "meal": params["meal_type"]["name"],
+        "plan": [{"date": f"{d.isoformat()} ({d.strftime('%A')})",
+                  "recipe": ({"id": current[d.isoformat()].detail["recipe"]["id"],
+                              "name": current[d.isoformat()].detail["recipe"]["name"]} if d.isoformat() in current else None),
+                  "locked": locked(d)} for d in days],
+        "wishes": params.get("wishes") or "",
+        "at_home": [h.strip() for h in (params.get("at_home") or "").replace(";", ",").split(",") if h.strip()],
+        "recipes": [lines.line(r) for r in candidates],
+        "history": history[-CHAT_HISTORY:],
+        "message": message,
+    }, 1200)
+    answer = answer if isinstance(answer, dict) else {}
+
+    changed, changed_days = [], set()
+
+    def put(day, recipe, reason):
+        new = _suggestion(day, recipe, reason, params)
+        job.suggestions = [s for s in job.suggestions if s.detail.get("date") != day.isoformat()] + [new]
+        current[day.isoformat()] = new
+        changed_days.add(day.isoformat())
+        changed.append(new.id)
+
+    valid = []
+    for change in answer.get("changes") or []:
+        day = _date(change.get("date")) if isinstance(change, dict) else None
+        recipe = by_id.get(str(change.get("recipe_id"))) if day else None
+        if day in days and recipe is not None and not locked(day):
+            valid.append((day, recipe, str(change.get("reason") or "").strip()))
+    targets = {d.isoformat() for d, _r, _x in valid}
+    for day, recipe, reason in valid:
+        old = current.get(day.isoformat())
+        if old is not None and str(old.detail["recipe"]["id"]) == str(recipe["id"]):
+            continue  # unchanged
+        # The recipe is already on another open day the answer doesn't touch:
+        # swap the two, so no recipe is planned twice.
+        other = next((d for d, s in current.items() if d != day.isoformat() and d not in targets and d not in changed_days
+                      and s.status != "applied" and str(s.detail["recipe"]["id"]) == str(recipe["id"])), None)
+        put(day, recipe, reason)
+        if other and old is not None:
+            put(_date(other), by_id.get(str(old.detail["recipe"]["id"]), old.detail["recipe"]), old.detail.get("reason") or "")
+    job.suggestions.sort(key=lambda s: s.detail["date"])
+    reply = str(answer.get("reply") or "").strip()
+    job.meta["chat"] = history + [{"role": "user", "text": message},
+                                  {"role": "assistant", "text": reply or ("✓" if changed else "–"), "changed": len(changed)}]
+    job.meta["last_changed"] = changed
     tool_jobs.save_tool_job(job)
     return job
 

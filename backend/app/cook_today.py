@@ -71,6 +71,23 @@ def save_index(recipes) -> None:
     os.replace(tmp, _path())
 
 
+def foods_by_recipe() -> dict:
+    """Recipe id -> its ingredients as [name, plural] pairs, from the index;
+    empty if there is no index yet."""
+    data = _load()
+    return {r["id"]: r["foods"] for r in data["recipes"]} if data else {}
+
+
+def at_home_in(have: list[str], foods) -> list[str]:
+    """Which of a recipe's ingredients ([name, plural] pairs) are among the
+    things at home (normalized, see _norm) - staples left out."""
+    return [names[0] for names in foods if not _is_staple(names) and any(_matches(h, names) for h in have)]
+
+
+def parse_have(text) -> list[str]:
+    return [_norm(h) for h in re.split(r"[,;\n]+", text or "") if _norm(h)]
+
+
 def seasonal_by_recipe() -> dict[int, list[str]]:
     """Recipe id -> its in-season ingredients (display names), from the
     index; empty if there is no index yet."""
