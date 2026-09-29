@@ -3054,6 +3054,9 @@ if ('serviceWorker' in navigator) {
       elm.textContent = t('cookedHintMealie');
     });
   }
+  const version = `Recipe Bridge ${APP_CONFIG.version || 'dev'}`;
+  el('brand-link').title = version;
+  el('app-version').textContent = version;
   initEnhancePhotos();
   await tryRestoreJobFromUrl();
   showArea('import');

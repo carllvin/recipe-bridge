@@ -21,6 +21,5 @@ services:
 
 volumes:
   recipe_bridge_data:
-    # A fixed name, independent of the folder. Coming from "Tandoor Helper"?
-    # The README (Updating) shows how to move the old data.
+    # A fixed name, independent of the folder the compose file is in.
     name: recipe_bridge_data
