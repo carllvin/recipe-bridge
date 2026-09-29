@@ -1539,6 +1539,7 @@ async def get_config():
         "supported_extensions": sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS),
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "image_gen_available": image_gen.is_configured(),
+        "version": settings.app_version,
         "auth_enabled": auth.enabled(),
         "notify_channels": notify.channels(),
         "watch_dir": settings.watch_dir if settings.watch_dir and os.path.isdir(settings.watch_dir) else None,

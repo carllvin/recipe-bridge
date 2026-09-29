@@ -75,6 +75,7 @@ class Settings(BaseSettings):
 
     # App
     data_dir: str = "/app/data"
+    app_version: str = "dev"             # set in the Docker image (APP_VERSION)
     max_upload_mb: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

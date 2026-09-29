@@ -24,6 +24,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY scripts ./scripts
 
+# Set by the image workflow (the release tag, e.g. 1.0.0-beta.1) - shown in the app.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Persistent storage for uploaded PDFs / extracted images
 RUN mkdir -p /app/data
 
