@@ -113,6 +113,17 @@ _COOKBOOK_ENDPOINT_CANDIDATES = ["recipe-book", "cookbook"]
 _COOKBOOK_ENTRY_ENDPOINT_CANDIDATES = ["recipe-book-entry", "cookbook-recipe", "cookbookrecipe"]
 
 
+def list_cookbooks(client: httpx.Client) -> list[str]:
+    """Names of the existing cookbooks (for the choice in the review)."""
+    for endpoint in _COOKBOOK_ENDPOINT_CANDIDATES:
+        try:
+            return sorted((i["name"] for i in fetch_all_items(client, endpoint)), key=str.casefold)
+        except TandoorError as exc:
+            if "(404)" not in str(exc):
+                raise
+    return []
+
+
 def get_or_create_cookbook(client: httpx.Client, name: str) -> tuple[int, str]:
     """Returns (cookbook_id, working_endpoint_name)."""
     name = name.strip()

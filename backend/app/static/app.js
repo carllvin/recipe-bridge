@@ -635,7 +635,8 @@ function showReview() {
   el('processing-screen').classList.add('hidden');
   el('review-screen').classList.remove('hidden');
   el('action-bar').classList.remove('hidden');
-  el('cookbook-name-input').value = state.job.cookbook_name || state.job.suggested_cookbook_name || '';
+  setCookbook(state.job.cookbook_name || state.job.suggested_cookbook_name || '');
+  loadCookbooks();
   updateUsageDisplay(state.job.token_usage);
   // e.g. links of a link list that couldn't be read
   const notes = state.job.notes || [];
@@ -649,7 +650,47 @@ function showReview() {
   }
 }
 
-el('cookbook-name-input').addEventListener('blur', () => {
+// Cookbook: a choice of the existing ones plus "new cookbook …" (a name
+// field). #cookbook-name-input always holds the name that is used - for an
+// existing cookbook it's just hidden. Without the list (not reachable) only
+// the name field shows.
+const NEW_COOKBOOK = '__new__';
+const cookbookState = { names: null };
+
+async function loadCookbooks() {
+  if (cookbookState.names === null) {
+    try {
+      const data = await (await fetch('/api/cookbooks')).json();
+      cookbookState.names = data.error ? [] : data.names;
+    } catch (e) { cookbookState.names = []; }
+  }
+  setCookbook(el('cookbook-name-input').value.trim());
+}
+
+function setCookbook(name) {
+  const select = el('cookbook-select');
+  const input = el('cookbook-name-input');
+  const names = cookbookState.names || [];
+  input.value = name;
+  if (!names.length) {  // no list: just the name field
+    select.classList.add('hidden');
+    input.classList.remove('hidden');
+    el('cookbook-hint').classList.remove('hidden');
+    return;
+  }
+  const existing = names.find((n) => n.toLowerCase() === name.toLowerCase());
+  select.innerHTML = `<option value="">${escapeHtml(t('cookbookNone'))}</option>`
+    + names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')
+    + `<option value="${NEW_COOKBOOK}">${escapeHtml(t('cookbookNew'))}</option>`;
+  select.value = existing || (name ? NEW_COOKBOOK : '');
+  if (existing) input.value = existing;
+  const isNew = select.value === NEW_COOKBOOK;
+  select.classList.remove('hidden');
+  input.classList.toggle('hidden', !isNew);
+  el('cookbook-hint').classList.toggle('hidden', !isNew);
+}
+
+function saveCookbook() {
   const value = el('cookbook-name-input').value.trim();
   state.job.cookbook_name = value;
   fetch(`/api/jobs/${state.jobId}`, {
@@ -657,7 +698,29 @@ el('cookbook-name-input').addEventListener('blur', () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookbook_name: value }),
   }).catch(() => {});
+}
+
+el('cookbook-select').addEventListener('change', () => {
+  const value = el('cookbook-select').value;
+  const input = el('cookbook-name-input');
+  if (value === NEW_COOKBOOK) {
+    // start from the suggested name unless it is one of the existing ones
+    const suggested = state.job.suggested_cookbook_name || '';
+    const known = (cookbookState.names || []).some((n) => n.toLowerCase() === suggested.toLowerCase());
+    input.value = known ? '' : suggested;
+    input.classList.remove('hidden');
+    el('cookbook-hint').classList.remove('hidden');
+    input.focus();
+    input.select();
+  } else {
+    input.value = value;
+    input.classList.add('hidden');
+    el('cookbook-hint').classList.add('hidden');
+  }
+  saveCookbook();
 });
+
+el('cookbook-name-input').addEventListener('blur', saveCookbook);
 
 function imageUrl(imageId) {
   if (!imageId) return null;
@@ -1313,6 +1376,8 @@ async function runImport(recipeIds) {
       r.tandoor_recipe_id = result.tandoor_recipe_id;
     });
     showImportSummary(data.results, data.cookbook_name, data.cookbook_warning, data.post_processing_job_id);
+    cookbookState.names = null;  // a new cookbook may exist now
+    loadCookbooks();
   } catch (e) {
     alert(`${t('importFailedAlertPrefix')} ${e.message}`);
   } finally {

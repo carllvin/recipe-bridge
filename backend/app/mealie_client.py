@@ -223,6 +223,11 @@ def upload_image(client, recipe_id, image_path: str) -> None:
     _check(resp, "the image")
 
 
+def list_cookbooks(client) -> list[str]:
+    """The cookbooks of an import are categories - their names."""
+    return sorted((i["name"] for i in fetch_all_items(client, "category")), key=str.casefold)
+
+
 def get_or_create_cookbook(client, name: str) -> tuple[str, str]:
     """The cookbook becomes a category - (category id, "category")."""
     return _lookup_for(client).get_or_create("category", name)["id"], "category"

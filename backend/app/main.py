@@ -745,6 +745,19 @@ async def update_job(job_id: str, payload: dict = Body(...)):
     return job.model_dump()
 
 
+@app.get("/api/cookbooks")
+async def list_cookbooks():
+    """Names of the existing cookbooks (with Mealie: categories)."""
+    def load():
+        api = target.client()
+        with api.get_client() as client:
+            return api.list_cookbooks(client)
+    try:
+        return {"names": await asyncio.to_thread(load)}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"names": [], "error": str(exc)}, status_code=200)
+
+
 @app.post("/api/jobs/{job_id}/import")
 async def import_selected(job_id: str, body: dict = Body(default={})):
     job = jobs.get_job(job_id)
