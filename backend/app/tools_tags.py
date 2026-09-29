@@ -517,8 +517,9 @@ def tag_vocabulary(all_tags, recipes, food_names=frozenset()) -> list[str]:
     for recipe in recipes:
         for kw in recipe.get("keywords", []):
             usage[kw.get("name")] = usage.get(kw.get("name"), 0) + 1
+    usage_of = {t["name"]: max(usage.get(t["name"], 0), t.get("numrecipe") or 0) for t in all_tags}
     names = [t["name"] for t in all_tags if t["name"].strip().casefold() not in food_names and not t.get("numchild")]
-    return sorted(names, key=lambda n: -usage.get(n, 0))[:MAX_VOCABULARY]
+    return sorted(names, key=lambda n: -usage_of.get(n, 0))[:MAX_VOCABULARY]
 
 
 def food_name_set(client) -> set[str]:
@@ -614,25 +615,25 @@ def run_suggest_more_scan(job_id: str) -> None:
             return
 
         with tandoor_client.get_client() as client:
-            all_tags = tandoor_client.fetch_all_items(client, "keyword")
-
-            job.progress_label = "Scanning every recipe's full detail..."
-            tool_jobs.save_tool_job(job)
-            recipes = fetch_all_recipes_full(client)
+            # with "numrecipe" - the vocabulary is ordered by use without
+            # reading every recipe
+            from .tools_conversions import _fetch_all
+            all_tags = [t for t in _fetch_all(client, "keyword") if t.get("name")]
             food_names = food_name_set(client)
             # Only descriptive tags count - five ingredient tags ("Blumenkohl")
             # still leave a recipe under-tagged.
             skip = ignored.keys("recipes_few_tags")
             checked = diet_checked()
-            diets = diet_tags(tag_vocabulary(all_tags, recipes, food_names))
+            diets = diet_tags(tag_vocabulary(all_tags, [], food_names))
 
             def needs_tags(r):
-                if str(r["id"]) in skip:
-                    return False
                 descriptive = sum(1 for kw in r.get("keywords", []) if kw["name"].strip().casefold() not in food_names)
-                # Every recipe also gets its diet / allergen tags judged once.
+                # Every recipe read here also gets its diet / allergen tags
+                # judged once.
                 return descriptive < MIN_TAGS_DEFAULT or (r["id"] not in checked and not has_diet_tag(r, diets))
-            under_tagged = [r for r in recipes if needs_tags(r)]
+            # The recipes the tile lists and the ones changed since the
+            # overview - not the whole collection (recipe_scope).
+            recipes = under_tagged = recipe_scope.recipes_for(client, "recipes_few_tags", needs_tags, skip, job)
             job.progress_total = len(under_tagged)
             job.cost_estimate = format_cost_estimate(len(under_tagged), "batched_suggest_tags")
             tool_jobs.save_tool_job(job)

@@ -324,12 +324,17 @@ def tag_review(job, client):
             detail={**action, "entity": "keyword"}))
 
 
+def _recipes_for(client, metric, matches, job, for_tags=False) -> list[dict]:
+    """Views of the recipes the tile lists / that changed since the
+    overview and match (mealie_maintenance.recipes_for)."""
+    from .mealie_maintenance import recipes_for
+    return [view(r, for_tags) for r in
+            recipes_for(client, metric, lambda r: matches(view(r, for_tags)), ignored.keys(metric), job)]
+
+
 def season(job, client):
     _need_ai()
-    _progress(job, "Reading every recipe's full detail...")
-    skip = ignored.keys("recipes_without_season")
-    recipes = [view(r, for_tags=True) for r in fetch_recipes_full(client)]
-    missing = [r for r in recipes if r["slug"] not in skip and not tools_tags.has_season_tag(r)]
+    missing = _recipes_for(client, "recipes_without_season", lambda v: not tools_tags.has_season_tag(v), job, True)
     job.progress_total = len(missing)
     job.cost_estimate = format_cost_estimate(len(missing), "batched_season")
     job.suggestions = tools_tags.season_suggestions(job, missing)
@@ -337,14 +342,16 @@ def season(job, client):
 
 def suggest_more(job, client):
     _need_ai()
-    _progress(job, "Reading every recipe's full detail...")
-    recipes = [view(r, for_tags=True) for r in fetch_recipes_full(client)]
-    all_tags = mealie_client.fetch_all_items(client, "keyword")
+    from .mealie_maintenance import usage_since_overview
+    usage = (usage_since_overview(client) or {}).get("keyword", {})
+    # the vocabulary ordered by use - from the overview's counts
+    all_tags = [{**t, "numrecipe": usage.get(t["id"], 0)} for t in mealie_client.fetch_all_items(client, "keyword")]
     names = food_names(mealie_client.fetch_all_items(client, "food"))
-    vocabulary = tools_tags.tag_vocabulary(all_tags, recipes, names)
-    skip, checked, diets = ignored.keys("recipes_few_tags"), tools_tags.diet_checked(), tools_tags.diet_tags(vocabulary)
-    todo = [r for r in recipes if r["slug"] not in skip
-            and (few_tags(r, names) or (r["id"] not in checked and not tools_tags.has_diet_tag(r, diets)))]
+    vocabulary = tools_tags.tag_vocabulary(all_tags, [], names)
+    checked, diets = tools_tags.diet_checked(), tools_tags.diet_tags(vocabulary)
+    todo = _recipes_for(client, "recipes_few_tags",
+                        lambda v: few_tags(v, names) or (v["id"] not in checked and not tools_tags.has_diet_tag(v, diets)),
+                        job, True)
     job.progress_total = len(todo)
     job.cost_estimate = format_cost_estimate(len(todo), "batched_suggest_tags")
     job.suggestions = tools_tags.suggest_tags_suggestions(job, todo, vocabulary, names)
@@ -352,11 +359,9 @@ def suggest_more(job, client):
 
 def translate(job, client):
     _need_ai()
-    _progress(job, "Looking for recipes to translate...")
     expected = get_language_code(settings.output_language)
-    skip = ignored.keys("recipes_not_translated")
-    todo = [v for v in (view(r) for r in fetch_recipes_full(client))
-            if v["slug"] not in skip and not tools_recipes.already_in_target_language(v, expected)]
+    todo = _recipes_for(client, "recipes_not_translated",
+                        lambda v: not tools_recipes.already_in_target_language(v, expected), job)
     job.progress_total = len(todo)
     job.cost_estimate = format_cost_estimate(len(todo), "per_recipe_translate")
     skipped = []
@@ -395,10 +400,7 @@ def translation_suggestion(job, recipe):
 
 def restructure(job, client):
     _need_ai()
-    _progress(job, "Checking the recipes' structure (no AI)...")
-    skip = ignored.keys("recipes_need_restructure")
-    todo = [v for v in (view(r) for r in fetch_recipes_full(client))
-            if v["slug"] not in skip and recipe_restructure.needs_restructure(v)]
+    todo = _recipes_for(client, "recipes_need_restructure", lambda v: bool(recipe_restructure.needs_restructure(v)), job)
     job.progress_total = len(todo)
     job.cost_estimate = format_cost_estimate(len(todo), "per_recipe_translate")
     for i, recipe in enumerate(todo, 1):

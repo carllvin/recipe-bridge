@@ -27,7 +27,7 @@ shows a group as a parent tag with its tags below it.
 
 You receive JSON: {"language": string, "groups": [existing group names],
 "tags": [{"name": string, "recipes": number of recipes using it,
-"group": its current group or null}]}
+"group": null}]} - the tags that aren't in any group yet
 
 Form 4 to 10 groups that people typically filter recipes by - for example
 diet (vegetarian, vegan, gluten-free ...), cuisine or country, course / type
@@ -37,7 +37,7 @@ wherever it fits.
 
 Put a tag into a group only when it clearly belongs there - leave tags that
 fit no group out. Each tag goes into at most one group. Never put a group
-into another group. Tags already in the right group can be left out.
+into another group.
 
 Respond with ONLY a JSON array (no explanation, no markdown fence):
 [{"group": "<group name>", "tags": ["<exact tag name>", ...]}]
@@ -70,7 +70,10 @@ def run_scan(job_id: str) -> None:
         by_id = {k["id"]: k for k in keywords}
         groups = {k["name"].casefold(): k for k in keywords if k.get("numchild")}
         skip = ignored.keys(METRIC)
-        tags = sorted((k for k in keywords if not k.get("numchild") and str(k["id"]) not in skip),
+        # Only the tags the tile lists (top level, not a group, not ignored) -
+        # tags already in a group stay where they are; the existing groups
+        # are sent by name.
+        tags = sorted((k for k in ungrouped(keywords) if str(k["id"]) not in skip),
                       key=lambda k: -(k.get("numrecipe") or 0))[:MAX_TAGS]
         by_name = {k["name"].casefold(): k for k in tags}
         job.progress_total = 1
