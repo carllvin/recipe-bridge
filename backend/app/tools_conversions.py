@@ -203,6 +203,23 @@ def conversion_suggestions(job, client, pairs, pending_nutrition=None, food_name
     return suggestions
 
 
+def _pairs_since_overview(client, job) -> dict | None:
+    """The (ingredient, unit) pairs the health overview counted, plus those
+    of recipes new or changed since - so only those recipes are read.
+    None without a usable overview (then every recipe is read)."""
+    from . import recipe_scope
+    stored = recipe_scope._health().get("recipe_pairs")
+    if stored is None:
+        return None
+    known = recipe_scope.changed_since_overview(client, job)
+    if known is None:
+        return None
+    pairs = {(f, u): n for f, u, n in stored}
+    for pair, n in recipe_pairs(known[1]).items():
+        pairs[pair] = max(pairs.get(pair, 0), n)
+    return pairs
+
+
 def run_scan(job_id: str) -> None:
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
@@ -215,9 +232,11 @@ def run_scan(job_id: str) -> None:
             return
 
         with tandoor_client.get_client() as client:
-            job.progress_label = "Scanning every recipe's ingredients..."
-            tool_jobs.save_tool_job(job)
-            pairs = recipe_pairs(fetch_all_recipes_full(client))
+            pairs = _pairs_since_overview(client, job)
+            if pairs is None:
+                job.progress_label = "Scanning every recipe's ingredients..."
+                tool_jobs.save_tool_job(job)
+                pairs = recipe_pairs(fetch_all_recipes_full(client))
             job.suggestions = conversion_suggestions(job, client, pairs)
             job.status = "cancelled" if job.cancel_requested else "ready"
             job.progress_label = None

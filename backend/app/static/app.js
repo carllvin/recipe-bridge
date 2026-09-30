@@ -1634,7 +1634,6 @@ const INBOX_GROUPS = [
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
   { key: 'recipes', icon: '🧩', match: (i) => i.kind === 'restructure_recipe' || i.kind === 'translate_recipe' },
   { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' },
-  { key: 'plan', icon: '📅', match: (i) => i.kind === 'meal_plan' },
   { key: 'other', icon: '•', match: () => true },
 ];
 const inboxState = { items: [], selected: new Set(), collapsed: new Set(), busyGroup: null, results: {} };
@@ -2063,8 +2062,8 @@ el('set-maint-run').addEventListener('click', async () => {
 // metric -> the tool that fixes it (endpoint + optional request body)
 const HEALTH_METRICS = [
   { key: 'foods_duplicates', tool: 'ingredients_review', endpoint: '/api/tools/ingredients/review', body: { focus: 'duplicates' } },
-  { key: 'foods_without_nutrition', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich' },
-  { key: 'foods_without_category', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich' },
+  { key: 'foods_without_nutrition', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich', body: { focus: 'tiles' } },
+  { key: 'foods_without_category', tool: 'ingredients_enrich', endpoint: '/api/tools/ingredients/enrich', body: { focus: 'tiles' } },
   { key: 'missing_conversions', tool: 'conversions', endpoint: '/api/tools/conversions' },
   { key: 'units_duplicates', tool: 'units_review', endpoint: '/api/tools/units/review', body: { focus: 'duplicates' } },
   { key: 'recipes_not_translated', tool: 'recipes_translate', endpoint: '/api/tools/recipes/translate' },
@@ -2688,6 +2687,36 @@ el('plan-apply-btn').addEventListener('click', async () => {
   pollPlan();
 });
 
+const newRecipesState = { existing: 0 };
+
+function showBaselineChoice(show, count) {
+  el('new-recipes-choice').classList.toggle('hidden', !show);
+  if (!show) return;
+  el('new-recipes-choice-text').textContent = tf('newRecipesChoiceQuestion', { count });
+  el('new-recipes-choice-hint').textContent = tf('newRecipesChoiceHint', { count });
+}
+
+async function setBaseline(existingDone) {
+  ['new-recipes-existing-done', 'new-recipes-existing-new'].forEach((id) => { el(id).disabled = true; });
+  try {
+    const res = await fetch('/api/tools/new-recipes/baseline', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ existing_done: existingDone }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+  } catch (e) {
+    el('new-recipes-status').textContent = `${t('toolNewRecipesStatusFailed')}: ${e.message}`;
+  } finally {
+    ['new-recipes-existing-done', 'new-recipes-existing-new'].forEach((id) => { el(id).disabled = false; });
+  }
+  loadNewRecipesStatus();
+}
+
+el('new-recipes-existing-done').addEventListener('click', () => setBaseline(true));
+el('new-recipes-existing-new').addEventListener('click', () => setBaseline(false));
+el('new-recipes-change-baseline').addEventListener('click', () => {
+  showBaselineChoice(true, newRecipesState.existing);
+});
+
 async function loadNewRecipesStatus() {
   const label = el('new-recipes-status');
   const btn = el('new-recipes-start-btn');
@@ -2697,12 +2726,17 @@ async function loadNewRecipesStatus() {
     const res = await fetch('/api/tools/new-recipes/status');
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    if (data.baseline_created) {
-      label.textContent = tf('toolNewRecipesBaseline', { count: data.baseline_count });
+    // Before the first run: do the recipes existing now count as done?
+    newRecipesState.existing = data.existing_count;
+    showBaselineChoice(data.needs_choice, data.existing_count);
+    if (data.needs_choice) {
+      label.textContent = t('toolNewRecipesChooseFirst');
     } else {
       label.textContent = data.new_count > 0 ? tf('toolNewRecipesCount', { count: data.new_count }) : t('toolNewRecipesNone');
+      el('new-recipes-baseline-info').textContent = tf('newRecipesBaselineInfo', { handled: data.handled_count, total: data.existing_count });
     }
-    btn.disabled = data.new_count === 0;
+    el('new-recipes-change-baseline').classList.toggle('hidden', !!data.needs_choice);
+    btn.disabled = !data.new_count;
 
     const auto = el('new-recipes-auto');
     if (data.auto_interval_hours > 0) {

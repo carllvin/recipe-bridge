@@ -97,7 +97,7 @@ class FakeMealie:
                 if request.url.params.get("tags"):
                     found = [r for r in found if any(t["id"] == request.url.params["tags"] for t in r.get("tags", []))]
                 return self._page([{k: r.get(k) for k in ("id", "name", "slug", "image", "recipeServings", "tags",
-                                                         "description", "totalTime", "rating", "lastMade")}
+                                                         "description", "totalTime", "rating", "lastMade", "updatedAt")}
                                    for r in found], request)
             if request.method == "POST":
                 name = json.loads(request.content)["name"]
@@ -127,6 +127,7 @@ class FakeMealie:
                 if error:
                     return httpx.Response(422, json={"detail": error})
                 self.recipes[slug].update(body)
+                self._touch(slug)
                 return httpx.Response(200, json=self.recipes[slug])
             if request.method == "DELETE":
                 return httpx.Response(200, json=self.recipes.pop(slug))
@@ -138,6 +139,10 @@ class FakeMealie:
             for ref in refs:
                 if ref and ref.get("id") == item_id:
                     ref["name"] = name
+
+    def _touch(self, slug):
+        self.clock = getattr(self, "clock", 0) + 1
+        self.recipes[slug]["updatedAt"] = f"2026-01-01T00:00:{self.clock:02d}"
 
     def _slug(self, slug_or_id):
         return next((s for s, r in self.recipes.items() if r["id"] == slug_or_id), slug_or_id)
@@ -225,4 +230,5 @@ class FakeMealie:
             "recipeInstructions": [], "tags": [{"id": t["id"], "name": t["name"], "slug": t["slug"]} for t in tags],
             "recipeCategory": [], **extra,
         }
+        self._touch(slug)
         return self.recipes[slug]

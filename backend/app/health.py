@@ -118,12 +118,12 @@ def _unused_items(recipes, foods, units, keywords, unit_conversions) -> dict:
     }
 
 
-def _write(started, metrics, item_lists, recipe_versions=None) -> None:
+def _write(started, metrics, item_lists, recipe_versions=None, extra=None) -> None:
     os.makedirs(settings.data_dir, exist_ok=True)
     tmp = _path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"computed_at": started, "metrics": metrics, "items": item_lists,
-                   "recipe_versions": recipe_versions}, f, ensure_ascii=False)
+                   "recipe_versions": recipe_versions, **(extra or {})}, f, ensure_ascii=False)
     os.replace(tmp, _path())
 
 
@@ -132,8 +132,8 @@ def _compute() -> None:
     if target.is_mealie():  # the tiles that work with Mealie (mealie_maintenance)
         try:
             with mealie_client.get_client() as client:
-                metrics, item_lists = mealie_maintenance.compute(client)
-            _write(started, metrics, item_lists)
+                metrics, item_lists, versions, extra = mealie_maintenance.compute_full(client)
+            _write(started, metrics, item_lists, versions, extra)
         except Exception as exc:  # noqa: BLE001
             log.exception("Health overview (Mealie) failed")
             _state["error"] = str(exc)
@@ -154,8 +154,8 @@ def _compute() -> None:
             keywords = tools_conversions._fetch_all(client, "keyword")
             unit_conversions = tools_conversions._fetch_all(client, "unit-conversion")
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
-            general, to_estimate = tools_conversions.find_missing(
-                client, tools_conversions.recipe_pairs(recipes), respect_ignored=False)
+            pairs = tools_conversions.recipe_pairs(recipes)
+            general, to_estimate = tools_conversions.find_missing(client, pairs, respect_ignored=False)
 
         expected = get_language_code(settings.output_language)
 
@@ -198,7 +198,9 @@ def _compute() -> None:
         metrics = {"recipes_total": len(recipes), "foods_used": len(used_foods)}
         # lets the recipe tools read only what changed since (recipe_scope.py)
         recipe_versions = {str(r["id"]): r.get("updated_at") for r in recipes}
-        _write(started, metrics, item_lists, recipe_versions)
+        # the conversions tool starts from these instead of reading every recipe
+        _write(started, metrics, item_lists, recipe_versions,
+               {"recipe_pairs": [[f, u, n] for (f, u), n in pairs.items()]})
     except Exception as exc:  # noqa: BLE001
         log.exception("Health overview failed")
         _state["error"] = str(exc)

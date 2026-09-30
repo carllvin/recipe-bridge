@@ -169,7 +169,7 @@ def test_new_recipes_run(mealie, ai, isolated):
     onion = mealie.add("food", "Zwiebel")
     mealie.add("tag", "Suppe")
     mealie.add_recipe("Alte Suppe", [(onion, None)])
-    assert tools_new_recipes.status()["baseline_created"]
+    assert not tools_new_recipes.set_baseline(True)["needs_choice"]
     onions = mealie.add("food", "onions")
     soups = mealie.add("tag", "soups")
     mealie.add_recipe("Onion soup", [(onions, None)], tags=[soups], description="A classic French soup with onions.",

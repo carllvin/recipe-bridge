@@ -32,7 +32,8 @@ def test_suggestions_are_checked(tandoor, monkeypatch):
         {"group": "Küche", "tags": ["italienisch", "vegan"]},  # vegan already placed; Küche is a used tag name
         {"group": "Anlass", "tags": ["Omas Beste"]},           # already there
     ])
-    assert sent["groups"] == ["Anlass"] and {t["name"] for t in sent["tags"]} >= {"vegan", "Omas Beste"}
+    # only the ungrouped tags (the tile's entries) go to the AI - "Omas Beste" is already in "Anlass"
+    assert sent["groups"] == ["Anlass"] and {t["name"] for t in sent["tags"]} == {"vegan", "vegetarisch", "italienisch", "Suppe", "Küche"}
     assert [(s.detail["group"], [t["name"] for t in s.detail["tags"]]) for s in job.suggestions] == [
         ("Ernährung", ["vegan", "vegetarisch"])]
 

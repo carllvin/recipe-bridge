@@ -1199,3 +1199,6 @@ a { color: inherit; }
 .ct-photo-btn { cursor: pointer; padding-left: 14px; padding-right: 14px; }
 
 .app-version { margin-left: auto; opacity: 0.7; }
+.new-recipes-choice { border-top: 1px solid #2a2f2a; margin-top: 12px; padding-top: 12px; }
+.new-recipes-choice p { margin: 0 0 10px; font-size: 0.9rem; }
+.new-recipes-choice-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }

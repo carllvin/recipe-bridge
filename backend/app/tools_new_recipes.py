@@ -70,7 +70,7 @@ def _save_store(store: dict) -> None:
 def mark_processed(recipe_ids) -> None:
     with _store_lock:
         store = _load_store() or {"baseline_at": time.time(), "recipe_ids": []}
-        store["recipe_ids"] = sorted(set(store["recipe_ids"]) | set(recipe_ids))
+        store["recipe_ids"] = sorted(set(store["recipe_ids"]) | set(recipe_ids), key=str)
         _save_store(store)
 
 
@@ -111,8 +111,9 @@ def _in_open_jobs(exclude_id: str | None = None) -> set[int]:
 
 def status() -> dict:
     """How many recipes are new (not handled and not already part of an
-    open run), plus the open runs and the automatic-run schedule. Creates the
-    baseline on first use: every recipe existing right now counts as handled."""
+    open run), plus the open runs and the automatic-run schedule. Before the
+    first run the user decides whether the existing recipes count as handled
+    (needs_choice, see set_baseline)."""
     with target.client().get_client() as client:
         ids = list_recipe_ids(client)
     result = {
@@ -126,17 +127,28 @@ def status() -> dict:
     }
     with _store_lock:
         store = _load_store()
-        if store is None:
-            _save_store({"baseline_at": time.time(), "recipe_ids": sorted(ids)})
-            return {**result, "new_count": 0, "baseline_created": True, "baseline_count": len(ids)}
+    if store is None:
+        return {**result, "new_count": 0, "needs_choice": True, "existing_count": len(ids)}
     new_ids = set(ids) - set(store["recipe_ids"]) - _in_open_jobs()
-    return {**result, "new_count": len(new_ids), "baseline_created": False}
+    return {**result, "new_count": len(new_ids), "needs_choice": False, "existing_count": len(ids),
+            "handled_count": len(set(ids) & set(store["recipe_ids"]))}
+
+
+def set_baseline(existing_done: bool) -> dict:
+    """The starting point: every recipe existing now counts as handled
+    (existing_done) - or none does, so the next run processes the whole
+    collection. Can be changed later; recipes in an open run stay in it."""
+    with target.client().get_client() as client:
+        ids = list_recipe_ids(client) if existing_done else []
+    with _store_lock:
+        _save_store({"baseline_at": time.time(), "recipe_ids": sorted(ids, key=str)})
+    return status()
 
 
 def _new_recipe_ids(client, job_id: str | None = None) -> list[int]:
     store = _load_store()
     if store is None:
-        raise tandoor_client.TandoorError("No baseline yet - open the tools page once first.")
+        raise tandoor_client.TandoorError("Choose first whether the existing recipes count as handled (Maintain → Process new recipes).")
     skip = set(store["recipe_ids"]) | _in_open_jobs(exclude_id=job_id)
     return [rid for rid in list_recipe_ids(client) if rid not in skip]
 

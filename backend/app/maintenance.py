@@ -22,8 +22,8 @@ log = logging.getLogger("recipe-bridge")
 # health metric -> (tool, extra job meta)
 METRIC_TOOLS = {
     "foods_duplicates": ("ingredients_review", {"focus": "duplicates"}),
-    "foods_without_nutrition": ("ingredients_enrich", {}),
-    "foods_without_category": ("ingredients_enrich", {}),
+    "foods_without_nutrition": ("ingredients_enrich", {"focus": "tiles"}),
+    "foods_without_category": ("ingredients_enrich", {"focus": "tiles"}),
     "missing_conversions": ("conversions", {}),
     "units_duplicates": ("units_review", {"focus": "duplicates"}),
     "recipes_not_translated": ("recipes_translate", {}),

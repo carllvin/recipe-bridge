@@ -84,6 +84,14 @@ def ingredient_lines(recipe) -> list[str]:
 
 def compute(client) -> tuple[dict, dict]:
     """(metrics, items per metric) for the health overview."""
+    metrics, items, _versions, _extra = compute_full(client)
+    return metrics, items
+
+
+def compute_full(client) -> tuple[dict, dict, dict, dict]:
+    """compute() plus what lets the tools read less later (like health.py
+    for Tandoor): each recipe's version (updatedAt) and how many recipes use
+    each ingredient, unit and tag."""
     recipes = fetch_recipes_full(client)
     try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
         from . import cook_today, mealie_plan
@@ -107,7 +115,75 @@ def compute(client) -> tuple[dict, dict]:
         "recipes_without_image": recipe_items(lacks_image),
         **mealie_tools.metric_items(recipes, lists["food"]),
     }
-    return {"recipes_total": len(recipes), "foods_used": len(used["food"])}, items
+    versions = {r["slug"]: version_of(r) for r in recipes}
+    return {"recipes_total": len(recipes), "foods_used": len(used["food"])}, items, versions, {"usage": used}
+
+
+# ---------- reading only what's needed ----------
+# A tool started from a tile reads only the recipes the overview listed
+# there and the ones new or changed since (by updatedAt) - one request per
+# recipe adds up with Mealie. Without an overview it reads all of them.
+
+def version_of(recipe) -> str | None:
+    return recipe.get("updatedAt") or recipe.get("dateUpdated") or recipe.get("updateAt")
+
+
+def _overview() -> dict:
+    from . import recipe_scope
+    return recipe_scope._health()
+
+
+def _read(client, slugs) -> list[dict]:
+    full = []
+    for slug in slugs:
+        resp = client.get(f"/recipes/{slug}")
+        if resp.status_code == 200:
+            full.append(resp.json())
+    return full
+
+
+def _changed(summaries, versions) -> set[str]:
+    missing = object()
+    return {s["slug"] for s in summaries if versions.get(s["slug"], missing) != version_of(s)}
+
+
+def recipes_for(client, metric, matches, skip=frozenset(), job=None) -> list[dict]:
+    """Full recipes (not in skip) for which matches(recipe) is true."""
+    data = _overview()
+    versions, listed = data.get("recipe_versions"), (data.get("items") or {}).get(metric)
+    if versions is None or listed is None:
+        if job is not None:
+            _progress(job, "Reading every recipe's full detail...")
+        return [r for r in fetch_recipes_full(client) if r["slug"] not in skip and matches(r)]
+    summaries = mealie_client._paged(client, "/recipes")
+    wanted = {i["key"] for i in listed} | _changed(summaries, versions)
+    todo = [s["slug"] for s in summaries if s["slug"] in wanted and s["slug"] not in skip]
+    if job is not None:
+        _progress(job, f"Reading {len(todo)} recipe(s)...")
+    return [r for r in _read(client, todo) if matches(r)]
+
+
+def usage_since_overview(client) -> dict | None:
+    """entity -> {id: number of recipes using it} as the overview counted
+    it, plus the recipes new or changed since - None without an overview."""
+    data = _overview()
+    stored, versions = data.get("usage"), data.get("recipe_versions")
+    if stored is None or versions is None:
+        return None
+    usage = {entity: dict(counts) for entity, counts in stored.items()}
+    changed = _changed(mealie_client._paged(client, "/recipes"), versions)
+    for entity, counts in used_ids(_read(client, sorted(changed))).items():
+        for item_id, n in counts.items():
+            usage.setdefault(entity, {})[item_id] = max(usage.get(entity, {}).get(item_id, 0), n)
+    return usage
+
+
+def _usage(client, job) -> dict:
+    usage = usage_since_overview(client)
+    if usage is None:
+        _progress(job, "Reading every recipe's full detail...")
+        usage = used_ids(fetch_recipes_full(client))
+    return usage
 
 
 # ---------- scans ----------
@@ -138,8 +214,7 @@ def _progress(job, label):
 
 def _duplicates(job, client):
     entity, metric = DUPLICATE_TOOLS[job.tool]
-    _progress(job, "Reading every recipe's full detail...")
-    counts = used_ids(fetch_recipes_full(client))[entity]
+    counts = _usage(client, job).get(entity, {})
     items = {i["id"]: i for i in mealie_client.fetch_all_items(client, entity)}
     finder = duplicates.food_duplicates if entity == "food" else duplicates.unit_duplicates
     skip = ignored.keys(metric)
@@ -160,8 +235,7 @@ def _duplicates(job, client):
 
 def _unused(job, client):
     entity, metric = UNUSED_TOOLS[job.tool]
-    _progress(job, "Reading every recipe's full detail...")
-    used = set(used_ids(fetch_recipes_full(client))[entity])
+    used = set(_usage(client, job).get(entity, {}))
     skip = ignored.keys(metric)
     label = {"food": "ingredient", "unit": "unit", "keyword": "tag"}[entity]
     for item in find_unused(entity, mealie_client.fetch_all_items(client, entity), used):
@@ -177,10 +251,9 @@ def _unused(job, client):
 def _servings(job, client):
     if not llm_provider.is_configured():
         raise RuntimeError(llm_provider.missing_key_hint())
-    _progress(job, "Reading every recipe's full detail...")
     skip = ignored.keys("recipes_without_servings")
-    recipes = [r for r in fetch_recipes_full(client)
-               if r["slug"] not in skip and lacks_servings(r) and ingredient_lines(r)]
+    recipes = recipes_for(client, "recipes_without_servings", lambda r: lacks_servings(r) and ingredient_lines(r),
+                          skip, job)
     by_slug = {r["slug"]: r for r in recipes}
     job.progress_total = len(recipes)
     for batch_no, start in enumerate(range(0, len(recipes), tools_recipe_details.SERVINGS_BATCH_SIZE), 1):
