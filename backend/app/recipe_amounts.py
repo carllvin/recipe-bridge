@@ -100,9 +100,22 @@ def _mentions_amount(ing, text) -> bool:
                for n in (number, number.replace(".", ",")))
 
 
+TEMPLATE = re.compile(r"\{\{\s*ingredients\[(\d+)\]\s*\}\}")
+
+
+def _notes_missing(step) -> list[int]:
+    """Places n of a step whose "{{ ingredients[n] }}" doesn't show the
+    ingredient's comment yet (recipes done before comments were added)."""
+    text, ingredients = step.get("instruction") or "", step.get("ingredients") or []
+    return [n for n in dict.fromkeys(int(m.group(1)) for m in TEMPLATE.finditer(text))
+            if n < len(ingredients) and _note(ingredients[n]) and f"ingredients[{n}].note" not in text]
+
+
 def needs_amounts(recipe) -> bool:
     steps = recipe.get("steps") or []
-    if not steps or any("{{" in (s.get("instruction") or "") for s in steps):
+    if steps and any("{{" in (s.get("instruction") or "") for s in steps):
+        return any(_notes_missing(s) for s in steps)  # templates already: only the comments
+    if not steps:
         return False
     if recipe_restructure.needs_restructure(recipe):
         return False  # the structure revision comes first
@@ -195,13 +208,54 @@ def describe(recipe, plan) -> tuple[str, str]:
     lines = []
     for change in plan["steps"]:
         step = steps[change["index"]]
-        after = render(change["text"], step.get("ingredients") or [], change["keys"], templates=False)
-        lines += [f"{change['index'] + 1}. BEFORE: {step.get('instruction') or ''}", f"   AFTER:  {after}"]
+        ingredients = step.get("ingredients") or []
+        after = _shown(render(change["text"], ingredients, change["keys"], templates=False), ingredients)
+        lines += [f"{change['index'] + 1}. BEFORE: {_shown(step.get('instruction') or '', ingredients)}", f"   AFTER:  {after}"]
     return (f"recipe: amounts into the steps of {recipe.get('name', '')!r} ({len(plan['steps'])} step(s))",
             "\n".join(lines))
 
 
+def notes_plan(recipe) -> dict:
+    """No AI: "{{ ingredients[n] }}" gets "({{ ingredients[n].note }})" where
+    the ingredient has a comment. Text without markers - saved as it is."""
+    changed = []
+    for index, step in enumerate(recipe.get("steps") or []):
+        missing = set(_notes_missing(step))
+        if not missing:
+            continue
+        done = set()
+
+        def add(match):
+            n = int(match.group(1))
+            if n not in missing or n in done:
+                return match.group(0)
+            done.add(n)
+            return f"{match.group(0)} ({{{{ ingredients[{n}].note }}}})"
+        changed.append({"index": index, "text": TEMPLATE.sub(add, step.get("instruction") or ""), "keys": {},
+                        "ids": [i.get("id") for i in step.get("ingredients") or []]})
+    return {"steps": changed}
+
+
+def _shown(text, step_ingredients) -> str:
+    """Tandoor's templates as they read (for the preview)."""
+    def put(match):
+        n = int(match.group(2))
+        if n >= len(step_ingredients):
+            return match.group(0)
+        ing = step_ingredients[n]
+        return _note(ing) if match.group(3) else amount_text({**ing, "note": ""})
+    return re.sub(r"\{\{\s*ingredients\[((\d+))\](\.note)?\s*\}\}", put, text)
+
+
 def plan_suggestion(job, recipe) -> ToolSuggestion | None:
+    if any("{{" in (s.get("instruction") or "") for s in recipe.get("steps") or []):
+        plan = notes_plan(recipe)
+        if not plan["steps"]:
+            return None
+        summary, preview = describe(recipe, plan)
+        return ToolSuggestion(id=uuid.uuid4().hex[:10], kind="amounts_in_steps",
+                              summary=summary.replace("amounts into the steps", "ingredient comments into the steps"),
+                              preview=preview, detail={"recipe_id": recipe["id"], "plan": plan})
     try:
         plan = amounts_plan(job, recipe)
     except Exception as exc:  # noqa: BLE001

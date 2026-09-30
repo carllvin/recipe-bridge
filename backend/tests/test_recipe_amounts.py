@@ -139,3 +139,26 @@ def test_comments_in_brackets(monkeypatch, tandoor):
     payload = recipe_amounts.build_payload(tandoor.db["recipe"][7], suggestion.detail["plan"])
     assert payload["steps"][0]["instruction"] == (
         "{{ ingredients[0] }} ({{ ingredients[0].note }}) mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren.")
+
+
+def test_recipes_done_before_get_the_comments_without_ai(monkeypatch, tandoor):
+    r = recipe()
+    r["steps"][0]["instruction"] = "{{ ingredients[0] }} mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren."
+    r["steps"][1]["instruction"] = "{{ ingredients[0] }} erhitzen, bei 180 °C backen."
+    r["steps"][0]["ingredients"][0]["note"] = "gesiebt"
+    assert recipe_amounts.needs_amounts(r)
+    monkeypatch.setattr(llm_provider, "complete_text", lambda *a, **k: pytest.fail("no AI needed"))
+    suggestion = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), r)
+    assert suggestion.summary.startswith("recipe: ingredient comments into the steps")
+    assert "AFTER:  250 g Mehl (gesiebt) mit 500 ml Milch und 3 Eier verrühren." in suggestion.preview
+    assert [c["index"] for c in suggestion.detail["plan"]["steps"]] == [0]  # step 2: no comments
+
+    for i in range(1, 6):
+        tandoor.db.setdefault("food", {})[i] = {"id": i, "name": ["", "Mehl", "Milch", "Ei", "Butter", "Salz"][i]}
+    tandoor.db.setdefault("unit", {})[1] = {"id": 1, "name": "g"}
+    tandoor.add("recipe", r)
+    payload = recipe_amounts.build_payload(tandoor.db["recipe"][7], suggestion.detail["plan"])
+    text = payload["steps"][0]["instruction"]
+    assert text == "{{ ingredients[0] }} ({{ ingredients[0].note }}) mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren."
+    r["steps"][0]["instruction"] = text
+    assert not recipe_amounts.needs_amounts(r)  # done
