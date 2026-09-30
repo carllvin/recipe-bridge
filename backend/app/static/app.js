@@ -344,6 +344,13 @@ function smartLink(value) {
   return null;
 }
 
+function isVideoLink(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^(www|m)\./, '');
+    return /(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com)$/.test(host);
+  } catch (e) { return false; }
+}
+
 function smartMode() {
   const value = el('smart-input').value.trim();
   const link = !value.includes('\n') ? smartLink(value) : null;
@@ -359,9 +366,12 @@ function updateSmartForm() {
   const { mode } = smartMode();
   el('smart-import').disabled = !mode;
   el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
-  el('smart-scan').classList.toggle('hidden', mode !== 'url');
-  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url');
-  el('smart-hint').textContent = mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
+  // A video link: the recipe comes from the description / subtitles - no website scan.
+  const video = mode === 'url' && isVideoLink(smartMode().value);
+  el('smart-scan').classList.toggle('hidden', mode !== 'url' || video);
+  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url' || video);
+  el('smart-hint').textContent = video ? t('smartHintVideo')
+    : mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
 function clearSmartForm() {
