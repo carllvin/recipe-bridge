@@ -2714,7 +2714,9 @@ function renderWeek(job) {
     if (!s || s.status === 'skipped') return `<div class="plan-day empty">${head}<div class="plan-empty">${t('planNoSuggestion')}</div>${reroll}</div>`;
     const d_ = s.detail;
     const body = `<div class="plan-recipe">${escapeHtml(d_.recipe.name)}</div>
-      <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>`;
+      <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>
+      ${(d_.shared || []).map((x) => `<div class="plan-shared" title="${escapeHtml(t('planSharedTitle'))}">🔁 ${escapeHtml(x.name)}: ${
+        x.days.map((o) => escapeHtml(new Date(`${o}T12:00:00`).toLocaleDateString([], { weekday: 'short' }))).join(', ')}</div>`).join('')}`;
     if (s.status === 'applied') return `<div class="plan-day applied">${head}${body}<div class="plan-done">✓ ${t('planApplied')}</div></div>`;
     const error = s.status === 'error' ? `<div class="inbox-error">${escapeHtml(s.error || '')}</div>` : '';
     return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''} ${planState.changed.has(s.id) ? 'changed' : ''}" data-id="${s.id}">

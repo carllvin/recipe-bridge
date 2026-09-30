@@ -40,7 +40,7 @@ HOUSEHOLD = """HOUSEHOLD is {"persons": number or null, "never": [string], "disl
 
 # One recipe as the AI sees it (the "recipes" list of both prompts).
 RECIPE_LINE = """Each RECIPE is one line:
-"<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>|<perishable level 3/2 and those ingredients, or ->|<its ingredients that are at home, or ->"
+"<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>|<perishable level 3/2 and those ingredients, or ->|<its ingredients that are at home, or ->|<its fresh ingredients that usually leave a rest (cream, fresh herbs, feta ...), or ->"
 """
 
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
@@ -58,8 +58,13 @@ for that meal:
   middle, and recipes without perishable ingredients (pantry, frozen,
   long-keeping) towards the end - this order comes before the weekday/weekend
   preference below
-- prefer recipes that use what is already at home ("at_home"; the last field
-  of a recipe lists which of those it uses) - perishable things at home early
+- prefer recipes that use what is already at home ("at_home"; the
+  at-home field of a recipe lists which of those it uses) - perishable
+  things at home early
+- use up rests: when a recipe has an ingredient that usually leaves a rest
+  (the last field - half a cup of cream, a bunch of herbs), plan another
+  recipe with the same ingredient one to three days later, where it fits
+  the other rules; mention it in "reason" (e.g. "uses the rest of the cream")
 - prefer well-rated recipes (4-5) and ones not cooked for a long time;
   avoid recipes rated 1-2 unless the wishes ask for them; mix in one or
   two never-cooked recipes so new ones get tried
@@ -173,7 +178,7 @@ class _Lines:
         home = cook_today.at_home_in(self.have, foods) if self.have else []
         return (f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
                 f"|{','.join(self.in_season.get(r['id'], []))}|{f'{level}:' + ','.join(perishable) if level else '-'}"
-                f"|{','.join(home) or '-'}")
+                f"|{','.join(home) or '-'}|{','.join(perishability.leftovers_of(n[0] for n in foods).values()) or '-'}")
 
 
 def _add_usage(job, usage) -> None:
@@ -270,6 +275,7 @@ def run_scan(job_id: str) -> None:
         suggestions = _pick(job, candidates, free_days, params) if free_days else []
         suggestions.sort(key=lambda s: s.detail["date"])
         job.suggestions = suggestions
+        mark_shared(job)
         job.status = "ready"
         job.progress_label = None
         tool_jobs.save_tool_job(job)
@@ -278,6 +284,27 @@ def run_scan(job_id: str) -> None:
         job.status = "error"
         job.error = str(exc)
         tool_jobs.save_tool_job(job)
+
+
+SHARE_WITHIN_DAYS = 3
+
+
+def mark_shared(job) -> None:
+    """Each planned day: its ingredients that usually leave a rest and the
+    other days (within SHARE_WITHIN_DAYS) that use them too - shown on the
+    day cards as "rest of the cream: Thursday"."""
+    foods = cook_today.foods_by_recipe()
+    active = [s for s in job.suggestions if s.status != "skipped"]
+    rests = {s.id: perishability.leftovers_of(n[0] for n in foods.get(s.detail["recipe"]["id"], [])) for s in active}
+    for s in active:
+        day = _date(s.detail["date"])
+        shared = []
+        for stem, name in rests[s.id].items():
+            others = sorted(o.detail["date"] for o in active
+                            if o is not s and stem in rests[o.id] and abs((_date(o.detail["date"]) - day).days) <= SHARE_WITHIN_DAYS)
+            if others:
+                shared.append({"name": name, "days": others})
+        s.detail["shared"] = shared
 
 
 def reroll_day(job_id: str, date: str) -> ToolJob:
@@ -301,6 +328,7 @@ def reroll_day(job_id: str, date: str) -> ToolJob:
         raise tandoor_client.TandoorError("No other matching recipe found for that day.")
     job.suggestions = [s for s in job.suggestions if s.detail.get("date") != date] + picked
     job.suggestions.sort(key=lambda s: s.detail["date"])
+    mark_shared(job)
     tool_jobs.save_tool_job(job)
     return job
 
@@ -376,6 +404,7 @@ def chat(job_id: str, message: str) -> ToolJob:
         if other and old is not None:
             put(_date(other), by_id.get(str(old.detail["recipe"]["id"]), old.detail["recipe"]), old.detail.get("reason") or "")
     job.suggestions.sort(key=lambda s: s.detail["date"])
+    mark_shared(job)
     reply = str(answer.get("reply") or "").strip()
     job.meta["chat"] = history + [{"role": "user", "text": message},
                                   {"role": "assistant", "text": reply or ("✓" if changed else "–"), "changed": len(changed)}]
