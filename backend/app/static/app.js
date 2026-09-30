@@ -2479,6 +2479,7 @@ async function searchCookToday() {
         r.minutes ? `${r.minutes} min` : '',
         r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',
+        r.disliked && r.disliked.length ? `<span class="ct-disliked">👎 ${escapeHtml(r.disliked.join(', '))}</span>` : '',
       ].filter(Boolean).join(' · ');
       return `<div class="ct-row">
         <div class="ct-score">${r.matched.length}/${r.needed}</div>
@@ -2581,8 +2582,55 @@ function rememberPlan(jobId) {
   try { if (jobId) localStorage.setItem('th.planJob', jobId); else localStorage.removeItem('th.planJob'); } catch (e) { /* optional */ }
 }
 
+// ---------- Household profile ----------
+// Weekday names from the browser in the UI language, Monday = 0.
+function weekdayName(i) {
+  return new Date(2024, 0, 1 + i).toLocaleDateString(LANG_CODE, { weekday: 'long' });
+}
+
+function householdSummary(h) {
+  return [
+    h.persons ? tf('householdSummaryPersons', { n: h.persons }) : '',
+    h.avoid ? `🚫 ${h.avoid}` : '',
+    Object.keys(h.weekdays || {}).sort().map((d) => `${weekdayName(+d)}: ${h.weekdays[d]}`).join(', '),
+  ].filter(Boolean).join(' · ');
+}
+
+function fillHousehold(h) {
+  el('hh-persons').value = h.persons || '';
+  el('hh-avoid').value = h.avoid || '';
+  el('hh-dislikes').value = h.dislikes || '';
+  el('hh-weekdays').innerHTML = [0, 1, 2, 3, 4, 5, 6].map((d) => `<label><span>${escapeHtml(weekdayName(d))}</span>
+    <input type="text" maxlength="100" data-day="${d}" value="${escapeHtml((h.weekdays || {})[d] || '')}" placeholder="–" /></label>`).join('');
+  el('household-summary').textContent = householdSummary(h);
+}
+
+async function loadHousehold() {
+  try {
+    fillHousehold((await (await fetch('/api/settings')).json()).household || {});
+  } catch (err) { /* the card stays empty */ }
+}
+
+el('household-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const weekdays = {};
+  el('hh-weekdays').querySelectorAll('input').forEach((i) => { if (i.value.trim()) weekdays[i.dataset.day] = i.value.trim(); });
+  const household = { persons: +el('hh-persons').value || 0, avoid: el('hh-avoid').value,
+    dislikes: el('hh-dislikes').value, weekdays };
+  try {
+    const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ household }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+    fillHousehold((await res.json()).household);
+    el('hh-status').textContent = t('householdSaved');
+  } catch (err) {
+    el('hh-status').textContent = `${t('householdSaveFailed')}: ${err.message}`;
+  }
+});
+
 async function openPlanArea() {
   loadMealPlanOptions();
+  loadHousehold();
   if (!planState.jobId) {
     try { planState.jobId = localStorage.getItem('th.planJob'); } catch (e) { planState.jobId = null; }
   }

@@ -842,7 +842,7 @@ a { color: inherit; }
 .meal-plan-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #8f9689; }
 .meal-plan-form .mp-wide { grid-column: 1 / -1; }
 .meal-plan-form .mp-check { flex-direction: row; align-items: center; gap: 8px; color: var(--paper); font-size: 0.85rem; }
-.meal-plan-form input, .meal-plan-form select {
+.meal-plan-form input, .meal-plan-form select, .household-form input {
   background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius);
   color: var(--paper); padding: 7px 8px; font-size: 0.88rem; color-scheme: dark;
 }
@@ -1207,3 +1207,16 @@ a { color: inherit; }
 .new-recipes-choice-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 #voice-record.recording { border-color: #e08a7e; color: #e08a7e; animation: voice-pulse 1.2s ease-in-out infinite; }
 @keyframes voice-pulse { 50% { opacity: 0.55; } }
+
+/* Household profile (Plan) */
+.household-card > summary { cursor: pointer; font-weight: 600; list-style: revert; }
+.household-summary { font-weight: 400; color: var(--muted, #9aa39a); font-size: .9rem; margin-left: 6px; }
+.household-form { display: grid; grid-template-columns: 120px 1fr; gap: 12px; margin-top: 12px; }
+.household-form label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
+.household-form .hh-wide { grid-column: 1 / -1; }
+.hh-label { font-size: .85rem; }
+.hh-weekdays { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 4px; }
+.hh-weekdays label { font-size: .8rem; }
+.hh-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+.ct-disliked { color: #d9a441; }
+@media (max-width: 520px) { .household-form { grid-template-columns: 1fr; } }

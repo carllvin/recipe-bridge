@@ -181,8 +181,12 @@ def suggest(have_text: str, limit: int = 20) -> dict:
     have = [_norm(h) for h in re.split(r"[,;\n]+", have_text or "") if _norm(h)]
     if not have:
         return {"building": building, "results": [], "built_at": data.get("built_at")}
+    from . import household  # late: household imports this module
+    profile = household.get()
     results = []
     for r in data["recipes"]:
+        if household.avoided_in(r["foods"], r["name"], profile):
+            continue  # an allergy / intolerance of the household
         needed, matched, missing = 0, [], []
         for names in r["foods"]:
             if _is_staple(names):
@@ -196,10 +200,12 @@ def suggest(have_text: str, limit: int = 20) -> dict:
             continue
         season = seasonal.display_names(seasonal.seasonal_in(n for names in r["foods"] for n in names))
         results.append({"id": r["id"], "slug": r.get("slug"), "name": r["name"], "minutes": r["minutes"] or None, "rating": r["rating"],
-                        "matched": matched, "missing": missing, "needed": needed, "season": season})
-    # Fewest missing first, then most of what you have used, then seasonal
-    # ingredients, then rating.
-    results.sort(key=lambda x: (len(x["missing"]), -len(x["matched"]), -len(x["season"]), -(x["rating"] or 0)))
+                        "matched": matched, "missing": missing, "needed": needed, "season": season,
+                        "disliked": household.disliked_in(r["foods"], r["name"], profile)})
+    # Disliked ones last; fewest missing first, then most of what you have
+    # used, then seasonal ingredients, then rating.
+    results.sort(key=lambda x: (bool(x["disliked"]), len(x["missing"]), -len(x["matched"]), -len(x["season"]),
+                                -(x["rating"] or 0)))
     return {"building": building, "results": results[:limit], "built_at": data.get("built_at")}
 
 

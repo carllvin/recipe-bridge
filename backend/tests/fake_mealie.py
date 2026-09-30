@@ -177,6 +177,7 @@ class FakeMealie:
             if lst is None or not isinstance(body, list):
                 return httpx.Response(404 if lst is None else 422, json={})
             lst["recipes"].extend(b["recipeId"] for b in body)
+            lst.setdefault("times", []).extend(b.get("recipeIncrementQuantity", 1) for b in body)
             return httpx.Response(200, json=lst)
         m = re.match(r"^/users/([^/]+)/ratings/([^/]+)$", path)
         if m and request.method == "POST":

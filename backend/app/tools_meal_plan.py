@@ -17,7 +17,7 @@ import json
 import logging
 import uuid
 
-from . import cook_today, json_answer, llm_provider, mealie_plan, perishability, seasonal, tandoor_client, target, tool_jobs
+from . import cook_today, household, json_answer, llm_provider, mealie_plan, perishability, seasonal, tandoor_client, target, tool_jobs
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
@@ -25,6 +25,18 @@ log = logging.getLogger("recipe-bridge")
 
 MAX_CANDIDATES = 300
 RECENTLY_COOKED_DAYS = 14
+
+# The household profile (household.py) as both prompts read it.
+HOUSEHOLD = """HOUSEHOLD is {"persons": number or null, "never": [string], "dislikes": [string],
+"fixed_days": {weekday: wish}}:
+- NEVER pick a recipe whose title, tags or ingredients contain anything in
+  "never" (allergies / intolerances - "Nüsse" also rules out Walnüsse,
+  Haselnüsse, Nusskuchen ...)
+- avoid recipes with "dislikes" unless the wishes ask for them
+- on a weekday in "fixed_days" pick a recipe that fits that wish (e.g.
+  "Friday": "Pizza" -> a pizza); this comes before the freshness order. If
+  nothing fits, take the closest match and say so in "reason"
+"""
 
 # One recipe as the AI sees it (the "recipes" list of both prompts).
 RECIPE_LINE = """Each RECIPE is one line:
@@ -34,11 +46,12 @@ RECIPE_LINE = """Each RECIPE is one line:
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
 collection. Language for "reason": {language}. You will receive a JSON
 object: {"today": "YYYY-MM-DD", "meal": string, "days": ["YYYY-MM-DD (weekday)", ...],
-"wishes": string, "in_season": [string], "at_home": [string], "recipes": [RECIPE, ...]}
-""" + RECIPE_LINE + """
+"wishes": string, "household": HOUSEHOLD, "in_season": [string], "at_home": [string], "recipes": [RECIPE, ...]}
+""" + RECIPE_LINE + HOUSEHOLD + """
 The first day of "days" is the shopping day. Pick exactly one recipe per day
 for that meal:
-- follow the wishes (e.g. "2x vegetarian", "quick on weekdays")
+- follow the household rules above and the wishes (e.g. "2x vegetarian",
+  "quick on weekdays")
 - freshness: recipes with perishable level 3 (fresh fish and seafood, mince,
   leafy greens, fresh herbs, berries, mushrooms) on the first two days,
   level 2 (fresh meat and poultry, soft vegetables, fresh dairy) in the
@@ -65,16 +78,17 @@ element per day: {"date": "YYYY-MM-DD", "recipe_id": <id>, "reason": <a few word
 CHAT_PROMPT = """You help a home cook adjust their weekly meal plan. Language
 for "reply" and "reason": {language}. You will receive a JSON object:
 {"meal": string, "plan": [{"date": "YYYY-MM-DD (weekday)", "recipe": {"id", "name"} or null,
-"locked": bool}, ...], "wishes": string, "at_home": [string], "recipes": [RECIPE, ...],
-"history": [{"role": "user"|"assistant", "text": string}], "message": string}
-""" + RECIPE_LINE + """
+"locked": bool}, ...], "wishes": string, "household": HOUSEHOLD, "at_home": [string],
+"recipes": [RECIPE, ...], "history": [{"role": "user"|"assistant", "text": string}], "message": string}
+""" + RECIPE_LINE + HOUSEHOLD + """
 Do what "message" asks, e.g. "swap Thursday's dinner with a beef recipe",
 "swap Monday and Wednesday", "something quicker on Tuesday", "no fish this
 week". Change only the days the request is about - never "locked" days -
 and use only recipes from "recipes" or ones already in the plan (to move
 them). Keep the rules of a good plan: no recipe twice, perishable
-ingredients early in the week, variety. If nothing fits, change nothing and
-say so.
+ingredients early in the week, variety, the household rules ("never" even
+when the message asks otherwise - then say why). If nothing fits, change
+nothing and say so.
 
 Respond with ONLY a JSON object (no explanation, no markdown fence):
 {"reply": <one or two short sentences for the cook>,
@@ -125,6 +139,11 @@ def _candidates(client) -> list[dict]:
     everything = mealie_plan.fetch_recipes(client) if target.is_mealie() else _fetch_all(client, "recipe")
     recipes = [r for r in everything
                if not (_date(r.get("last_cooked")) and _date(r.get("last_cooked")) >= cutoff)]
+    # Allergies / intolerances of the household: out before the AI sees them.
+    profile = household.get()
+    if profile["avoid"]:
+        foods = cook_today.foods_by_recipe()
+        recipes = [r for r in recipes if not household.avoided_in(foods.get(r["id"], []), r.get("name", ""), profile)]
     # Well rated and long not cooked first (unrated counts as average); the
     # AI weighs it again, this only decides who makes the capped list.
     recipes.sort(key=lambda r: -((r.get("rating") or 3) + min(_days_since_cooked(r) or 60, 180) / 60))
@@ -169,7 +188,8 @@ def _suggestion(day: dt.date, recipe, reason, params) -> ToolSuggestion:
         id=uuid.uuid4().hex[:10], kind="meal_plan",
         summary=(f"{day.strftime('%a %d.%m.')} · {meal_type['name']}: {recipe.get('name', '')}"
                  + (f" ({minutes} min)" if minutes else "") + (f" – {reason}" if reason else "")),
-        detail={"date": day.isoformat(), "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
+        detail={"date": day.isoformat(), "recipe": {"id": recipe["id"], "name": recipe.get("name", ""),
+                                                    "servings": recipe.get("servings") or None},
                 "minutes": minutes or None, "reason": reason or None,
                 "meal_type": meal_type, "add_to_shopping": bool(params.get("add_to_shopping"))},
     )
@@ -195,6 +215,7 @@ def _pick(job, candidates, days, params, exclude_ids=frozenset()) -> list[ToolSu
         "meal": params["meal_type"]["name"],
         "days": [f"{d.isoformat()} ({d.strftime('%A')})" for d in days],
         "wishes": params.get("wishes") or "",
+        "household": household.for_ai(),
         "in_season": seasonal.display_names(seasonal.in_season()),
         "at_home": [h.strip() for h in (params.get("at_home") or "").replace(";", ",").split(",") if h.strip()],
         "recipes": [lines.line(r) for r in pool],
@@ -319,6 +340,7 @@ def chat(job_id: str, message: str) -> ToolJob:
                               "name": current[d.isoformat()].detail["recipe"]["name"]} if d.isoformat() in current else None),
                   "locked": locked(d)} for d in days],
         "wishes": params.get("wishes") or "",
+        "household": household.for_ai(),
         "at_home": [h.strip() for h in (params.get("at_home") or "").replace(";", ",").split(",") if h.strip()],
         "recipes": [lines.line(r) for r in candidates],
         "history": history[-CHAT_HISTORY:],
@@ -363,10 +385,10 @@ def chat(job_id: str, message: str) -> ToolJob:
 
 
 def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
-    """Creates one entry in Tandoor's meal plan with the recipe's own
-    servings - so the shopping list gets exactly the amounts written in the
-    recipe. Returns the created entry. With Mealie: its meal plan and
-    shopping list (mealie_plan)."""
+    """Creates one entry in Tandoor's meal plan with the household's
+    number of persons as servings (else the recipe's own) - the shopping
+    list scales the amounts to it. Returns the created entry. With Mealie:
+    its meal plan and shopping list (mealie_plan)."""
     if target.is_mealie():
         return mealie_plan.create_entry(client, recipe, date, meal_type, add_to_shopping)
     resp = client.get(f"/recipe/{recipe['id']}/")
@@ -374,7 +396,7 @@ def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_s
     payload = {
         "title": "",
         "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
-        "servings": resp.json().get("servings") or 1,
+        "servings": household.servings(resp.json().get("servings")) or 1,
         "note": "",
         "from_date": date,
         "to_date": date,

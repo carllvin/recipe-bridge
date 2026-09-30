@@ -52,6 +52,25 @@
       <h1 data-i18n="planHeadline">Plan</h1>
       <p class="lede" data-i18n="planLede">What to cook today – and this week?</p>
       <div id="season-now" class="season-now hidden"></div>
+      <!-- Household profile (household.py): used by the weekly plan, its chat and "What can I cook today?". -->
+      <details id="household-card" class="tool-card household-card">
+        <summary><span data-i18n="householdTitle">🏠 Household</span> <span id="household-summary" class="household-summary"></span></summary>
+        <form id="household-form" class="household-form">
+          <label><span data-i18n="householdPersons">Persons</span>
+            <input id="hh-persons" type="number" min="0" max="30" placeholder="–" /></label>
+          <label class="hh-wide"><span data-i18n="householdAvoid">Never (allergies, intolerances)</span>
+            <input id="hh-avoid" type="text" maxlength="500" data-i18n-placeholder="householdAvoidPlaceholder" placeholder="e.g. nuts, shrimp" /></label>
+          <label class="hh-wide"><span data-i18n="householdDislikes">Rather not</span>
+            <input id="hh-dislikes" type="text" maxlength="500" data-i18n-placeholder="householdDislikesPlaceholder" placeholder="e.g. mushrooms, coriander" /></label>
+          <div class="hh-wide">
+            <span class="hh-label" data-i18n="householdWeekdays">Fixed days</span>
+            <div id="hh-weekdays" class="hh-weekdays"></div>
+          </div>
+          <p class="settings-hint hh-wide" data-i18n="householdHint">The weekly plan and "What can I cook today?" follow this. Persons = servings of planned days (the shopping list scales the amounts).</p>
+          <div class="hh-wide hh-foot"><span id="hh-status" class="settings-hint"></span>
+            <button class="btn" type="submit" data-i18n="householdSave">Save</button></div>
+        </form>
+      </details>
       <section id="cooked-card" class="tool-card cooked-card hidden">
         <h3 data-i18n="cookedTitle">How was it?</h3>
         <p class="settings-hint" data-i18n="cookedHint">Rate what you cooked – Tandoor keeps it as a cook log, and the weekly plan prefers well-rated recipes you haven't had for a while.</p>
