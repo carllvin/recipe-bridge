@@ -264,6 +264,36 @@ function initVoice() {
   el('voice-record').classList.toggle('hidden', !ok);
 }
 
+// Moving recipes from the other recipe manager (Tandoor <-> Mealie).
+function initMigration() {
+  const source = APP_CONFIG.migration_source;
+  el('more-way-move').classList.toggle('hidden', !source);
+  if (!source) return;
+  el('move-title').textContent = tf('moveTitle', { source });
+  el('move-hint').textContent = tf('moveHint', { source });
+}
+
+let moveCookbooksLoaded = false;
+document.querySelector('.more-ways').addEventListener('toggle', async (e) => {
+  if (!e.target.open || moveCookbooksLoaded || !APP_CONFIG.migration_source) return;
+  moveCookbooksLoaded = true;
+  try {
+    const data = await (await fetch('/api/migration/cookbooks')).json();
+    const select = el('move-cookbook');
+    (data.names || []).forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+  } catch (err) { moveCookbooksLoaded = false; }
+});
+
+el('move-start').addEventListener('click', () => {
+  startImportRequest('/api/migration', { cookbook: el('move-cookbook').value },
+    tf('moveLoading', { source: APP_CONFIG.migration_source }));
+});
+
 el('voice-record').addEventListener('click', async () => {
   const btn = el('voice-record');
   if (voiceState.recorder) {  // second click: stop and import
@@ -693,9 +723,15 @@ function showReview() {
   loadCookbooks();
   updateUsageDisplay(state.job.token_usage);
   // e.g. links of a link list that couldn't be read
-  const notes = state.job.notes || [];
+  let notes = state.job.notes || [];
+  let summary = tf('reviewNotesSummary', { n: notes.length });
+  if (state.job.source === 'migration') {  // moved recipes also go into their old cookbooks
+    notes = [...new Set(state.job.recipes.flatMap((r) => r.cookbooks || []))]
+      .filter((b) => b !== state.job.cookbook_name).sort((a, b) => a.localeCompare(b));
+    summary = tf('moveCookbooksSummary', { n: notes.length });
+  }
   el('review-notes').classList.toggle('hidden', !notes.length);
-  el('review-notes-summary').textContent = tf('reviewNotesSummary', { n: notes.length });
+  el('review-notes-summary').textContent = summary;
   el('review-notes-list').innerHTML = notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
   renderRecipeList();
   updateSelectionCount();
@@ -1738,8 +1774,8 @@ function renderInboxImports() {
       <div class="tools-suggestions-list">${imports.map((i) => `
         <div class="tool-suggestion-row ${i.status === 'error' ? 'error' : ''}">
           <div class="suggestion-text">
-            <div>${i.source === 'folder' ? '📂' : '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
-            <div class="inbox-source">${escapeHtml(t(i.source === 'folder' ? 'inboxImportFolder' : 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
+            <div>${{ folder: '📂', migration: '🚚' }[i.source] || '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
+            <div class="inbox-source">${escapeHtml(t({ folder: 'inboxImportFolder', migration: 'inboxImportMigration' }[i.source] || 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
             <div class="suggestion-preview">${i.status === 'processing'
               ? `<span class="spinner small"></span> ${t('inboxImportProcessing')}`
               : i.status === 'error' ? `<span class="inbox-error">${escapeHtml(i.error || '')}</span>`
@@ -3147,6 +3183,7 @@ if ('serviceWorker' in navigator) {
   el('app-version').textContent = version;
   initEnhancePhotos();
   initVoice();
+  initMigration();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

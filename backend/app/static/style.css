@@ -1061,6 +1061,8 @@ a { color: inherit; }
 .photo-actions { display: none; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; justify-content: center; }
 @media (pointer: coarse) { .photo-actions { display: flex; } }
 .photo-actions .btn { cursor: pointer; }
+.move-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.move-row select { min-width: 0; flex: 1 1 180px; }
 .voice-actions { display: flex; justify-content: center; margin: 12px 0 0; }
 .photo-collector { border: 1px solid #3a3f3a; border-radius: var(--radius); background: #1c211b; padding: 14px 16px; margin-top: 14px; }
 .photo-collector h3 { margin: 0 0 4px; font-size: 1rem; }

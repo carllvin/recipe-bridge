@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -429,6 +429,70 @@ def _start_text_job(text: str, source: str | None = None):
     return job
 
 
+def _run_migration(job_id: str, cookbook: str | None) -> None:
+    """Recipes from the other recipe manager (see migration.py): read as
+    they are - no AI - and then the same review as any import."""
+    job = jobs.get_job(job_id)
+    try:
+        images_dir = os.path.join(_job_dir(job_id), "images")
+
+        def progress(n, total):
+            job.progress_current, job.progress_total = n, total
+            job.progress_label = f"Reading recipe {n}/{total} from {migration.source_name()} …"
+            jobs.save_job(job)
+        for number, (recipe, image) in enumerate(migration.read_recipes(cookbook, images_dir, progress), 1):
+            recipe.source_page_start = recipe.source_page_end = number
+            if image:
+                image_id = f"moved{number}"
+                job.images[image_id] = {"page": number, "filename": os.path.basename(image)}
+                recipe.candidate_image_ids = [image_id]
+                recipe.selected_image_id = image_id
+            job.recipes.append(recipe)
+        if not job.recipes:
+            raise ValueError(f"No recipes found in {migration.source_name()}"
+                             + (f" in the cookbook {cookbook!r}." if cookbook else "."))
+        job.page_count = len(job.recipes)
+        # All recipes of one cookbook -> that cookbook; the whole collection
+        # keeps each recipe's own cookbooks (recipe.cookbooks) instead.
+        job.suggested_cookbook_name = job.cookbook_name = cookbook or None
+        _finish_extraction(job)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Moving recipes failed for job %s", job_id)
+        job.status = "error"
+        job.error = str(exc)
+    finally:
+        notify.import_finished(job)
+        jobs.save_job(job)
+
+
+@app.get("/api/migration/cookbooks")
+async def migration_cookbooks():
+    """The other manager's cookbooks (Mealie: categories) to move just one."""
+    if not migration.source_name():
+        raise HTTPException(400, "The other recipe manager is not configured.")
+    try:
+        return {"source": migration.source_name(), "names": await asyncio.to_thread(migration.list_cookbooks)}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"source": migration.source_name(), "names": [], "error": str(exc)}, status_code=200)
+
+
+@app.post("/api/migration")
+async def start_migration(body: dict = Body(default={})):
+    """Moves the recipes of the other recipe manager (all, or one cookbook)
+    into this one - through the normal review."""
+    source = migration.source_name()
+    if not source:
+        raise HTTPException(400, "The other recipe manager is not configured.")
+    cookbook = (body.get("cookbook") or "").strip() or None
+    job = jobs.create_job(f"{source}: {cookbook}" if cookbook else source)
+    job.source = "migration"
+    job.progress_label = f"Reading the recipes from {source} …"
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    jobs.save_job(job)
+    threading.Thread(target=_run_migration, args=(job.id, cookbook), daemon=True).start()
+    return {"job_id": job.id}
+
+
 @app.post("/api/import-url")
 async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
@@ -814,6 +878,7 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                     cookbook_warning = str(exc)
                     log.warning("Could not create cookbook: %s", exc)
 
+            own_cookbooks: dict[str, tuple] = {}
             for recipe in to_import:
                 recipe.import_status = "importing"
                 jobs.save_job(job)
@@ -846,6 +911,16 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                     if cookbook_id is not None:
                         try:
                             api.add_recipe_to_cookbook(client, cookbook_id, cookbook_endpoint, tandoor_id)
+                        except tandoor_client.TandoorError as exc:
+                            warnings.append(str(exc))
+                    # moved from the other manager: into the cookbooks it was in there
+                    for name in recipe.cookbooks:
+                        if name.strip().casefold() == cookbook_name.casefold():
+                            continue
+                        try:
+                            if name not in own_cookbooks:
+                                own_cookbooks[name] = api.get_or_create_cookbook(client, name)
+                            api.add_recipe_to_cookbook(client, *own_cookbooks[name], tandoor_id)
                         except tandoor_client.TandoorError as exc:
                             warnings.append(str(exc))
 
@@ -1573,6 +1648,7 @@ async def get_config():
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
         "audio_extensions": sorted(AUDIO_EXTENSIONS),
         "voice_available": llm_provider.audio_provider() is not None,
+        "migration_source": migration.source_name(),
         "image_gen_available": image_gen.is_configured(),
         "version": settings.app_version,
         "auth_enabled": auth.enabled(),

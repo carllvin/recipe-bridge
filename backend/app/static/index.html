@@ -313,6 +313,15 @@
           <p id="more-way-insecure" class="more-way-warn hidden" data-i18n="moreWayInsecure">This address is not HTTPS – the browser won’t install the app.</p>
           <p data-i18n="moreWayShareText">Install the app on your phone (browser menu → "Install app" / "Add to home screen"). It then shows up in the share menu – links, text and photos land right here. Needs HTTPS.</p>
         </div>
+        <!-- Only when the other recipe manager is configured too (see migration.py). -->
+        <div id="more-way-move" class="more-way hidden">
+          <h4 id="move-title"></h4>
+          <p id="move-hint"></p>
+          <div class="move-row">
+            <select id="move-cookbook"><option value="" data-i18n="moveAll">All recipes</option></select>
+            <button id="move-start" class="btn" type="button" data-i18n="moveStart">Fetch recipes</button>
+          </div>
+        </div>
         <div class="more-way">
           <h4 data-i18n="moreWayFolderTitle">📂 Watched folder</h4>
           <p id="more-way-folder"></p>
