@@ -159,6 +159,9 @@ function classifyFiles(files) {
   if (files.length === 1 && pdfExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && epubExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && SINGLE_DOC_EXTENSIONS.includes(exts[0])) return { ok: true };
+  if (files.length === 1 && ((APP_CONFIG.audio_extensions || []).includes(exts[0]) || (files[0].type || '').startsWith('audio/'))) {
+    return APP_CONFIG.voice_available ? { ok: true } : { ok: false, error: t('voiceUnavailable') };
+  }
   if (exts.length > 0 && exts.every((e) => imageExts.includes(e))) return { ok: true };
   if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e) || SINGLE_DOC_EXTENSIONS.includes(e) || BOOKMARK_EXTENSIONS.includes(e))) {
     return { ok: false, error: t('onlyOnePdfOrEpubError') };
@@ -251,6 +254,77 @@ el('photo-camera').addEventListener('change', (e) => {
   e.target.value = '';  // so the same photo can be taken/picked again
   if (files.length) addPhotos(files);
 });
+// ---------- Dictating a recipe (voice note) ----------
+// Records in the browser and uploads the recording like a file - the
+// server transcribes it and reads the recipe from the text.
+const voiceState = { recorder: null, chunks: [] };
+
+function initVoice() {
+  const ok = APP_CONFIG.voice_available && window.MediaRecorder && navigator.mediaDevices;
+  el('voice-record').classList.toggle('hidden', !ok);
+}
+
+// Moving recipes from the other recipe manager (Tandoor <-> Mealie).
+function initMigration() {
+  const source = APP_CONFIG.migration_source;
+  el('more-way-move').classList.toggle('hidden', !source);
+  if (!source) return;
+  el('move-title').textContent = tf('moveTitle', { source });
+  el('move-hint').textContent = tf('moveHint', { source });
+}
+
+let moveCookbooksLoaded = false;
+document.querySelector('.more-ways').addEventListener('toggle', async (e) => {
+  if (!e.target.open || moveCookbooksLoaded || !APP_CONFIG.migration_source) return;
+  moveCookbooksLoaded = true;
+  try {
+    const data = await (await fetch('/api/migration/cookbooks')).json();
+    const select = el('move-cookbook');
+    (data.names || []).forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+  } catch (err) { moveCookbooksLoaded = false; }
+});
+
+el('move-start').addEventListener('click', () => {
+  startImportRequest('/api/migration', { cookbook: el('move-cookbook').value },
+    tf('moveLoading', { source: APP_CONFIG.migration_source }));
+});
+
+el('voice-record').addEventListener('click', async () => {
+  const btn = el('voice-record');
+  if (voiceState.recorder) {  // second click: stop and import
+    voiceState.recorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const type = ['audio/webm', 'audio/ogg', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported(m)) || '';
+    const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    voiceState.chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) voiceState.chunks.push(e.data); };
+    recorder.onstop = () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const mime = recorder.mimeType || type || 'audio/webm';
+      const ext = mime.includes('ogg') ? '.ogg' : mime.includes('mp4') ? '.m4a' : '.webm';
+      const blob = new Blob(voiceState.chunks, { type: mime });
+      voiceState.recorder = null;
+      btn.textContent = t('voiceRecordBtn');
+      btn.classList.remove('recording');
+      if (blob.size > 2000) uploadFiles([new File([blob], `${t('voiceFileName')}${ext}`, { type: mime })], {});
+    };
+    recorder.start();
+    voiceState.recorder = recorder;
+    btn.textContent = t('voiceStopBtn');
+    btn.classList.add('recording');
+  } catch (e) {
+    alert(`${t('voiceMicFailed')}: ${e.message}`);
+  }
+});
+
 el('photo-clear').addEventListener('click', clearPhotos);
 el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);
@@ -344,6 +418,13 @@ function smartLink(value) {
   return null;
 }
 
+function isVideoLink(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^(www|m)\./, '');
+    return /(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com)$/.test(host);
+  } catch (e) { return false; }
+}
+
 function smartMode() {
   const value = el('smart-input').value.trim();
   const link = !value.includes('\n') ? smartLink(value) : null;
@@ -359,9 +440,12 @@ function updateSmartForm() {
   const { mode } = smartMode();
   el('smart-import').disabled = !mode;
   el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
-  el('smart-scan').classList.toggle('hidden', mode !== 'url');
-  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url');
-  el('smart-hint').textContent = mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
+  // A video link: the recipe comes from the description / subtitles - no website scan.
+  const video = mode === 'url' && isVideoLink(smartMode().value);
+  el('smart-scan').classList.toggle('hidden', mode !== 'url' || video);
+  el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url' || video);
+  el('smart-hint').textContent = video ? t('smartHintVideo')
+    : mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
 function clearSmartForm() {
@@ -639,9 +723,15 @@ function showReview() {
   loadCookbooks();
   updateUsageDisplay(state.job.token_usage);
   // e.g. links of a link list that couldn't be read
-  const notes = state.job.notes || [];
+  let notes = state.job.notes || [];
+  let summary = tf('reviewNotesSummary', { n: notes.length });
+  if (state.job.source === 'migration') {  // moved recipes also go into their old cookbooks
+    notes = [...new Set(state.job.recipes.flatMap((r) => r.cookbooks || []))]
+      .filter((b) => b !== state.job.cookbook_name).sort((a, b) => a.localeCompare(b));
+    summary = tf('moveCookbooksSummary', { n: notes.length });
+  }
   el('review-notes').classList.toggle('hidden', !notes.length);
-  el('review-notes-summary').textContent = tf('reviewNotesSummary', { n: notes.length });
+  el('review-notes-summary').textContent = summary;
   el('review-notes-list').innerHTML = notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('');
   renderRecipeList();
   updateSelectionCount();
@@ -1582,6 +1672,7 @@ const TOOL_TITLE_KEYS = {
   tags_suggest_more: 'toolTagsSuggestMoreTitle',
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
+  recipes_amounts: 'toolRecipesAmountsTitle',
   recipes_servings: 'toolRecipesServingsTitle',
   recipes_images: 'toolRecipesImagesTitle',
 };
@@ -1632,7 +1723,7 @@ const INBOX_GROUPS = [
   { key: 'merges', icon: '🔀', match: (i) => i.entity || i.kind === 'merge' || i.kind === 'rename' },
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
-  { key: 'recipes', icon: '🧩', match: (i) => i.kind === 'restructure_recipe' || i.kind === 'translate_recipe' },
+  { key: 'recipes', icon: '🧩', match: (i) => ['restructure_recipe', 'translate_recipe', 'amounts_in_steps'].includes(i.kind) },
   { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' },
   { key: 'other', icon: '•', match: () => true },
 ];
@@ -1684,8 +1775,8 @@ function renderInboxImports() {
       <div class="tools-suggestions-list">${imports.map((i) => `
         <div class="tool-suggestion-row ${i.status === 'error' ? 'error' : ''}">
           <div class="suggestion-text">
-            <div>${i.source === 'folder' ? '📂' : '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
-            <div class="inbox-source">${escapeHtml(t(i.source === 'folder' ? 'inboxImportFolder' : 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
+            <div>${{ folder: '📂', migration: '🚚' }[i.source] || '📱'} <strong>${escapeHtml(i.filename)}</strong></div>
+            <div class="inbox-source">${escapeHtml(t({ folder: 'inboxImportFolder', migration: 'inboxImportMigration' }[i.source] || 'inboxImportShare'))} · ${escapeHtml(new Date(i.created_at * 1000).toLocaleString())}</div>
             <div class="suggestion-preview">${i.status === 'processing'
               ? `<span class="spinner small"></span> ${t('inboxImportProcessing')}`
               : i.status === 'error' ? `<span class="inbox-error">${escapeHtml(i.error || '')}</span>`
@@ -2068,6 +2159,7 @@ const HEALTH_METRICS = [
   { key: 'units_duplicates', tool: 'units_review', endpoint: '/api/tools/units/review', body: { focus: 'duplicates' } },
   { key: 'recipes_not_translated', tool: 'recipes_translate', endpoint: '/api/tools/recipes/translate' },
   { key: 'recipes_need_restructure', tool: 'recipes_restructure', endpoint: '/api/tools/recipes/restructure' },
+  { key: 'recipes_amounts_missing', tool: 'recipes_amounts', endpoint: '/api/tools/recipes/amounts' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
   { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
@@ -2087,7 +2179,7 @@ const HEALTH_GROUPS = [
   { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
-    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_without_season', 'recipes_few_tags',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_without_season', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image'] },
   { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
@@ -2389,6 +2481,7 @@ async function searchCookToday() {
         r.minutes ? `${r.minutes} min` : '',
         r.season && r.season.length ? `🌱 ${escapeHtml(r.season.join(', '))}` : '',
         r.rating ? '★'.repeat(Math.round(r.rating)) : '',
+        r.disliked && r.disliked.length ? `<span class="ct-disliked">👎 ${escapeHtml(r.disliked.join(', '))}</span>` : '',
       ].filter(Boolean).join(' · ');
       return `<div class="ct-row">
         <div class="ct-score">${r.matched.length}/${r.needed}</div>
@@ -2491,8 +2584,55 @@ function rememberPlan(jobId) {
   try { if (jobId) localStorage.setItem('th.planJob', jobId); else localStorage.removeItem('th.planJob'); } catch (e) { /* optional */ }
 }
 
+// ---------- Household profile ----------
+// Weekday names from the browser in the UI language, Monday = 0.
+function weekdayName(i) {
+  return new Date(2024, 0, 1 + i).toLocaleDateString(LANG_CODE, { weekday: 'long' });
+}
+
+function householdSummary(h) {
+  return [
+    h.persons ? tf('householdSummaryPersons', { n: h.persons }) : '',
+    h.avoid ? `🚫 ${h.avoid}` : '',
+    Object.keys(h.weekdays || {}).sort().map((d) => `${weekdayName(+d)}: ${h.weekdays[d]}`).join(', '),
+  ].filter(Boolean).join(' · ');
+}
+
+function fillHousehold(h) {
+  el('hh-persons').value = h.persons || '';
+  el('hh-avoid').value = h.avoid || '';
+  el('hh-dislikes').value = h.dislikes || '';
+  el('hh-weekdays').innerHTML = [0, 1, 2, 3, 4, 5, 6].map((d) => `<label><span>${escapeHtml(weekdayName(d))}</span>
+    <input type="text" maxlength="100" data-day="${d}" value="${escapeHtml((h.weekdays || {})[d] || '')}" placeholder="–" /></label>`).join('');
+  el('household-summary').textContent = householdSummary(h);
+}
+
+async function loadHousehold() {
+  try {
+    fillHousehold((await (await fetch('/api/settings')).json()).household || {});
+  } catch (err) { /* the card stays empty */ }
+}
+
+el('household-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const weekdays = {};
+  el('hh-weekdays').querySelectorAll('input').forEach((i) => { if (i.value.trim()) weekdays[i.dataset.day] = i.value.trim(); });
+  const household = { persons: +el('hh-persons').value || 0, avoid: el('hh-avoid').value,
+    dislikes: el('hh-dislikes').value, weekdays };
+  try {
+    const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ household }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+    fillHousehold((await res.json()).household);
+    el('hh-status').textContent = t('householdSaved');
+  } catch (err) {
+    el('hh-status').textContent = `${t('householdSaveFailed')}: ${err.message}`;
+  }
+});
+
 async function openPlanArea() {
   loadMealPlanOptions();
+  loadHousehold();
   if (!planState.jobId) {
     try { planState.jobId = localStorage.getItem('th.planJob'); } catch (e) { planState.jobId = null; }
   }
@@ -2569,14 +2709,16 @@ function renderWeek(job) {
   job.suggestions.forEach((s) => { byDate[s.detail.date] = s; });
   el('plan-week').innerHTML = days.map((d) => {
     const date = new Date(`${d}T12:00:00`);
-    const head = `<div class="plan-day-head"><strong>${date.toLocaleDateString([], { weekday: 'short' })}</strong> ${date.toLocaleDateString([], { day: '2-digit', month: '2-digit' })}</div>`;
+    const head = `<div class="plan-day-head"><strong>${date.toLocaleDateString(LANG_CODE, { weekday: 'short' })}</strong> ${date.toLocaleDateString(LANG_CODE, { day: '2-digit', month: '2-digit' })}</div>`;
     const s = byDate[d];
     if (taken.has(d)) return `<div class="plan-day taken">${head}<div class="plan-empty">${t('planTaken')}</div></div>`;
     const reroll = `<button class="btn secondary plan-reroll" type="button" data-date="${d}" ${planState.busy ? 'disabled' : ''} title="${t('planReroll')}">🎲 ${t('planReroll')}</button>`;
     if (!s || s.status === 'skipped') return `<div class="plan-day empty">${head}<div class="plan-empty">${t('planNoSuggestion')}</div>${reroll}</div>`;
     const d_ = s.detail;
     const body = `<div class="plan-recipe">${escapeHtml(d_.recipe.name)}</div>
-      <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>`;
+      <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>
+      ${(d_.shared || []).map((x) => `<div class="plan-shared" title="${escapeHtml(t('planSharedTitle'))}">🔁 ${escapeHtml(x.name)}: ${
+        x.days.map((o) => escapeHtml(new Date(`${o}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short' }))).join(', ')}</div>`).join('')}`;
     if (s.status === 'applied') return `<div class="plan-day applied">${head}${body}<div class="plan-done">✓ ${t('planApplied')}</div></div>`;
     const error = s.status === 'error' ? `<div class="inbox-error">${escapeHtml(s.error || '')}</div>` : '';
     return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''} ${planState.changed.has(s.id) ? 'changed' : ''}" data-id="${s.id}">
@@ -2598,6 +2740,57 @@ function renderWeek(job) {
   el('plan-actions').classList.toggle('hidden', !days.length);
   renderPlanChat(job, days.length > 0);
 }
+
+// ---------- Shopping list to share ----------
+function formatAmount(n) {
+  return n == null ? '' : n.toLocaleString(LANG_CODE, { maximumFractionDigits: 2 });
+}
+
+function shoppingText(data) {
+  const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const range = data.days.length ? `${day(data.days[0])} – ${day(data.days[data.days.length - 1])}` : '';
+  const line = (i) => `• ${[formatAmount(i.amount), i.unit, i.name].filter(Boolean).join(' ')}`;
+  const parts = [`🛒 ${t('planShoppingHeading')}${range ? ` · ${range}` : ''}${data.persons ? ` (${tf('householdSummaryPersons', { n: data.persons })})` : ''}`];
+  data.groups.forEach((g) => parts.push(`\n*${g.category || t('planShoppingOther')}*\n${g.items.map(line).join('\n')}`));
+  if (data.check.length) parts.push(`\n*${t('planShoppingCheck')}*\n${data.check.map(line).join('\n')}`);
+  return parts.join('\n');
+}
+
+el('plan-shopping-btn').addEventListener('click', async () => {
+  if (!planState.jobId) return;
+  const btn = el('plan-shopping-btn');
+  btn.disabled = true;
+  el('plan-shopping-status').textContent = '';
+  try {
+    const res = await fetch(`/api/tools/meal-plan/${planState.jobId}/shopping-list`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.status);
+    el('plan-shopping-text').value = shoppingText(data);
+    if (data.missing.length) el('plan-shopping-status').textContent = `${t('planShoppingMissing')}: ${data.missing.join(', ')}`;
+    el('plan-shopping-share').classList.toggle('hidden', !navigator.share);
+    el('plan-shopping').classList.remove('hidden');
+    el('plan-shopping').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    el('plan-error').textContent = `${t('planShoppingFailed')}: ${err.message}`;
+    el('plan-error').classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('plan-shopping-close').addEventListener('click', () => el('plan-shopping').classList.add('hidden'));
+el('plan-shopping-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(el('plan-shopping-text').value);
+  } catch (err) {  // no clipboard API (http): select for Ctrl+C
+    el('plan-shopping-text').select();
+    document.execCommand('copy');
+  }
+  el('plan-shopping-status').textContent = t('planShoppingCopied');
+});
+el('plan-shopping-share').addEventListener('click', () => {
+  navigator.share({ text: el('plan-shopping-text').value }).catch(() => { /* cancelled */ });
+});
 
 // ---------- Changing the plan in a chat ----------
 
@@ -3092,6 +3285,8 @@ if ('serviceWorker' in navigator) {
   el('brand-link').title = version;
   el('app-version').textContent = version;
   initEnhancePhotos();
+  initVoice();
+  initMigration();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

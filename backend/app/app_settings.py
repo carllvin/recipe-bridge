@@ -1,6 +1,6 @@
 """Settings changed in the UI (unlike .env, which needs a restart): the
-automatic maintenance schedule and the monthly AI budget. Stored as
-settings.json in the data volume."""
+automatic maintenance schedule, the monthly AI budget and the household
+profile (household.py). Stored as settings.json in the data volume."""
 from __future__ import annotations
 
 import copy
@@ -12,7 +12,7 @@ from .config import settings
 
 MAINTENANCE_METRICS = [
     "foods_duplicates", "foods_without_nutrition", "foods_without_category", "missing_conversions",
-    "units_duplicates", "recipes_not_translated", "recipes_need_restructure", "recipes_without_season",
+    "units_duplicates", "recipes_not_translated", "recipes_need_restructure", "recipes_amounts_missing", "recipes_without_season",
     "recipes_few_tags", "recipes_without_servings", "recipes_without_image",
     "foods_unused", "units_unused", "keywords_unused", "keywords_ungrouped",
 ]
@@ -31,7 +31,14 @@ DEFAULTS = {
         "monthly_tokens": 0,    # 0 = no limit
         "block_manual": False,  # also refuse tool starts and imports once reached
     },
+    "household": {
+        "persons": 0,     # 0 = the recipe's own servings
+        "avoid": "",      # allergies / intolerances - never planned
+        "dislikes": "",   # rather not
+        "weekdays": {},   # "0" (Monday) .. "6" -> a fixed wish, e.g. "4": "Pizza"
+    },
 }
+TEXT_MAX = 500
 
 _lock = threading.Lock()
 
@@ -59,6 +66,7 @@ def update(changes: dict) -> dict:
         current = get()
         m = {**current["maintenance"], **(changes.get("maintenance") or {})}
         b = {**current["budget"], **(changes.get("budget") or {})}
+        h = {**current["household"], **(changes.get("household") or {})}
         current["maintenance"] = {
             "enabled": bool(m["enabled"]),
             "hour": min(23, max(0, int(m["hour"]))),
@@ -68,6 +76,13 @@ def update(changes: dict) -> dict:
         current["budget"] = {
             "monthly_tokens": max(0, int(b["monthly_tokens"] or 0)),
             "block_manual": bool(b["block_manual"]),
+        }
+        current["household"] = {
+            "persons": min(30, max(0, int(h["persons"] or 0))),
+            "avoid": str(h["avoid"] or "").strip()[:TEXT_MAX],
+            "dislikes": str(h["dislikes"] or "").strip()[:TEXT_MAX],
+            "weekdays": {str(k): str(v).strip()[:100] for k, v in dict(h["weekdays"] or {}).items()
+                         if str(k) in "0123456" and len(str(k)) == 1 and str(v or "").strip()},
         }
         os.makedirs(settings.data_dir, exist_ok=True)
         tmp = _path() + ".tmp"

@@ -108,6 +108,12 @@ class FakeMealie:
                                       "recipeServings": 0, "recipeIngredient": [], "recipeInstructions": [],
                                       "tags": [], "recipeCategory": []}
                 return httpx.Response(201, json=slug)
+        media = re.match(r"^/media/recipes/([^/]+)/images/original\.webp$", path)
+        if media:
+            slug = self._slug(media.group(1))
+            if slug not in self.images:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, content=self.images[slug][1], headers={"content-type": "image/webp"})
         m = re.match(r"^/recipes/([^/]+)(/image)?$", path)
         if m:
             slug = self._slug(m.group(1))
@@ -171,6 +177,7 @@ class FakeMealie:
             if lst is None or not isinstance(body, list):
                 return httpx.Response(404 if lst is None else 422, json={})
             lst["recipes"].extend(b["recipeId"] for b in body)
+            lst.setdefault("times", []).extend(b.get("recipeIncrementQuantity", 1) for b in body)
             return httpx.Response(200, json=lst)
         m = re.match(r"^/users/([^/]+)/ratings/([^/]+)$", path)
         if m and request.method == "POST":

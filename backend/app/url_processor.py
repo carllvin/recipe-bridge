@@ -21,6 +21,8 @@ import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
 
+from . import video_processor
+
 log = logging.getLogger("recipe-bridge")
 
 HEADERS = {
@@ -180,9 +182,37 @@ def _save_image(client: httpx.Client, url: str, images_dir: str) -> dict | None:
     return {"id": image_id, "page": 1, "path": out_path, "filename": filename, "width": img.width, "height": img.height}
 
 
+def _client() -> httpx.Client:
+    return httpx.Client(headers=HEADERS, follow_redirects=True, timeout=20)
+
+
+def _process_video(url: str, images_dir: str) -> dict:
+    """YouTube / Instagram / TikTok: description or caption plus - for
+    YouTube - the subtitles (video_processor)."""
+    from .config import get_language_code, settings
+    with _client() as client:
+        try:
+            info = video_processor.read(client, url, get_language_code(settings.output_language))
+        except httpx.HTTPError as exc:
+            raise UrlImportError(f"Could not load the video page: {exc}") from exc
+        if len((info.get("description") or "") + (info.get("transcript") or "")) < 40:
+            raise UrlImportError(
+                "The video's text couldn't be read (the site may want a login or consent). "
+                "Copy the recipe from the video description and paste it as text instead.")
+        images = {}
+        if info.get("image"):
+            saved = _save_image(client, info["image"], images_dir)
+            if saved:
+                images[saved.pop("id")] = saved
+    return {"pages": [{"page": 1, "text": info["text"]}], "images": images, "page_count": 1,
+            "metadata_title": info.get("title") or "", "toc_pages": []}
+
+
 def process_url(url: str, images_dir: str) -> dict:
     os.makedirs(images_dir, exist_ok=True)
-    with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=20) as client:
+    if video_processor.platform(url):
+        return _process_video(url, images_dir)
+    with _client() as client:
         try:
             resp = client.get(url)
             resp.raise_for_status()

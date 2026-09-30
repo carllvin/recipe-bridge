@@ -114,13 +114,28 @@ def create_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shoppi
         "date": date[:10], "entryType": entry_type, "recipeId": recipe["id"], "title": "", "text": ""}),
         "the meal-plan entry").json()
     if add_to_shopping:
-        add_to_shopping_list(client, recipe["id"])
+        add_to_shopping_list(client, recipe["id"], _scale(client, recipe))
     return entry
 
 
-def add_to_shopping_list(client, recipe_id: str) -> None:
+def _scale(client, recipe: dict) -> float:
+    """How many times the recipe goes on the shopping list: the household's
+    persons relative to the recipe's servings (1 without a profile)."""
+    from . import household
+    persons = household.get()["persons"]
+    if not persons:
+        return 1
+    servings = recipe.get("servings")
+    if not servings:
+        resp = client.get(f"/recipes/{recipe.get('slug') or recipe['id']}")
+        if resp.status_code == 200:
+            servings = resp.json().get("recipeServings") or resp.json().get("recipeYieldQuantity")
+    return round(persons / servings, 2) if servings else 1
+
+
+def add_to_shopping_list(client, recipe_id: str, times: float = 1) -> None:
     """Adds the recipe's ingredients to the first shopping list (Mealie
-    merges them with what is already there)."""
+    merges them with what is already there) - `times` over."""
     lists = mealie_client._paged(client, "/households/shopping/lists")
     if lists:
         list_id = lists[0]["id"]
@@ -128,9 +143,9 @@ def add_to_shopping_list(client, recipe_id: str) -> None:
         list_id = mealie_client._check(client.post("/households/shopping/lists", json={"name": DEFAULT_SHOPPING_LIST}),
                                        "creating a shopping list").json()["id"]
     resp = client.post(f"/households/shopping/lists/{list_id}/recipe",
-                       json=[{"recipeId": recipe_id, "recipeIncrementQuantity": 1}])
+                       json=[{"recipeId": recipe_id, "recipeIncrementQuantity": times}])
     if resp.status_code in (404, 405, 422):  # Mealie before the bulk endpoint
-        resp = client.post(f"/households/shopping/lists/{list_id}/recipe/{recipe_id}", json={"recipeIncrementQuantity": 1})
+        resp = client.post(f"/households/shopping/lists/{list_id}/recipe/{recipe_id}", json={"recipeIncrementQuantity": times})
     mealie_client._check(resp, "adding the ingredients to the shopping list")
 
 

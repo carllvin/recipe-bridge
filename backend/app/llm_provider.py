@@ -9,11 +9,16 @@ _PROVIDER_KEY_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    # any OpenAI-compatible API: Ollama, LM Studio, vLLM, LocalAI, OpenRouter ...
+    "compatible": "COMPATIBLE_BASE_URL and COMPATIBLE_MODEL",
 }
+_ALIASES = {"ollama": "compatible", "local": "compatible", "openai_compatible": "compatible",
+            "openai-compatible": "compatible", "lmstudio": "compatible", "openrouter": "compatible"}
 
 
 def _active_provider() -> str:
     provider = (settings.ai_provider or "anthropic").strip().lower()
+    provider = _ALIASES.get(provider, provider)
     return provider if provider in _PROVIDER_KEY_VARS else "anthropic"
 
 
@@ -24,7 +29,20 @@ def is_configured() -> bool:
         return bool(settings.openai_api_key)
     if provider == "gemini":
         return bool(settings.gemini_api_key)
+    if provider == "compatible":
+        return bool(settings.compatible_base_url and settings.compatible_model)
     return bool(settings.anthropic_api_key)
+
+
+def _openai_client(provider: str):
+    """An OpenAI SDK client - for OpenAI itself or an OpenAI-compatible
+    server (COMPATIBLE_BASE_URL, e.g. http://ollama:11434/v1)."""
+    from openai import OpenAI
+    if provider == "compatible":
+        # local servers usually take any key; the SDK needs a non-empty one
+        return OpenAI(api_key=settings.compatible_api_key or "not-needed", base_url=settings.compatible_base_url,
+                      timeout=settings.compatible_timeout_seconds)
+    return OpenAI(api_key=settings.openai_api_key)
 
 
 def missing_key_hint() -> str:
@@ -38,12 +56,12 @@ def missing_key_hint() -> str:
 
 def _model(provider: str, tools: bool) -> str:
     """The main model, or - for tools=True - the *_TOOLS_MODEL if one is set."""
-    main = {"openai": settings.openai_model, "gemini": settings.gemini_model}.get(provider, settings.claude_model)
+    main = {"openai": settings.openai_model, "gemini": settings.gemini_model,
+            "compatible": settings.compatible_model}.get(provider, settings.claude_model)
     if not tools:
         return main
-    cheap = {"openai": settings.openai_tools_model, "gemini": settings.gemini_tools_model}.get(
-        provider, settings.claude_tools_model
-    )
+    cheap = {"openai": settings.openai_tools_model, "gemini": settings.gemini_tools_model,
+             "compatible": settings.compatible_tools_model}.get(provider, settings.claude_tools_model)
     return (cheap or "").strip() or main
 
 
@@ -56,8 +74,8 @@ def complete_text(
     tools' small, structured tasks, not for cookbook extraction."""
     provider = _active_provider()
     model = _model(provider, tools)
-    if provider == "openai":
-        return _complete_openai(system_prompt, user_content, max_tokens, model)
+    if provider in ("openai", "compatible"):
+        return _complete_openai(system_prompt, user_content, max_tokens, model, provider)
     if provider == "gemini":
         return _complete_gemini(system_prompt, user_content, max_tokens, model)
     return _complete_anthropic(system_prompt, user_content, max_tokens, model)
@@ -89,13 +107,12 @@ def _complete_anthropic(system_prompt: Optional[str], user_content: str, max_tok
     return text, usage
 
 
-def _complete_openai(system_prompt: Optional[str], user_content: str, max_tokens: int, model: str) -> tuple[str, TokenUsage]:
-    from openai import OpenAI
-
-    if not settings.openai_api_key:
+def _complete_openai(system_prompt: Optional[str], user_content: str, max_tokens: int, model: str,
+                     provider: str = "openai") -> tuple[str, TokenUsage]:
+    if not is_configured():
         raise RuntimeError(missing_key_hint())
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = _openai_client(provider)
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -168,11 +185,11 @@ def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000) -> tuple[
     model = _model(provider, tools=False)
     b64 = base64.b64encode(jpeg).decode("ascii")
     usage = TokenUsage()
-    if provider == "openai":
-        from openai import OpenAI
-        if not settings.openai_api_key:
+    if provider in ("openai", "compatible"):
+        if not is_configured():
             raise RuntimeError(missing_key_hint())
-        client = OpenAI(api_key=settings.openai_api_key)
+        # (with a local server this needs a model that reads images, e.g. llava, qwen2.5-vl)
+        client = _openai_client(provider)
         messages = [{"role": "user", "content": [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
@@ -217,3 +234,56 @@ def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000) -> tuple[
         usage.input_tokens = getattr(response.usage, "input_tokens", 0) or 0
         usage.output_tokens = getattr(response.usage, "output_tokens", 0) or 0
     return "".join(block.text for block in response.content if block.type == "text"), usage
+
+
+# ---------- voice notes ----------
+
+AUDIO_TYPES = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+               ".oga": "audio/ogg", ".opus": "audio/ogg", ".webm": "audio/webm", ".aac": "audio/aac",
+               ".flac": "audio/flac", ".amr": "audio/amr", ".3gp": "audio/3gpp", ".mp4": "audio/mp4"}
+TRANSCRIBE_PROMPT = ("Transcribe this voice recording word for word in its original language. It is someone "
+                     "dictating a recipe. Write numbers and amounts as digits. Respond with the transcript only.")
+
+
+def audio_provider() -> str | None:
+    """Who transcribes voice notes: the active provider if it can (OpenAI,
+    Gemini, a compatible server with TRANSCRIBE support), otherwise any
+    OpenAI or Gemini key that is set - Claude has no audio input."""
+    active = _active_provider()
+    if active in ("openai", "gemini") and is_configured():
+        return active
+    if active == "compatible" and settings.compatible_transcribe_model:
+        return "compatible"
+    if settings.openai_api_key:
+        return "openai"
+    if settings.gemini_api_key:
+        return "gemini"
+    return None
+
+
+def transcribe_audio(data: bytes, filename: str) -> tuple[str, TokenUsage]:
+    """The spoken text of a voice note."""
+    import os
+    provider = audio_provider()
+    if provider is None:
+        raise RuntimeError("Voice notes need an OpenAI or Gemini API key (OPENAI_API_KEY or GEMINI_API_KEY) - "
+                           "Claude can't listen to audio.")
+    ext = os.path.splitext(filename)[1].lower()
+    mime = AUDIO_TYPES.get(ext, "audio/mpeg")
+    usage = TokenUsage()
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=settings.gemini_api_key)
+        model = settings.gemini_model if _active_provider() == "gemini" else "gemini-2.5-flash"
+        response = client.models.generate_content(
+            model=model, contents=[types.Part.from_bytes(data=data, mime_type=mime), TRANSCRIBE_PROMPT])
+        meta = getattr(response, "usage_metadata", None)
+        if meta is not None:
+            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+        return (response.text or "").strip(), usage
+    client = _openai_client(provider)
+    model = settings.compatible_transcribe_model if provider == "compatible" else settings.openai_transcribe_model
+    result = client.audio.transcriptions.create(model=model, file=(filename or f"note{ext}", data, mime))
+    return (getattr(result, "text", "") or "").strip(), usage
