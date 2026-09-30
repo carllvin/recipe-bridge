@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 
-from . import duplicates, ignored, llm_provider, nutrition_properties, tandoor_client, tool_jobs
+from . import duplicates, ignored, llm_provider, nutrition_properties, prep_notes, tandoor_client, tool_jobs
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked, delete_entity, entity_exists, find_recipes_by_filter, format_cost_estimate, minimal_ref, resolve_name_collisions, validate_actions
@@ -63,12 +63,23 @@ def _review_chunk(foods, language):
 
 
 def _describe(action, by_id):
+    return describe_food_action(action, by_id, "")
+
+
+def describe_food_action(action, by_id, prefix) -> str:
+    """The suggestion line - with the notes the recipes get ("gemahlene
+    Mandeln" -> "Mandeln": note "gemahlen", see prep_notes)."""
     if action["type"] == "rename":
         old = by_id.get(action["id"], {}).get("name", "?")
-        return f"rename {old!r} -> {action['new_name']!r}"
-    keep_old = by_id.get(action["keep_id"], {}).get("name", "?")
-    remove_names = ", ".join(f"{by_id.get(rid, {}).get('name', '?')!r}" for rid in action["remove_ids"])
-    return f"merge {remove_names} into {keep_old!r} -> {action['keep_name']!r}"
+        notes = [prep_notes.prep_note(old, action["new_name"])]
+        text = f"{prefix}rename {old!r} -> {action['new_name']!r}"
+    else:
+        keep_old = by_id.get(action["keep_id"], {}).get("name", "?")
+        removed = [by_id.get(rid, {}).get("name", "?") for rid in action["remove_ids"]]
+        notes = [prep_notes.prep_note(n, action["keep_name"]) for n in [keep_old, *removed]]
+        text = f"{prefix}merge {', '.join(repr(n) for n in removed)} into {keep_old!r} -> {action['keep_name']!r}"
+    notes = list(dict.fromkeys(n for n in notes if n))
+    return text + (f" (recipe note: {', '.join(repr(n) for n in notes)})" if notes else "")
 
 
 def run_scan(job_id: str) -> None:
@@ -148,7 +159,24 @@ def _find_recipes_using_food(client, food_id):
     return find_recipes_by_filter(client, "foods", food_id)
 
 
-def _repoint_recipe_food(recipe_detail, remove_id, keep_id, keep_name):
+def _food_name(client, food_id) -> str:
+    resp = client.get(f"/food/{food_id}/")
+    return resp.json().get("name", "") if resp.status_code == 200 else ""
+
+
+def _note_recipes(client, food_id, note) -> None:
+    """Puts `note` on every recipe line that uses this food."""
+    for recipe in _find_recipes_using_food(client, food_id):
+        resp = client.get(f"/recipe/{recipe['id']}/")
+        resp.raise_for_status()
+        payload = _repoint_recipe_food(resp.json(), food_id, food_id, None, note=note)
+        resp = client.patch(f"/recipe/{recipe['id']}/", json=payload)
+        if resp.status_code not in (200, 201):
+            raise tandoor_client.TandoorError(f"Could not update recipe {recipe['id']}: {resp.status_code} {resp.text[:300]}")
+
+
+def _repoint_recipe_food(recipe_detail, remove_id, keep_id, keep_name, note=None):
+    """keep_name None: the food stays, only the note is added."""
     new_steps = []
     for step in recipe_detail.get("steps", []):
         new_ingredients = []
@@ -156,7 +184,9 @@ def _repoint_recipe_food(recipe_detail, remove_id, keep_id, keep_name):
             new_ing = dict(ing)
             food_ref = ing.get("food")
             if food_ref and food_ref.get("id") == remove_id:
-                new_ing["food"] = {"id": keep_id, "name": keep_name}
+                new_ing["food"] = {"id": keep_id, "name": keep_name} if keep_name is not None else minimal_ref(food_ref)
+                if note:
+                    new_ing["note"] = prep_notes.with_note(ing.get("note"), note)
             elif food_ref is not None:
                 new_ing["food"] = minimal_ref(food_ref)
             if ing.get("unit") is not None:
@@ -186,6 +216,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     try:
         with tandoor_client.get_client() as client:
             if action["type"] == "rename":
+                note = prep_notes.prep_note(_food_name(client, action["id"]), action["new_name"])
+                if note:
+                    _note_recipes(client, action["id"], note)
                 resp = client.patch(f"/food/{action['id']}/", json={"name": action["new_name"]})
                 if resp.status_code not in (200, 201):
                     raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
@@ -195,6 +228,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
                     raise tandoor_client.TandoorError(
                         f"Food #{keep_id} no longer exists (already merged by another suggestion?) - rescan to continue."
                     )
+                note = prep_notes.prep_note(_food_name(client, keep_id), keep_name)
+                if note:
+                    _note_recipes(client, keep_id, note)
                 resp = client.patch(f"/food/{keep_id}/", json={"name": keep_name})
                 if resp.status_code not in (200, 201):
                     raise tandoor_client.TandoorError(f"{resp.status_code} {resp.text[:300]}")
@@ -202,10 +238,11 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
                 for remove_id in action["remove_ids"]:
                     if not entity_exists(client, "food", remove_id):
                         continue  # already merged away by an earlier suggestion
+                    note = prep_notes.prep_note(_food_name(client, remove_id), keep_name)
                     for recipe in _find_recipes_using_food(client, remove_id):
                         resp = client.get(f"/recipe/{recipe['id']}/")
                         resp.raise_for_status()
-                        payload = _repoint_recipe_food(resp.json(), remove_id, keep_id, keep_name)
+                        payload = _repoint_recipe_food(resp.json(), remove_id, keep_id, keep_name, note=note)
                         resp = client.patch(f"/recipe/{recipe['id']}/", json=payload)
                         if resp.status_code not in (200, 201):
                             raise tandoor_client.TandoorError(

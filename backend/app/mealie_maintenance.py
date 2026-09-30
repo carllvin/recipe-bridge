@@ -18,7 +18,7 @@ import os
 import tempfile
 import uuid
 
-from . import duplicates, ignored, image_gen, llm_provider, mealie_client, mealie_tools, tool_jobs, tools_recipe_details, tools_tags
+from . import duplicates, ignored, image_gen, llm_provider, mealie_client, mealie_tools, prep_notes, tool_jobs, tools_recipe_details, tools_tags
 from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_client import TandoorError
@@ -224,9 +224,10 @@ def _duplicates(job, client):
         # keep the one more recipes use (on a tie: the shorter name)
         keep, remove = sorted((items[i] for i in pair["ids"]),
                               key=lambda i: (-counts.get(i["id"], 0), len(i["name"]), i["name"]))
+        note = prep_notes.prep_note(remove["name"], keep["name"]) if entity == "food" else None
         job.suggestions.append(ToolSuggestion(
             id=uuid.uuid4().hex[:10], kind="merge",
-            summary=f"merge {remove['name']!r} into {keep['name']!r}",
+            summary=f"merge {remove['name']!r} into {keep['name']!r}" + (f" (recipe note: {note!r})" if note else ""),
             detail={"entity": entity, "keep_id": keep["id"], "keep_name": keep["name"],
                     "remove_id": remove["id"], "remove_name": remove["name"]},
         ))
@@ -327,6 +328,8 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
             if suggestion.kind in mealie_tools.KINDS and not (suggestion.kind == "merge" and "remove_id" in d):
                 mealie_tools.apply(client, suggestion)
             elif suggestion.kind == "merge":
+                if d["entity"] == "food" and (note := prep_notes.prep_note(d.get("remove_name"), d.get("keep_name"))):
+                    mealie_tools._note_recipes(client, d["remove_id"], note)
                 body = ({"fromFood": d["remove_id"], "toFood": d["keep_id"]} if d["entity"] == "food"
                         else {"fromUnit": d["remove_id"], "toUnit": d["keep_id"]})
                 mealie_client._check(client.put(f"{ENTITY_PATHS[d['entity']]}/merge", json=body), "the merge")
