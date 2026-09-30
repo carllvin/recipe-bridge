@@ -57,6 +57,7 @@ CLEANUP_INTERVAL_SECONDS = 3600        # how often the background cleanup task r
 PDF_EXTENSIONS = {".pdf"}
 TXT_EXTENSIONS = {".txt"}  # recipe links (one per line) or recipe text - decided by content
 TEXT_EXTENSIONS = {".md", ".markdown"}
+AUDIO_EXTENSIONS = set(llm_provider.AUDIO_TYPES) - {".mp4"}  # voice notes (dictated recipes)
 DOCX_EXTENSIONS = {".docx"}
 MAX_SELECTED_LINKS = 200  # links picked from a site scan or bookmarks
 
@@ -173,6 +174,16 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 result = process_text(f.read())
+        elif doc_type == "audio":
+            job.progress_label = "Listening to the voice note …"
+            jobs.save_job(job)
+            with open(source_paths[0], "rb") as f:
+                spoken, usage = llm_provider.transcribe_audio(f.read(), os.path.basename(source_paths[0]))
+            job.token_usage.input_tokens += usage.input_tokens
+            job.token_usage.output_tokens += usage.output_tokens
+            if len(spoken) < 20:
+                raise ValueError("Nothing recipe-like could be heard in the voice note.")
+            result = process_text("Dictated recipe (voice note transcript):\n" + spoken)
         elif doc_type == "docx":
             job.progress_label = "Reading the Word document …"
             jobs.save_job(job)
@@ -325,7 +336,10 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
         return "text", ""
     if len(filenames) == 1 and exts[0] in DOCX_EXTENSIONS:
         return "docx", ""
-    single_only = PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS
+    if len(filenames) == 1 and exts[0] in AUDIO_EXTENSIONS:
+        return "audio", ""
+    single_only = (PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS
+                   | AUDIO_EXTENSIONS)
     if exts and all(e in SUPPORTED_IMAGE_EXTENSIONS for e in exts):
         return "images", ""
     if len(filenames) > 1 and any(e in single_only for e in exts):
@@ -1557,6 +1571,8 @@ async def get_config():
         "check_duplicates": settings.check_duplicates,
         "supported_extensions": sorted(PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS),
         "image_extensions": sorted(SUPPORTED_IMAGE_EXTENSIONS),
+        "audio_extensions": sorted(AUDIO_EXTENSIONS),
+        "voice_available": llm_provider.audio_provider() is not None,
         "image_gen_available": image_gen.is_configured(),
         "version": settings.app_version,
         "auth_enabled": auth.enabled(),

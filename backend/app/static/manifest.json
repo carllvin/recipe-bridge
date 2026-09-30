@@ -25,7 +25,7 @@
           "name": "files",
           "accept": ["image/*", "application/pdf", ".pdf", "application/epub+zip", ".epub",
                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx",
-                     "text/plain", ".txt", "text/markdown", ".md"]
+                     "text/plain", ".txt", "text/markdown", ".md", "audio/*"]
         }
       ]
     }

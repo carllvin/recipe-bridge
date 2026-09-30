@@ -1061,6 +1061,7 @@ a { color: inherit; }
 .photo-actions { display: none; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; justify-content: center; }
 @media (pointer: coarse) { .photo-actions { display: flex; } }
 .photo-actions .btn { cursor: pointer; }
+.voice-actions { display: flex; justify-content: center; margin: 12px 0 0; }
 .photo-collector { border: 1px solid #3a3f3a; border-radius: var(--radius); background: #1c211b; padding: 14px 16px; margin-top: 14px; }
 .photo-collector h3 { margin: 0 0 4px; font-size: 1rem; }
 .photo-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin: 10px 0; }
@@ -1202,3 +1203,5 @@ a { color: inherit; }
 .new-recipes-choice { border-top: 1px solid #2a2f2a; margin-top: 12px; padding-top: 12px; }
 .new-recipes-choice p { margin: 0 0 10px; font-size: 0.9rem; }
 .new-recipes-choice-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+#voice-record.recording { border-color: #e08a7e; color: #e08a7e; animation: voice-pulse 1.2s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { opacity: 0.55; } }

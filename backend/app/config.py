@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     openai_tools_model: str = ""       # cheaper model for the maintenance tools; empty = openai_model
+    openai_transcribe_model: str = "gpt-4o-mini-transcribe"  # voice notes
 
     # AI_PROVIDER=compatible (or ollama): any OpenAI-compatible API - Ollama,
     # LM Studio, vLLM, LocalAI, OpenRouter ...
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     compatible_model: str = ""         # e.g. qwen2.5:14b
     compatible_tools_model: str = ""   # optional smaller model for the tools; empty = compatible_model
     compatible_timeout_seconds: float = 600  # local models can be slow
+    compatible_transcribe_model: str = ""    # voice notes, if the server has /audio/transcriptions (e.g. whisper-1)
 
     # Google / Gemini
     gemini_api_key: str = ""

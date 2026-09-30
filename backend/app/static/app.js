@@ -159,6 +159,9 @@ function classifyFiles(files) {
   if (files.length === 1 && pdfExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && epubExts.includes(exts[0])) return { ok: true };
   if (files.length === 1 && SINGLE_DOC_EXTENSIONS.includes(exts[0])) return { ok: true };
+  if (files.length === 1 && ((APP_CONFIG.audio_extensions || []).includes(exts[0]) || (files[0].type || '').startsWith('audio/'))) {
+    return APP_CONFIG.voice_available ? { ok: true } : { ok: false, error: t('voiceUnavailable') };
+  }
   if (exts.length > 0 && exts.every((e) => imageExts.includes(e))) return { ok: true };
   if (files.length > 1 && exts.some((e) => pdfExts.includes(e) || epubExts.includes(e) || SINGLE_DOC_EXTENSIONS.includes(e) || BOOKMARK_EXTENSIONS.includes(e))) {
     return { ok: false, error: t('onlyOnePdfOrEpubError') };
@@ -251,6 +254,47 @@ el('photo-camera').addEventListener('change', (e) => {
   e.target.value = '';  // so the same photo can be taken/picked again
   if (files.length) addPhotos(files);
 });
+// ---------- Dictating a recipe (voice note) ----------
+// Records in the browser and uploads the recording like a file - the
+// server transcribes it and reads the recipe from the text.
+const voiceState = { recorder: null, chunks: [] };
+
+function initVoice() {
+  const ok = APP_CONFIG.voice_available && window.MediaRecorder && navigator.mediaDevices;
+  el('voice-record').classList.toggle('hidden', !ok);
+}
+
+el('voice-record').addEventListener('click', async () => {
+  const btn = el('voice-record');
+  if (voiceState.recorder) {  // second click: stop and import
+    voiceState.recorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const type = ['audio/webm', 'audio/ogg', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported(m)) || '';
+    const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    voiceState.chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) voiceState.chunks.push(e.data); };
+    recorder.onstop = () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const mime = recorder.mimeType || type || 'audio/webm';
+      const ext = mime.includes('ogg') ? '.ogg' : mime.includes('mp4') ? '.m4a' : '.webm';
+      const blob = new Blob(voiceState.chunks, { type: mime });
+      voiceState.recorder = null;
+      btn.textContent = t('voiceRecordBtn');
+      btn.classList.remove('recording');
+      if (blob.size > 2000) uploadFiles([new File([blob], `${t('voiceFileName')}${ext}`, { type: mime })], {});
+    };
+    recorder.start();
+    voiceState.recorder = recorder;
+    btn.textContent = t('voiceStopBtn');
+    btn.classList.add('recording');
+  } catch (e) {
+    alert(`${t('voiceMicFailed')}: ${e.message}`);
+  }
+});
+
 el('photo-clear').addEventListener('click', clearPhotos);
 el('photo-import').addEventListener('click', () => {
   const files = photoState.files.map((p) => p.file);
@@ -3102,6 +3146,7 @@ if ('serviceWorker' in navigator) {
   el('brand-link').title = version;
   el('app-version').textContent = version;
   initEnhancePhotos();
+  initVoice();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

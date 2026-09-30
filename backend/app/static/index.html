@@ -236,13 +236,17 @@
         <span class="icon">📖</span>
         <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
         <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
-        <input id="file-input" type="file" accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm,.jpg,.jpeg,.png,.heic,.heif" multiple />
+        <input id="file-input" type="file" accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm,.jpg,.jpeg,.png,.heic,.heif,audio/*,.m4a,.mp3,.ogg,.opus,.wav,.webm" multiple />
       </label>
       <!-- Phones/tablets only: opens the camera directly (the drop area above
            already takes files and photos on every device). -->
       <div class="photo-actions">
         <label class="btn secondary"><span data-i18n="photoTakeBtn">📷 Take photo</span>
           <input id="photo-camera" type="file" accept="image/*" capture="environment" hidden /></label>
+      </div>
+      <!-- Every device: dictate a recipe with the microphone. -->
+      <div class="voice-actions">
+        <button id="voice-record" class="btn secondary hidden" type="button" data-i18n="voiceRecordBtn">🎙️ Dictate a recipe</button>
       </div>
       <section id="photo-collector" class="photo-collector hidden">
         <h3 data-i18n="photoCollectorTitle">Photos for this import</h3>

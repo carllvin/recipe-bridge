@@ -234,3 +234,56 @@ def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000) -> tuple[
         usage.input_tokens = getattr(response.usage, "input_tokens", 0) or 0
         usage.output_tokens = getattr(response.usage, "output_tokens", 0) or 0
     return "".join(block.text for block in response.content if block.type == "text"), usage
+
+
+# ---------- voice notes ----------
+
+AUDIO_TYPES = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+               ".oga": "audio/ogg", ".opus": "audio/ogg", ".webm": "audio/webm", ".aac": "audio/aac",
+               ".flac": "audio/flac", ".amr": "audio/amr", ".3gp": "audio/3gpp", ".mp4": "audio/mp4"}
+TRANSCRIBE_PROMPT = ("Transcribe this voice recording word for word in its original language. It is someone "
+                     "dictating a recipe. Write numbers and amounts as digits. Respond with the transcript only.")
+
+
+def audio_provider() -> str | None:
+    """Who transcribes voice notes: the active provider if it can (OpenAI,
+    Gemini, a compatible server with TRANSCRIBE support), otherwise any
+    OpenAI or Gemini key that is set - Claude has no audio input."""
+    active = _active_provider()
+    if active in ("openai", "gemini") and is_configured():
+        return active
+    if active == "compatible" and settings.compatible_transcribe_model:
+        return "compatible"
+    if settings.openai_api_key:
+        return "openai"
+    if settings.gemini_api_key:
+        return "gemini"
+    return None
+
+
+def transcribe_audio(data: bytes, filename: str) -> tuple[str, TokenUsage]:
+    """The spoken text of a voice note."""
+    import os
+    provider = audio_provider()
+    if provider is None:
+        raise RuntimeError("Voice notes need an OpenAI or Gemini API key (OPENAI_API_KEY or GEMINI_API_KEY) - "
+                           "Claude can't listen to audio.")
+    ext = os.path.splitext(filename)[1].lower()
+    mime = AUDIO_TYPES.get(ext, "audio/mpeg")
+    usage = TokenUsage()
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=settings.gemini_api_key)
+        model = settings.gemini_model if _active_provider() == "gemini" else "gemini-2.5-flash"
+        response = client.models.generate_content(
+            model=model, contents=[types.Part.from_bytes(data=data, mime_type=mime), TRANSCRIBE_PROMPT])
+        meta = getattr(response, "usage_metadata", None)
+        if meta is not None:
+            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+        return (response.text or "").strip(), usage
+    client = _openai_client(provider)
+    model = settings.compatible_transcribe_model if provider == "compatible" else settings.openai_transcribe_model
+    result = client.audio.transcriptions.create(model=model, file=(filename or f"note{ext}", data, mime))
+    return (getattr(result, "text", "") or "").strip(), usage
