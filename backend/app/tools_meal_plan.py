@@ -194,7 +194,8 @@ def _suggestion(day: dt.date, recipe, reason, params) -> ToolSuggestion:
         summary=(f"{day.strftime('%a %d.%m.')} · {meal_type['name']}: {recipe.get('name', '')}"
                  + (f" ({minutes} min)" if minutes else "") + (f" – {reason}" if reason else "")),
         detail={"date": day.isoformat(), "recipe": {"id": recipe["id"], "name": recipe.get("name", ""),
-                                                    "servings": recipe.get("servings") or None},
+                                                    "servings": recipe.get("servings") or None,
+                                                    **({"slug": recipe["slug"]} if recipe.get("slug") else {})},
                 "minutes": minutes or None, "reason": reason or None,
                 "meal_type": meal_type, "add_to_shopping": bool(params.get("add_to_shopping"))},
     )

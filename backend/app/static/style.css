@@ -1221,3 +1221,7 @@ a { color: inherit; }
 .ct-disliked { color: #d9a441; }
 @media (max-width: 520px) { .household-form { grid-template-columns: 1fr; } }
 .plan-shared { font-size: .78rem; color: #8fb98a; margin-top: 4px; }
+.plan-shopping { margin-top: 14px; }
+.plan-shopping textarea { width: 100%; box-sizing: border-box; background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a;
+  border-radius: var(--radius); color: var(--paper); padding: 10px; font: .88rem/1.45 ui-monospace, monospace; }
+.plan-shopping-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-wrap: wrap; margin-top: 8px; }

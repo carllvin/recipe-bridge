@@ -2707,7 +2707,7 @@ function renderWeek(job) {
   job.suggestions.forEach((s) => { byDate[s.detail.date] = s; });
   el('plan-week').innerHTML = days.map((d) => {
     const date = new Date(`${d}T12:00:00`);
-    const head = `<div class="plan-day-head"><strong>${date.toLocaleDateString([], { weekday: 'short' })}</strong> ${date.toLocaleDateString([], { day: '2-digit', month: '2-digit' })}</div>`;
+    const head = `<div class="plan-day-head"><strong>${date.toLocaleDateString(LANG_CODE, { weekday: 'short' })}</strong> ${date.toLocaleDateString(LANG_CODE, { day: '2-digit', month: '2-digit' })}</div>`;
     const s = byDate[d];
     if (taken.has(d)) return `<div class="plan-day taken">${head}<div class="plan-empty">${t('planTaken')}</div></div>`;
     const reroll = `<button class="btn secondary plan-reroll" type="button" data-date="${d}" ${planState.busy ? 'disabled' : ''} title="${t('planReroll')}">🎲 ${t('planReroll')}</button>`;
@@ -2716,7 +2716,7 @@ function renderWeek(job) {
     const body = `<div class="plan-recipe">${escapeHtml(d_.recipe.name)}</div>
       <div class="plan-meta">${d_.minutes ? `${d_.minutes} min` : ''}${d_.reason ? ` · ${escapeHtml(d_.reason)}` : ''}</div>
       ${(d_.shared || []).map((x) => `<div class="plan-shared" title="${escapeHtml(t('planSharedTitle'))}">🔁 ${escapeHtml(x.name)}: ${
-        x.days.map((o) => escapeHtml(new Date(`${o}T12:00:00`).toLocaleDateString([], { weekday: 'short' }))).join(', ')}</div>`).join('')}`;
+        x.days.map((o) => escapeHtml(new Date(`${o}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short' }))).join(', ')}</div>`).join('')}`;
     if (s.status === 'applied') return `<div class="plan-day applied">${head}${body}<div class="plan-done">✓ ${t('planApplied')}</div></div>`;
     const error = s.status === 'error' ? `<div class="inbox-error">${escapeHtml(s.error || '')}</div>` : '';
     return `<div class="plan-day ${planState.selected.has(s.id) ? 'selected' : ''} ${planState.changed.has(s.id) ? 'changed' : ''}" data-id="${s.id}">
@@ -2738,6 +2738,57 @@ function renderWeek(job) {
   el('plan-actions').classList.toggle('hidden', !days.length);
   renderPlanChat(job, days.length > 0);
 }
+
+// ---------- Shopping list to share ----------
+function formatAmount(n) {
+  return n == null ? '' : n.toLocaleString(LANG_CODE, { maximumFractionDigits: 2 });
+}
+
+function shoppingText(data) {
+  const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const range = data.days.length ? `${day(data.days[0])} – ${day(data.days[data.days.length - 1])}` : '';
+  const line = (i) => `• ${[formatAmount(i.amount), i.unit, i.name].filter(Boolean).join(' ')}`;
+  const parts = [`🛒 ${t('planShoppingHeading')}${range ? ` · ${range}` : ''}${data.persons ? ` (${tf('householdSummaryPersons', { n: data.persons })})` : ''}`];
+  data.groups.forEach((g) => parts.push(`\n*${g.category || t('planShoppingOther')}*\n${g.items.map(line).join('\n')}`));
+  if (data.check.length) parts.push(`\n*${t('planShoppingCheck')}*\n${data.check.map(line).join('\n')}`);
+  return parts.join('\n');
+}
+
+el('plan-shopping-btn').addEventListener('click', async () => {
+  if (!planState.jobId) return;
+  const btn = el('plan-shopping-btn');
+  btn.disabled = true;
+  el('plan-shopping-status').textContent = '';
+  try {
+    const res = await fetch(`/api/tools/meal-plan/${planState.jobId}/shopping-list`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.status);
+    el('plan-shopping-text').value = shoppingText(data);
+    if (data.missing.length) el('plan-shopping-status').textContent = `${t('planShoppingMissing')}: ${data.missing.join(', ')}`;
+    el('plan-shopping-share').classList.toggle('hidden', !navigator.share);
+    el('plan-shopping').classList.remove('hidden');
+    el('plan-shopping').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    el('plan-error').textContent = `${t('planShoppingFailed')}: ${err.message}`;
+    el('plan-error').classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('plan-shopping-close').addEventListener('click', () => el('plan-shopping').classList.add('hidden'));
+el('plan-shopping-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(el('plan-shopping-text').value);
+  } catch (err) {  // no clipboard API (http): select for Ctrl+C
+    el('plan-shopping-text').select();
+    document.execCommand('copy');
+  }
+  el('plan-shopping-status').textContent = t('planShoppingCopied');
+});
+el('plan-shopping-share').addEventListener('click', () => {
+  navigator.share({ text: el('plan-shopping-text').value }).catch(() => { /* cancelled */ });
+});
 
 // ---------- Changing the plan in a chat ----------
 
