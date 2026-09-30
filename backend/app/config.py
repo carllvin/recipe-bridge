@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # Which AI provider is used for recipe extraction: anthropic | openai | gemini
+    # Which AI provider is used: anthropic | openai | gemini | compatible (ollama, LM Studio, OpenRouter ...)
     ai_provider: str = "anthropic"
 
     # Anthropic / Claude
@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     openai_tools_model: str = ""       # cheaper model for the maintenance tools; empty = openai_model
+
+    # AI_PROVIDER=compatible (or ollama): any OpenAI-compatible API - Ollama,
+    # LM Studio, vLLM, LocalAI, OpenRouter ...
+    compatible_base_url: str = ""      # e.g. http://ollama:11434/v1
+    compatible_api_key: str = ""       # most local servers don't need one
+    compatible_model: str = ""         # e.g. qwen2.5:14b
+    compatible_tools_model: str = ""   # optional smaller model for the tools; empty = compatible_model
+    compatible_timeout_seconds: float = 600  # local models can be slow
 
     # Google / Gemini
     gemini_api_key: str = ""
