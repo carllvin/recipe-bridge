@@ -121,3 +121,21 @@ def test_mealie_gets_the_amounts_written_out(monkeypatch):
     assert len(job.suggestions) == 1
     apply_all(job)
     assert fake.recipes["teig"]["recipeInstructions"][0]["text"] == "250 g Mehl mit 0,5 ml Milch verrühren."
+
+
+def test_comments_in_brackets(monkeypatch, tandoor):
+    r = recipe()
+    r["steps"][0]["ingredients"][0]["note"] = "gesiebt"
+    AI(monkeypatch, GOOD)
+    job = tool_jobs.create_tool_job("recipes_amounts")
+    suggestion = recipe_amounts.plan_suggestion(job, r)
+    assert "AFTER:  250 g Mehl (gesiebt) mit 500 ml Milch und 3 Eier verrühren." in suggestion.preview
+
+    # Tandoor: the comment through the template, only where there is one
+    for i in range(1, 6):
+        tandoor.db.setdefault("food", {})[i] = {"id": i, "name": ["", "Mehl", "Milch", "Ei", "Butter", "Salz"][i]}
+    tandoor.db.setdefault("unit", {})[1] = {"id": 1, "name": "g"}
+    tandoor.add("recipe", r)
+    payload = recipe_amounts.build_payload(tandoor.db["recipe"][7], suggestion.detail["plan"])
+    assert payload["steps"][0]["instruction"] == (
+        "{{ ingredients[0] }} ({{ ingredients[0].note }}) mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren.")

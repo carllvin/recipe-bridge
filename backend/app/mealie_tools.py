@@ -23,7 +23,7 @@ import re
 import time
 import uuid
 
-from . import ignored, llm_provider, mealie_client, recipe_amounts, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
+from . import ignored, llm_provider, mealie_client, prep_notes, recipe_amounts, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .mealie_plan import minutes as _parse_minutes
 from .schemas import ToolSuggestion
@@ -228,7 +228,32 @@ def _exists(client, entity, item_id) -> bool:
     return client.get(f"{PATHS[entity]}/{item_id}").status_code == 200
 
 
+def _note_recipes(client, food_id, note) -> None:
+    """Puts `note` (prep_notes) on every recipe line that uses this food."""
+    resp = mealie_client._check(client.get("/recipes", params={"foods": food_id, "perPage": 500}), "finding recipes")
+    for item in resp.json().get("items", []):
+        recipe = _fetch(client, item["slug"])
+        rows = []
+        for row in recipe.get("recipeIngredient") or []:
+            row = dict(row)
+            if (row.get("food") or {}).get("id") == food_id:
+                row["note"] = prep_notes.with_note(row.get("note"), note)
+            rows.append(row)
+        _patch(client, item["slug"], {"recipeIngredient": rows})
+
+
+def _note_before_rename(client, entity, item_id, new_name, current_name=None) -> None:
+    if entity != "food":
+        return
+    if current_name is None:
+        current_name = mealie_client._check(client.get(f"{PATHS[entity]}/{item_id}"), "loading the entry").json().get("name", "")
+    note = prep_notes.prep_note(current_name, new_name)
+    if note:
+        _note_recipes(client, item_id, note)
+
+
 def rename(client, entity, item_id, new_name) -> None:
+    _note_before_rename(client, entity, item_id, new_name)
     if entity == "keyword":
         body = {"name": new_name}
     else:  # foods / units: the whole entry with the new name
@@ -245,6 +270,7 @@ def merge(client, entity, keep_id, keep_name, remove_ids) -> None:
     for remove_id in remove_ids:
         if not _exists(client, entity, remove_id):
             continue  # merged away by an earlier suggestion
+        _note_before_rename(client, entity, remove_id, keep_name)
         if entity == "food":
             mealie_client._check(client.put("/foods/merge", json={"fromFood": remove_id, "toFood": keep_id}), "the merge")
         elif entity == "unit":

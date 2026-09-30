@@ -373,6 +373,8 @@ def _match_actions(job, entity, candidates, all_items) -> list[dict]:
 
 def _describe(entity, action, by_id):
     label = ENTITY_LABEL[entity]
+    if entity == "food":
+        return tools_ingredients.describe_food_action(action, by_id, f"{label}: ")
     if action["type"] == "rename":
         return f"{label}: rename {by_id.get(action['id'], {}).get('name', '?')!r} -> {action['new_name']!r}"
     removed = ", ".join(repr(by_id.get(rid, {}).get("name", "?")) for rid in action["remove_ids"])
