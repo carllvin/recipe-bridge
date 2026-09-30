@@ -38,13 +38,17 @@ MIN_KEPT_RATIO = 0.8  # the method written out must keep at least this much of t
 SYSTEM_PROMPT = """You add the ingredient amounts to the method of a recipe
 written in {language}. You will receive a JSON object:
 {"steps": [{"instruction": string, "ingredients": [{"key": string, "text": string}]}]}
-where "text" is how the ingredient is shown with its amount (e.g. "250 g Mehl").
+where "text" is how the ingredient is shown with its amount and, in
+brackets, its comment (e.g. "250 g Mehl", "2 Zwiebeln (fein gewürfelt)").
 
 For every step, rewrite its instruction so that the FIRST mention of each
 of that step's ingredients is replaced by the marker [[key]] - the marker
 is later shown as the full "text". Adjust articles and grammar only as far
 as needed, e.g. "Das Mehl mit der Milch verrühren" -> "[[i0]] mit [[i1]]
-verrühren", "Die Zwiebel fein würfeln" -> "[[i2]] fein würfeln".
+verrühren", "Die Zwiebel fein würfeln" -> "[[i2]] fein würfeln". Where
+the bracketed comment already says what the sentence says, drop those words
+from the sentence: "Die gewürfelten Zwiebeln andünsten" with "2 Zwiebeln
+(gewürfelt)" -> "[[i3]] andünsten".
 
 Rules:
 - use only the keys of that same step, each at most once
@@ -67,15 +71,23 @@ def _number(value) -> str:
     return text if get_language_code(settings.output_language) == "en" else text.replace(".", ",")
 
 
+def _note(ing) -> str:
+    """The ingredient's comment ("fein gewürfelt") - shown in brackets
+    after it. Not for a line without a food, whose text is the note."""
+    return (ing.get("note") or "").strip() if (ing.get("food") or {}).get("name") else ""
+
+
 def amount_text(ing) -> str:
-    """How an ingredient reads in the text: "250 g Mehl", "2 Eier", "Salz"."""
+    """How an ingredient reads in the text: "250 g Mehl", "2 Eier", "Salz",
+    "2 Zwiebeln (fein gewürfelt)"."""
     food = ing.get("food") or {}
     amount = None if ing.get("no_amount") else ing.get("amount")
     unit = (ing.get("unit") or {}).get("name") or ""
     name = food.get("name") or (ing.get("note") or "").strip()
     if amount and float(amount) > 1 and not unit and food.get("plural_name"):
         name = food["plural_name"]
-    return " ".join(p for p in (_number(amount) if amount else "", unit, name) if p)
+    text = " ".join(p for p in (_number(amount) if amount else "", unit, name) if p)
+    return f"{text} ({_note(ing)})" if _note(ing) else text
 
 
 def _has_amount(ing) -> bool:
@@ -170,7 +182,11 @@ def render(text, step_ingredients, key_ids, templates: bool) -> str:
         row = key_ids.get(match.group(1))
         if row not in position:
             raise tandoor_client.TandoorError("The recipe's ingredients changed since the scan - rescan it.")
-        return f"{{{{ ingredients[{position[row]}] }}}}" if templates else amount_text(by_id[row])
+        if not templates:
+            return amount_text(by_id[row])
+        # Tandoor's template shows amount, unit and food - the comment is its .note
+        n = position[row]
+        return f"{{{{ ingredients[{n}] }}}}" + (f" ({{{{ ingredients[{n}].note }}}})" if _note(by_id[row]) else "")
     return MARK.sub(put, text)
 
 
