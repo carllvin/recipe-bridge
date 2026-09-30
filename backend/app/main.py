@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -1137,6 +1137,7 @@ _TOOL_SCANS = {
     "new_recipes": tools_new_recipes.run_scan,
     "conversions": tools_conversions.run_scan,
     "recipes_restructure": recipe_restructure.run_scan,
+    "recipes_amounts": recipe_amounts.run_scan,
     "meal_plan": tools_meal_plan.run_scan,
     "recipes_servings": tools_recipe_details.run_servings_scan,
     "recipes_images": tools_recipe_details.run_images_scan,
@@ -1160,6 +1161,7 @@ _TOOL_APPLY = {
     "new_recipes": tools_new_recipes.apply_suggestion,
     "conversions": tools_conversions.apply_suggestion,
     "recipes_restructure": recipe_restructure.apply_suggestion,
+    "recipes_amounts": recipe_amounts.apply_suggestion,
     "meal_plan": tools_meal_plan.apply_suggestion,
     "recipes_servings": tools_recipe_details.apply_servings_suggestion,
     "recipes_images": tools_recipe_details.apply_image_suggestion,
@@ -1419,6 +1421,11 @@ async def meal_plan_chat(job_id: str, body: dict = Body(...)):
 @app.post("/api/tools/recipes/restructure")
 async def start_recipes_restructure():
     return _start_tool_job("recipes_restructure")
+
+
+@app.post("/api/tools/recipes/amounts")
+async def start_recipes_amounts():
+    return _start_tool_job("recipes_amounts")
 
 
 @app.post("/api/tools/conversions")

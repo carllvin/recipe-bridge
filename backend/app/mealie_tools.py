@@ -23,7 +23,7 @@ import re
 import time
 import uuid
 
-from . import ignored, llm_provider, mealie_client, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
+from . import ignored, llm_provider, mealie_client, recipe_amounts, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .mealie_plan import minutes as _parse_minutes
 from .schemas import ToolSuggestion
@@ -34,8 +34,8 @@ log = logging.getLogger("recipe-bridge")
 
 TAG_REVIEW_PROMPTS = {"tags_cleanup": tools_tags.CLEANUP_SYSTEM_PROMPT, "tags_simplify": tools_tags.SIMPLIFY_SYSTEM_PROMPT,
                       "tags_translate": tools_tags.TRANSLATE_SYSTEM_PROMPT}
-TOOLS = [*TAG_REVIEW_PROMPTS, "tags_season", "tags_suggest_more", "recipes_translate", "recipes_restructure", "new_recipes"]
-METRICS = ["recipes_not_translated", "recipes_need_restructure", "recipes_without_season", "recipes_few_tags"]
+TOOLS = [*TAG_REVIEW_PROMPTS, "tags_season", "tags_suggest_more", "recipes_translate", "recipes_restructure", "recipes_amounts", "new_recipes"]
+METRICS = ["recipes_not_translated", "recipes_need_restructure", "recipes_amounts_missing", "recipes_without_season", "recipes_few_tags"]
 PATHS = {"food": "/foods", "unit": "/units", "keyword": "/organizers/tags"}
 
 
@@ -116,6 +116,7 @@ def metric_items(recipes, foods) -> dict:
     return {
         "recipes_not_translated": items(lambda v, tv: not tools_recipes.already_in_target_language(v, expected)),
         "recipes_need_restructure": items(lambda v, tv: bool(recipe_restructure.needs_restructure(v))),
+        "recipes_amounts_missing": items(lambda v, tv: recipe_amounts.needs_amounts(v)),
         "recipes_without_season": items(lambda v, tv: not tools_tags.has_season_tag(v)),
         "recipes_few_tags": items(lambda v, tv: few_tags(tv, names)),
     }
@@ -194,6 +195,21 @@ def apply_restructure(client, slug, plan) -> None:
     _patch(client, slug, body)
 
 
+def apply_amounts(client, slug, plan) -> None:
+    """Mealie has no templates: the amounts are written into the text."""
+    recipe = _fetch(client, slug)
+    steps = view(recipe)["steps"]
+    recipe_amounts.check_unchanged(steps, plan)
+    instructions = [dict(s) for s in recipe.get("recipeInstructions") or []]
+    for change in plan["steps"]:
+        if change["index"] >= len(instructions):
+            raise TandoorError("The recipe's steps changed since the scan - rescan it.")
+        step = steps[change["index"]]
+        instructions[change["index"]]["text"] = recipe_amounts.render(change["text"], step["ingredients"], change["keys"],
+                                                                      templates=False)
+    _patch(client, slug, {"recipeInstructions": instructions, "recipeIngredient": recipe.get("recipeIngredient") or []})
+
+
 def add_tags(client, slug, names) -> None:
     recipe = _fetch(client, slug)
     tags = [{"id": t["id"], "name": t["name"], "slug": t.get("slug")} for t in recipe.get("tags") or []]
@@ -244,7 +260,7 @@ def merge(client, entity, keep_id, keep_name, remove_ids) -> None:
             mealie_client._check(client.delete(f"{PATHS[entity]}/{remove_id}"), "deleting the merged tag")
 
 
-KINDS = {"rename", "merge", "season", "suggest_tags", "translate_recipe", "restructure_recipe"}
+KINDS = {"rename", "merge", "season", "suggest_tags", "translate_recipe", "restructure_recipe", "amounts_in_steps"}
 
 
 def apply(client, suggestion) -> None:
@@ -261,6 +277,8 @@ def apply(client, suggestion) -> None:
         apply_translation(client, d["recipe_id"], d["translated"], d["shape"])
     elif suggestion.kind == "restructure_recipe":
         apply_restructure(client, d["recipe_id"], d["plan"])
+    elif suggestion.kind == "amounts_in_steps":
+        apply_amounts(client, d["recipe_id"], d["plan"])
     else:
         raise TandoorError(f"Unknown suggestion kind {suggestion.kind!r}")
 
@@ -413,6 +431,21 @@ def restructure(job, client):
             job.suggestions.append(suggestion)
 
 
+def amounts(job, client):
+    _need_ai()
+    todo = _recipes_for(client, recipe_amounts.METRIC, recipe_amounts.needs_amounts, job)
+    job.progress_total = len(todo)
+    job.cost_estimate = format_cost_estimate(len(todo), "per_recipe_translate")
+    for i, recipe in enumerate(todo, 1):
+        if job.cancel_requested:
+            break
+        job.progress_current = i
+        _progress(job, f"Amounts into the steps {i}/{len(todo)}: {recipe['name']!r}...")
+        suggestion = recipe_amounts.plan_suggestion(job, recipe)
+        if suggestion:
+            job.suggestions.append(suggestion)
+
+
 # ---------- new recipes ----------
 
 def list_recipe_ids(client) -> list[str]:
@@ -533,4 +566,5 @@ def new_recipes(job, client):
 
 
 SCANS = {**{tool: tag_review for tool in TAG_REVIEW_PROMPTS}, "tags_season": season, "tags_suggest_more": suggest_more,
-         "recipes_translate": translate, "recipes_restructure": restructure, "new_recipes": new_recipes}
+         "recipes_translate": translate, "recipes_restructure": restructure, "recipes_amounts": amounts,
+         "new_recipes": new_recipes}
