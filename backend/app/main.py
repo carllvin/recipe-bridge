@@ -579,7 +579,7 @@ async def inbox():
     runs that are still scanning."""
     items, running = [], []
     queued = apply_queue.queued_keys()
-    for job in sorted(tool_jobs.list_all_tool_jobs(), key=lambda j: j.created_at):
+    for job in sorted(_review_jobs(), key=lambda j: j.created_at):
         if job.status == "scanning":
             running.append({"id": job.id, "tool": job.tool, "created_at": job.created_at,
                             "label": job.progress_label, "trigger": job.meta.get("trigger")})
@@ -599,6 +599,12 @@ async def inbox():
     imports = _pending_imports()
     return {"items": items, "running": running, "count": len(items) + len(imports), "queued": len(queued),
             "imports": imports}
+
+
+def _review_jobs() -> list:
+    """The runs whose suggestions show under Review - the weekly plan is
+    reviewed and applied on the Plan page itself."""
+    return [job for job in tool_jobs.list_all_tool_jobs() if job.tool != "meal_plan"]
 
 
 def _pending_imports() -> list[dict]:
@@ -674,10 +680,10 @@ async def health_unignore(body: dict = Body(...)):
 @app.get("/api/inbox/count")
 async def inbox_count():
     count = sum(
-        1 for job in tool_jobs.list_all_tool_jobs() if job.status != "scanning"
+        1 for job in _review_jobs() if job.status != "scanning"
         for s in job.suggestions if s.status in ("pending", "error")
     )
-    running = sum(1 for job in tool_jobs.list_all_tool_jobs() if job.status == "scanning")
+    running = sum(1 for job in _review_jobs() if job.status == "scanning")
     return {"count": count + sum(1 for i in _pending_imports() if i["status"] != "processing"), "running": running}
 
 
@@ -1484,7 +1490,7 @@ async def applied_history():
     items = [
         {"job_id": job.id, "tool": job.tool, "id": s.id, "kind": s.kind, "summary": s.summary,
          "applied_at": s.applied_at, "error": s.error, "queued": (job.id, s.id) in queued}
-        for job in tool_jobs.list_all_tool_jobs()
+        for job in _review_jobs()
         for s in job.suggestions
         if s.status == "applied" and s.undoable and undo.exists(job.id, s.id)
     ]

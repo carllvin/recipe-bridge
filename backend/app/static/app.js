@@ -1634,7 +1634,6 @@ const INBOX_GROUPS = [
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
   { key: 'recipes', icon: '🧩', match: (i) => i.kind === 'restructure_recipe' || i.kind === 'translate_recipe' },
   { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' },
-  { key: 'plan', icon: '📅', match: (i) => i.kind === 'meal_plan' },
   { key: 'other', icon: '•', match: () => true },
 ];
 const inboxState = { items: [], selected: new Set(), collapsed: new Set(), busyGroup: null, results: {} };

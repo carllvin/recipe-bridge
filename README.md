@@ -135,8 +135,8 @@ grouped by kind:
   details** (plural, nutrition, supermarket category), **gram conversions**,
   **recipe revisions** (one block of text split into steps, ingredients
   assigned to steps – with a before/after preview), **translations**,
-  **tags & season**, **servings**, **photos**, **unused entries** and
-  **meal plan** entries.
+  **tags & season**, **servings**, **photos** and **unused entries**. (The
+  weekly plan is reviewed and added on the 📅 Plan page itself.)
 - Tick what you want and **Apply** or **Skip**. Applying runs **in the
   background on the server**, strictly one after another – you can close the
   page; the queue even survives a restart.
