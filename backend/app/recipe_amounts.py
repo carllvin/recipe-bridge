@@ -108,13 +108,31 @@ def _notes_missing(step) -> list[int]:
     ingredient's comment yet (recipes done before comments were added)."""
     text, ingredients = step.get("instruction") or "", step.get("ingredients") or []
     return [n for n in dict.fromkeys(int(m.group(1)) for m in TEMPLATE.finditer(text))
-            if n < len(ingredients) and _note(ingredients[n]) and f"ingredients[{n}].note" not in text]
+            if n < len(ingredients) and _note(ingredients[n]) and not _without_amount(ingredients[n])
+            and f"ingredients[{n}].note" not in text]
+
+
+def _without_amount(ing) -> bool:
+    return bool(ing.get("no_amount") or not ing.get("amount"))
+
+
+# "{{ ingredients[n] }}", optionally followed by " ({{ ingredients[n].note }})"
+TEMPLATE_WITH_NOTE = re.compile(r"\{\{\s*ingredients\[(\d+)\]\s*\}\}(?:\s*\(\{\{\s*ingredients\[\1\]\.note\s*\}\}\))?")
+
+
+def _zero_templates(step) -> list[int]:
+    """Places n whose template would read "0 Pfeffer": Tandoor shows the
+    amount 0 of an ingredient without an amount - those get the plain name."""
+    text, ingredients = step.get("instruction") or "", step.get("ingredients") or []
+    return [n for n in dict.fromkeys(int(m.group(1)) for m in TEMPLATE.finditer(text))
+            if n < len(ingredients) and _without_amount(ingredients[n])]
 
 
 def needs_amounts(recipe) -> bool:
     steps = recipe.get("steps") or []
     if steps and any("{{" in (s.get("instruction") or "") for s in steps):
-        return any(_notes_missing(s) for s in steps)  # templates already: only the comments
+        # templates already: only the comments and the "0 Pfeffer" ones
+        return any(_notes_missing(s) or _zero_templates(s) for s in steps)
     if not steps:
         return False
     if recipe_restructure.needs_restructure(recipe):
@@ -312,6 +330,8 @@ def render(text, step_ingredients, key_ids, templates: bool) -> str:
             raise tandoor_client.TandoorError("The recipe's ingredients changed since the scan - rescan it.")
         if not templates:
             return amount_text(by_id[row])
+        if _without_amount(by_id[row]):
+            return amount_text(by_id[row])  # nothing to scale - and the template would read "0 Pfeffer"
         # Tandoor's template shows amount, unit and food - the comment is its .note
         n = position[row]
         return f"{{{{ ingredients[{n}] }}}}" + (f" ({{{{ ingredients[{n}].note }}}})" if _note(by_id[row]) else "")
@@ -335,22 +355,27 @@ def describe(recipe, plan) -> tuple[str, str]:
 
 
 def notes_plan(recipe) -> dict:
-    """No AI: "{{ ingredients[n] }}" gets "({{ ingredients[n].note }})" where
-    the ingredient has a comment. Text without markers - saved as it is."""
+    """No AI, for recipes done before: "{{ ingredients[n] }}" gets
+    "({{ ingredients[n].note }})" where the ingredient has a comment, and an
+    ingredient without an amount gets its plain name instead of the template
+    (which would read "0 Pfeffer"). Text without markers - saved as it is."""
     changed = []
     for index, step in enumerate(recipe.get("steps") or []):
-        missing = set(_notes_missing(step))
-        if not missing:
+        missing, zero = set(_notes_missing(step)), set(_zero_templates(step))
+        if not missing and not zero:
             continue
+        ingredients = step.get("ingredients") or []
         done = set()
 
-        def add(match):
+        def fix(match):
             n = int(match.group(1))
+            if n in zero:
+                return amount_text(ingredients[n])
             if n not in missing or n in done:
                 return match.group(0)
             done.add(n)
             return f"{match.group(0)} ({{{{ ingredients[{n}].note }}}})"
-        changed.append({"index": index, "text": TEMPLATE.sub(add, step.get("instruction") or ""), "keys": {},
+        changed.append({"index": index, "text": TEMPLATE_WITH_NOTE.sub(fix, step.get("instruction") or ""), "keys": {},
                         "ids": [i.get("id") for i in step.get("ingredients") or []]})
     return {"steps": changed}
 
@@ -362,7 +387,10 @@ def _shown(text, step_ingredients) -> str:
         if n >= len(step_ingredients):
             return match.group(0)
         ing = step_ingredients[n]
-        return _note(ing) if match.group(3) else amount_text({**ing, "note": ""})
+        if match.group(3):
+            return _note(ing)
+        text = amount_text({**ing, "note": ""})
+        return f"0 {text}" if not ing.get("no_amount") and not ing.get("amount") else text  # as Tandoor shows it
     return re.sub(r"\{\{\s*ingredients\[((\d+))\](\.note)?\s*\}\}", put, text)
 
 
@@ -373,7 +401,7 @@ def plan_suggestion(job, recipe) -> ToolSuggestion | None:
             return None
         summary, preview = describe(recipe, plan)
         return ToolSuggestion(id=uuid.uuid4().hex[:10], kind="amounts_in_steps",
-                              summary=summary.replace("amounts into the steps", "ingredient comments into the steps"),
+                              summary=summary.replace("amounts into the steps", "fix the ingredients in the steps"),
                               preview=preview, detail={"recipe_id": recipe["id"], "plan": plan})
     try:
         plan = amounts_plan(job, recipe)
