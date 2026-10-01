@@ -2647,6 +2647,7 @@ el('household-form').addEventListener('submit', async (e) => {
 async function openPlanArea() {
   loadMealPlanOptions();
   loadHousehold();
+  openGuestMenu();
   if (!planState.jobId) {
     try { planState.jobId = localStorage.getItem('th.planJob'); } catch (e) { planState.jobId = null; }
   }
@@ -2762,7 +2763,9 @@ function formatAmount(n) {
 
 function shoppingText(data) {
   const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short', day: '2-digit', month: '2-digit' });
-  const range = data.days.length ? `${day(data.days[0])} – ${day(data.days[data.days.length - 1])}` : '';
+  const first = data.days[0];
+  const last = data.days[data.days.length - 1];
+  const range = !first ? '' : first === last ? day(first) : `${day(first)} – ${day(last)}`;
   const line = (i) => `• ${[formatAmount(i.amount), i.unit, i.name].filter(Boolean).join(' ')}`;
   const parts = [`🛒 ${t('planShoppingHeading')}${range ? ` · ${range}` : ''}${data.persons ? ` (${tf('householdSummaryPersons', { n: data.persons })})` : ''}`];
   data.groups.forEach((g) => parts.push(`\n*${g.category || t('planShoppingOther')}*\n${g.items.map(line).join('\n')}`));
@@ -2911,6 +2914,130 @@ el('db-chat-form').addEventListener('submit', async (e) => {
     renderDbChat();
   }
 });
+
+// ---------- Guest menu ----------
+const guestState = { job: null, busy: false };
+
+function recipeLink(recipe) {
+  const link = isMealie() ? (recipe.slug ? importedRecipeUrl(recipe.slug) : null)
+    : (APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${recipe.id}` : null);
+  return link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(recipe.name)}</a>` : escapeHtml(recipe.name);
+}
+
+function renderGuestMenu(job) {
+  guestState.job = job;
+  try { localStorage.setItem('th.guestJob', job.id); } catch (e) { /* only for this visit */ }
+  const meta = job.meta || {};
+  el('guest-result').classList.toggle('hidden', !(meta.menu || []).length);
+  el('guest-note').textContent = meta.note || '';
+  el('guest-courses').innerHTML = (meta.menu || []).map((m) => `<div class="guest-course">
+      <div class="gc-label">${t('course_' + m.course)}</div>
+      <div class="gc-main"><div class="gc-name">${recipeLink(m.recipe)}</div>
+        <div class="gc-meta">${[m.recipe.minutes ? `${m.recipe.minutes} min` : '', escapeHtml(m.reason || '')].filter(Boolean).join(' · ')}</div></div>
+      <button class="btn secondary gc-reroll" type="button" data-course="${m.course}" ${guestState.busy ? 'disabled' : ''}>🎲 ${t('planReroll')}</button>
+    </div>`).join('');
+  el('guest-courses').querySelectorAll('.gc-reroll').forEach((b) => b.addEventListener('click', () => guestReroll(b.dataset.course)));
+  el('guest-status').textContent = meta.planned ? `✓ ${t('guestPlanned')}` : '';
+}
+
+async function guestRequest(url, body, method = 'POST') {
+  const res = await fetch(url, method === 'GET' ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+
+function guestBusy(on) {
+  guestState.busy = on;
+  el('guest-progress').classList.toggle('hidden', !on);
+  el('gm-start').disabled = on;
+  if (on) el('guest-error').classList.add('hidden');
+}
+
+el('guest-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const courses = [...el('guest-form').querySelectorAll('.gm-courses input:checked')].map((i) => i.value);
+  guestBusy(true);
+  el('guest-shopping').classList.add('hidden');
+  try {
+    renderGuestMenu(await guestRequest('/api/guest-menu', {
+      occasion: el('gm-occasion').value, date: el('gm-date').value, persons: +el('gm-persons').value,
+      courses, guests_never: el('gm-never').value, wishes: el('gm-wishes').value,
+    }));
+  } catch (err) {
+    el('guest-error').textContent = err.message;
+    el('guest-error').classList.remove('hidden');
+  } finally {
+    guestBusy(false);
+    if (guestState.job) renderGuestMenu(guestState.job);
+  }
+});
+
+async function guestReroll(course) {
+  guestBusy(true);
+  try {
+    renderGuestMenu(await guestRequest(`/api/guest-menu/${guestState.job.id}/reroll`, { course }));
+  } catch (err) {
+    el('guest-error').textContent = err.message;
+    el('guest-error').classList.remove('hidden');
+  } finally {
+    guestBusy(false);
+    renderGuestMenu(guestState.job);
+  }
+}
+
+el('guest-shopping-btn').addEventListener('click', async () => {
+  try {
+    const data = await guestRequest(`/api/guest-menu/${guestState.job.id}/shopping-list`, null, 'GET');
+    el('guest-shopping-text').value = shoppingText(data);
+    el('guest-shopping-share').classList.toggle('hidden', !navigator.share);
+    el('guest-shopping').classList.remove('hidden');
+  } catch (err) {
+    el('guest-status').textContent = `${t('planShoppingFailed')}: ${err.message}`;
+  }
+});
+
+el('guest-shopping-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(el('guest-shopping-text').value); } catch (err) {
+    el('guest-shopping-text').select();
+    document.execCommand('copy');
+  }
+  el('guest-status').textContent = t('planShoppingCopied');
+});
+el('guest-shopping-share').addEventListener('click', () => {
+  navigator.share({ text: el('guest-shopping-text').value }).catch(() => { /* cancelled */ });
+});
+
+el('guest-plan-btn').addEventListener('click', async () => {
+  const select = el('mp-meal');
+  const option = select.options[select.selectedIndex];
+  if (!option) return;
+  el('guest-plan-btn').disabled = true;
+  try {
+    await guestRequest(`/api/guest-menu/${guestState.job.id}/plan`, {
+      meal_type: { id: isNaN(+option.value) ? option.value : +option.value, name: option.textContent },
+      add_to_shopping: el('mp-shopping').checked,
+    });
+    guestState.job.meta.planned = true;
+    renderGuestMenu(guestState.job);
+  } catch (err) {
+    el('guest-status').textContent = `⚠️ ${err.message}`;
+  } finally {
+    el('guest-plan-btn').disabled = false;
+  }
+});
+
+async function openGuestMenu() {
+  if (!el('gm-date').value) el('gm-date').value = nextSaturday();
+  if (guestState.job) return;
+  let id = null;
+  try { id = localStorage.getItem('th.guestJob'); } catch (e) { /* none */ }
+  if (!id) return;
+  try {
+    const job = await guestRequest(`/api/tools/jobs/${id}`, null, 'GET');
+    if (job.tool === 'guest_menu') renderGuestMenu(job);
+  } catch (e) { /* gone */ }
+}
 
 // ---------- Changing the plan in a chat ----------
 

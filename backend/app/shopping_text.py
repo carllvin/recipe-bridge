@@ -47,14 +47,22 @@ def collect(job_id: str) -> dict:
     if job is None or job.tool != "meal_plan":
         raise tandoor_client.TandoorError("Job not found.")
     days = [s for s in job.suggestions if s.status != "skipped"]
-    have = cook_today.parse_have(job.meta.get("params", {}).get("at_home"))
-    persons = household.get()["persons"]
+    result = collect_recipes([s.detail["recipe"] for s in days], household.get()["persons"],
+                             job.meta.get("params", {}).get("at_home"))
+    result["days"] = sorted(s.detail["date"] for s in days)
+    return result
+
+
+def collect_recipes(wanted: list[dict], persons: int | None, at_home: str | None = None) -> dict:
+    """The same for any recipes ({"id", "slug"?, "name"}), scaled to
+    `persons` (the recipe's own servings when not set)."""
+    have = cook_today.parse_have(at_home)
     items, missing = {}, []
     with target.client().get_client() as client:
-        for s in days:
-            recipe = _recipe(client, s.detail["recipe"])
+        for wanted_recipe in wanted:
+            recipe = _recipe(client, wanted_recipe)
             if recipe is None:
-                missing.append(s.detail["recipe"].get("name", ""))
+                missing.append(wanted_recipe.get("name", ""))
                 continue
             factor = persons / recipe["servings"] if persons and recipe.get("servings") else 1
             for step in recipe.get("steps") or []:
@@ -74,8 +82,8 @@ def collect(job_id: str) -> dict:
                         entry["some_without_amount"] = True
                     else:
                         entry["amount"] += amount
-                    if s.detail["recipe"].get("name") not in entry["recipes"]:
-                        entry["recipes"].append(s.detail["recipe"].get("name"))
+                    if wanted_recipe.get("name") not in entry["recipes"]:
+                        entry["recipes"].append(wanted_recipe.get("name"))
 
     groups, check = {}, []
     for entry in items.values():
@@ -89,7 +97,7 @@ def collect(job_id: str) -> dict:
             groups.setdefault(entry["category"], []).append(item)
     ordered = sorted(groups, key=lambda c: (c == "", c.casefold()))  # without a category last
     return {
-        "days": sorted(s.detail["date"] for s in days),
+        "days": [],
         "groups": [{"category": c or None, "items": sorted(groups[c], key=lambda i: i["name"].casefold())} for c in ordered],
         "check": sorted(check, key=lambda i: i["name"].casefold()),
         "missing": missing,

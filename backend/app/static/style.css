@@ -1243,3 +1243,17 @@ a { color: inherit; }
 .db-chat-warning p { margin: 0 0 6px; }
 .db-chat-warning ul { margin: 0 0 8px; padding-left: 18px; }
 .db-chat-warning li { margin: 2px 0; }
+
+/* Guest menu */
+.guest-card > summary { cursor: pointer; font-weight: 600; list-style: revert; }
+.guest-card .meal-plan-form { margin-top: 12px; }
+.gm-courses { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 0.86rem; }
+.gm-courses .hh-label { flex-basis: 100%; }
+.meal-plan-form .gm-courses label { flex-direction: row; align-items: center; gap: 5px; }
+.guest-courses { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.guest-course { display: flex; align-items: center; gap: 12px; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 12px; }
+.guest-course .gc-label { flex: 0 0 110px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: #8f9689; }
+.guest-course .gc-main { flex: 1; min-width: 0; }
+.guest-course .gc-name { font-weight: 600; }
+.guest-course .gc-meta { font-size: 0.8rem; color: #8f9689; }
+@media (max-width: 520px) { .guest-course { flex-wrap: wrap; } .guest-course .gc-label { flex-basis: 100%; } }

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, guest_menu, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -683,7 +683,7 @@ async def inbox():
 def _review_jobs() -> list:
     """The runs whose suggestions show under Review - the weekly plan is
     reviewed and applied on the Plan page itself."""
-    return [job for job in tool_jobs.list_all_tool_jobs() if job.tool != "meal_plan"]
+    return [job for job in tool_jobs.list_all_tool_jobs() if job.tool not in ("meal_plan", "guest_menu")]
 
 
 def _pending_imports() -> list[dict]:
@@ -1427,6 +1427,51 @@ async def meal_plan_chat(job_id: str, body: dict = Body(...)):
 @app.post("/api/tools/recipes/restructure")
 async def start_recipes_restructure():
     return _start_tool_job("recipes_restructure")
+
+
+def _guest_call(fn, *args):
+    try:
+        return fn(*args)
+    except tandoor_client.TandoorError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Guest menu failed")
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/guest-menu")
+async def guest_menu_create(body: dict = Body(...)):
+    """{"occasion", "date", "persons", "courses": [...], "guests_never", "wishes"} - a menu from your recipes."""
+    _check_budget()
+    job = await asyncio.to_thread(_guest_call, guest_menu.create, body)
+    usage_log.record("guest_menu", job.token_usage.input_tokens, job.token_usage.output_tokens)
+    return job.model_dump()
+
+
+@app.post("/api/guest-menu/{job_id}/reroll")
+async def guest_menu_reroll(job_id: str, body: dict = Body(...)):
+    _check_budget()
+    before = (tool_jobs.get_tool_job(job_id).token_usage.model_copy() if tool_jobs.get_tool_job(job_id) else None)
+    job = await asyncio.to_thread(_guest_call, guest_menu.reroll, job_id, str(body.get("course") or ""))
+    if before:
+        usage_log.record("guest_menu", job.token_usage.input_tokens - before.input_tokens,
+                         job.token_usage.output_tokens - before.output_tokens)
+    return job.model_dump()
+
+
+@app.get("/api/guest-menu/{job_id}/shopping-list")
+async def guest_menu_shopping(job_id: str):
+    return await asyncio.to_thread(_guest_call, guest_menu.shopping_list, job_id)
+
+
+@app.post("/api/guest-menu/{job_id}/plan")
+async def guest_menu_plan(job_id: str, body: dict = Body(...)):
+    """{"meal_type": {"id", "name"}, "add_to_shopping"} - every course into the meal plan."""
+    meal_type = body.get("meal_type") or {}
+    if not meal_type.get("id"):
+        raise HTTPException(400, "Meal type is required.")
+    n = await asyncio.to_thread(_guest_call, guest_menu.to_meal_plan, job_id, meal_type, bool(body.get("add_to_shopping")))
+    return {"planned": n}
 
 
 @app.post("/api/tools/db-chat")

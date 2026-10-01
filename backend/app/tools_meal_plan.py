@@ -425,19 +425,20 @@ def chat(job_id: str, message: str) -> ToolJob:
     return job
 
 
-def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
+def create_plan_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool,
+                      persons: int | None = None) -> dict:
     """Creates one entry in Tandoor's meal plan with the household's
     number of persons as servings (else the recipe's own) - the shopping
     list scales the amounts to it. Returns the created entry. With Mealie:
     its meal plan and shopping list (mealie_plan)."""
     if target.is_mealie():
-        return mealie_plan.create_entry(client, recipe, date, meal_type, add_to_shopping)
+        return mealie_plan.create_entry(client, recipe, date, meal_type, add_to_shopping, persons)
     resp = client.get(f"/recipe/{recipe['id']}/")
     resp.raise_for_status()
     payload = {
         "title": "",
         "recipe": {"id": recipe["id"], "name": recipe.get("name", "")},
-        "servings": household.servings(resp.json().get("servings")) or 1,
+        "servings": persons or household.servings(resp.json().get("servings")) or 1,
         "note": "",
         "from_date": date,
         "to_date": date,
