@@ -221,6 +221,10 @@ grouped by kind:
   change is shown with the recipes it touches and applied only on a click;
   changes to more than 50 recipes and deleting a tag need a second click. A
   warning has to be confirmed once before the chat can be used.
+
+  <p align="center">
+    <img src="screenshots/chat.png" alt="Asking for changes in the maintenance chat" width="75%">
+  </p>
 - **Automation & budget** (stored in the app, no restart needed):
   - *Automatic maintenance* – at a chosen time every N days, prepare
     suggestions for the selected tiles.
