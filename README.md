@@ -179,7 +179,8 @@ grouped by kind:
   ingredients/units/tags to existing ones, filling in ingredient details and
   conversions (Tandoor) and adding tags. Recipes imported through this app
   were already covered by the review – they only get the *amounts into the
-  steps* suggestion (see below).
+  steps* (see below), applied right away like the ingredient details;
+  only ones marked ⚠️ wait for review.
 - **State of your collection** counts what's left to do – without AI – in
   groups:
   - *Ingredients*: possible duplicates, without nutrition or supermarket

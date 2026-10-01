@@ -40,7 +40,8 @@ def test_new_recipes_get_the_amounts_suggestion(run, trigger):
     job, planned = run(trigger)
     assert planned == [7]
     amounts = [s for s in job.suggestions if s.kind == "amounts_in_steps"]
-    assert len(amounts) == 1 and amounts[0].status == "pending"  # after an import too: reviewed, not auto-applied
+    # after an import applied right away (_apply_all), otherwise reviewed
+    assert len(amounts) == 1 and amounts[0].status == ("applied" if trigger == "import" else "pending")
 
 
 def test_a_revised_recipe_follows_once_the_revision_is_applied(run, monkeypatch, tandoor):
@@ -61,11 +62,12 @@ def test_a_revised_recipe_follows_once_the_revision_is_applied(run, monkeypatch,
     assert not job.meta.get("marked")  # still something to review
 
 
-def test_after_an_import_only_the_data_is_applied_right_away(monkeypatch):
+def test_after_an_import_amounts_are_applied_right_away_unless_flagged(monkeypatch):
     applied = []
     monkeypatch.setattr(tools_new_recipes, "_apply_fn", lambda job_id, sid, action: applied.append(sid))
     job = tool_jobs.create_tool_job("new_recipes")
     job.suggestions = [ToolSuggestion(id="e1", kind="enrich", summary="x"),
-                       ToolSuggestion(id="a1", kind="amounts_in_steps", summary="y")]
+                       ToolSuggestion(id="a1", kind="amounts_in_steps", summary="y"),
+                       ToolSuggestion(id="a2", kind="amounts_in_steps", summary="⚠️ z", detail={"flagged": True})]
     tools_new_recipes._apply_all(job)
-    assert applied == ["e1"]
+    assert applied == ["e1", "a1"]

@@ -17,7 +17,8 @@
 **Maintain**
 - Amounts into the steps (Tandoor templates that follow the servings,
   Mealie written out), with the ingredients' comments and a proofreading
-  pass; also part of "process new recipes"
+  pass; also part of "process new recipes" and applied right after an import
+  (unless marked ⚠️)
 - Recipe doctor: contradictions found without AI, fixed with it
 - Weak photos found without AI, improved with the image AI
 - Changes by chat, from a fixed catalog of actions, with a warning first
