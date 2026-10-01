@@ -242,10 +242,14 @@ grouped by kind:
 
 - **🏠 Household** – how many people eat, what must **never** be in a dish
   (allergies, intolerances), what you'd **rather not** eat, and fixed wishes
-  per weekday ("Friday: pizza"). The weekly plan, its chat and *what can I
-  cook today?* follow it: recipes with a "never" ingredient are left out,
-  disliked ones come last, and planned days get the number of persons as
-  servings (the shopping list scales the amounts).
+  per weekday ("Friday: pizza"), plus **nutrition goals**: max. kcal and
+  min. protein per serving and more in words ("2x fish a week, little red
+  meat"). The weekly plan, its chat and *what can I cook today?* follow it:
+  recipes with a "never" ingredient are left out, disliked ones come last,
+  recipes known to be above the kcal limit don't get planned (energy and
+  protein per serving come from Tandoor's computed nutrition or Mealie's
+  nutrition), and planned days get the number of persons as servings (the
+  shopping list scales the amounts).
 - **How was it?** – rate the meals you planned in the last days. With
   Tandoor the rating goes in as a cook log, with Mealie as your rating plus
   the recipe's "last made" date – either way the weekly plan uses it.
@@ -274,7 +278,21 @@ grouped by kind:
   - **🛒 Shopping list to share** – the ingredients of the planned days
     added up, scaled to the household and grouped by supermarket aisle
     (Tandoor's categories, Mealie's labels), as text for a messenger or to
-    copy; staples and what's at home come under *check the pantry*.
+    copy; staples and what's at home come under *check the pantry*;
+  - **🔪 Meal-prep plan** – one work plan for the planned (or selected)
+    days, to cook ahead in one session: shared preparation done once with
+    the combined amounts ("dice 3 onions for the soup and the curry"), oven
+    and hob in parallel, the longest things first, and how to keep what's
+    prepared.
+- **🥂 Guest menu** – occasion, day, number of guests, courses (starter,
+  soup, main, side, dessert), what the guests can't eat and wishes: the AI
+  puts together a menu from your recipes – one per course, matching each
+  other (no main ingredient twice, not three heavy courses), the
+  household's and the guests' "never" ingredients left out. Swap any course
+  on its own, put the whole menu into the meal plan with the guests as
+  servings, get its **shopping list** and a **🔪 work plan** with clock
+  times counting back from "ready at 19:30". (Tags like *Dessert* or
+  *Starter* on your recipes help it pick the right ones.)
 
 ### On the phone
 
@@ -604,8 +622,11 @@ backend/
 
     # Plan
     tools_meal_plan.py      Weekly plan and its chat, rests across the week
-    household.py            Household profile (persons, never / rather not, fixed days)
+    household.py            Household profile (persons, never / rather not, fixed days, nutrition goals)
+    nutrition.py            Energy and protein per serving from Tandoor / Mealie
     shopping_text.py        Shopping list to share
+    guest_menu.py           Guest menu: courses from your recipes, swap, meal plan, shopping list
+    meal_prep.py            One work plan for several recipes (meal prep, guest menu)
     perishability.py        Which ingredients spoil quickly (order of the week)
     cook_today.py           "What can I cook today?" ingredient index, matching, fridge photo
     cook_feedback.py        "How was it?"
@@ -622,7 +643,8 @@ backend/
 The tricky parts – merging and undo against an in-memory fake Tandoor, the
 Mealie import, tools and planning against a fake Mealie, the background
 queue, duplicate detection, the weekly plan and its chat, the household
-profile, *what can I cook today?*, video, voice and migration imports, the
+profile and nutrition goals, the guest menu, the meal-prep plan, *what can
+I cook today?*, video, voice and migration imports, the
 amounts in the steps, the recipe doctor, the photo check, the maintenance
 chat, budget and schedule, the review inbox – have automated tests. They
 need neither a recipe manager nor an AI key and run in a few seconds:
@@ -652,9 +674,13 @@ for a pull request that touches the Dockerfile it only builds it.
 - Ingredient-to-step assignment and image matching are done by the AI or
   heuristically – worth a glance in the review screen for complex recipes.
 - Duplicate recipe detection compares titles only, not ingredients.
-- **Allergies** in the household profile are matched by name (ingredients
-  and title) and told to the AI as well – check the plan anyway when it
-  really matters.
+- **Allergies** in the household profile and the guest menu are matched by
+  name (ingredients and title) and told to the AI as well – check the plan
+  anyway when it really matters.
+- **Nutrition goals** need nutrition data: with Tandoor the ingredients'
+  properties (see *Without nutrition* under Maintain), with Mealie the
+  recipe's nutrition. Recipes without it are planned as before.
+- The **guest menu** recognizes courses only by recipe names and tags.
 - **Video links**: YouTube, Instagram and TikTok change often and sometimes
   show bots a login or consent page – then only the caption (or nothing) is
   found.
