@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, photo_quality, mealie_client, mealie_maintenance, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, photo_quality, mealie_client, mealie_maintenance, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -190,6 +190,8 @@ def _compute() -> None:
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
             "recipes_amounts_missing": recipe_items(recipe_amounts.needs_amounts),
+            "recipes_inconsistent": recipe_items(
+                lambda r, v=[f["name"] for f in foods.values()]: bool(recipe_doctor.findings(r, v))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),
             "recipes_without_servings": recipe_items(tools_recipe_details.lacks_servings),
             "recipes_without_image": recipe_items(tools_recipe_details.lacks_image),
