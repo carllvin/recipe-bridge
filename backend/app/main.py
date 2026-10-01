@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, guest_menu, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -1472,6 +1472,22 @@ async def guest_menu_plan(job_id: str, body: dict = Body(...)):
         raise HTTPException(400, "Meal type is required.")
     n = await asyncio.to_thread(_guest_call, guest_menu.to_meal_plan, job_id, meal_type, bool(body.get("add_to_shopping")))
     return {"planned": n}
+
+
+@app.post("/api/meal-prep")
+async def meal_prep_plan(body: dict = Body(...)):
+    """{"job_id", "ready_at"?, "suggestion_ids"?} - one work plan for the
+    weekly plan's days (meal prep) or a guest menu (ready at a time)."""
+    _check_budget()
+    job = tool_jobs.get_tool_job(str(body.get("job_id") or ""))
+    before = job.token_usage.model_copy() if job else None
+    result = await asyncio.to_thread(_guest_call, meal_prep.for_job, str(body.get("job_id") or ""),
+                                     body.get("ready_at"), body.get("suggestion_ids"))
+    if job and before:
+        job = tool_jobs.get_tool_job(job.id)
+        usage_log.record("meal_prep", job.token_usage.input_tokens - before.input_tokens,
+                         job.token_usage.output_tokens - before.output_tokens)
+    return result
 
 
 @app.post("/api/tools/db-chat")

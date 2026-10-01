@@ -2718,6 +2718,7 @@ async function pollPlan() {
 
 function renderWeek(job) {
   planState.job = job;
+  if (job.meta.prep && el('plan-prep').classList.contains('hidden')) renderPrep('plan-prep', job.meta.prep);
   const days = job.meta.days || [...new Set(job.suggestions.map((s) => s.detail.date))];
   const taken = new Set(job.meta.taken_days || []);
   const byDate = {};
@@ -2915,6 +2916,64 @@ el('db-chat-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Work plan for several recipes (meal_prep) ----------
+function prepText(plan) {
+  const lines = [`🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` (~${plan.total_minutes} min)` : ''}`,
+    plan.recipes.join(' · ')];
+  plan.phases.forEach((ph) => {
+    lines.push('', `*${[ph.time, ph.title].filter(Boolean).join(' – ')}*`);
+    ph.tasks.forEach((tk) => lines.push(`• ${tk.text}${tk.minutes ? ` (${tk.minutes} min)` : ''}`));
+  });
+  if (plan.keeping.length) lines.push('', `*${t('prepKeeping')}*`, ...plan.keeping.map((k) => `• ${k}`));
+  return lines.join('\n');
+}
+
+function renderPrep(box, plan) {
+  if (!plan) { el(box).classList.add('hidden'); return; }
+  el(box).innerHTML = `<div class="prep-head"><h4>🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` · ~${plan.total_minutes} min` : ''}</h4>
+      <button class="btn secondary prep-copy" type="button">${t('planShoppingCopy')}</button></div>
+    <div class="settings-hint">${escapeHtml(plan.recipes.join(' · '))}</div>
+    ${plan.phases.map((ph) => `<div class="prep-phase"><h5>${escapeHtml([ph.time, ph.title].filter(Boolean).join(' – '))}</h5><ul>
+      ${ph.tasks.map((tk) => `<li>${escapeHtml(tk.text)}${tk.minutes ? ` <span class="prep-for">(${tk.minutes} min)</span>` : ''}${
+        tk.recipes.length ? ` <span class="prep-for">– ${escapeHtml(tk.recipes.join(', '))}</span>` : ''}</li>`).join('')}</ul></div>`).join('')}
+    ${plan.keeping.length ? `<div class="prep-keeping"><strong>${t('prepKeeping')}</strong><ul>${plan.keeping.map((k) => `<li>${escapeHtml(k)}</li>`).join('')}</ul></div>` : ''}`;
+  el(box).classList.remove('hidden');
+  el(box).querySelector('.prep-copy').addEventListener('click', async (e) => {
+    try { await navigator.clipboard.writeText(prepText(plan)); e.target.textContent = t('planShoppingCopied'); } catch (err) { /* http */ }
+  });
+}
+
+async function requestPrep(box, button, body) {
+  const btn = el(button);
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('prepRunning');
+  try {
+    const res = await fetch('/api/meal-prep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    renderPrep(box, data);
+    el(box).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    el(box).innerHTML = `<div class="inbox-error">⚠️ ${escapeHtml(err.message)}</div>`;
+    el(box).classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+el('plan-prep-btn').addEventListener('click', () => {
+  if (!planState.jobId) return;
+  const chosen = [...planState.selected];
+  requestPrep('plan-prep', 'plan-prep-btn', { job_id: planState.jobId, suggestion_ids: chosen.length ? chosen : null });
+});
+
+el('guest-prep-btn').addEventListener('click', () => {
+  if (!guestState.job) return;
+  requestPrep('guest-prep', 'guest-prep-btn', { job_id: guestState.job.id, ready_at: el('gm-ready').value || null });
+});
+
 // ---------- Guest menu ----------
 const guestState = { job: null, busy: false };
 
@@ -2938,6 +2997,7 @@ function renderGuestMenu(job) {
     </div>`).join('');
   el('guest-courses').querySelectorAll('.gc-reroll').forEach((b) => b.addEventListener('click', () => guestReroll(b.dataset.course)));
   el('guest-status').textContent = meta.planned ? `✓ ${t('guestPlanned')}` : '';
+  renderPrep('guest-prep', meta.prep);
 }
 
 async function guestRequest(url, body, method = 'POST') {

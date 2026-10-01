@@ -1257,3 +1257,15 @@ a { color: inherit; }
 .guest-course .gc-name { font-weight: 600; }
 .guest-course .gc-meta { font-size: 0.8rem; color: #8f9689; }
 @media (max-width: 520px) { .guest-course { flex-wrap: wrap; } .guest-course .gc-label { flex-basis: 100%; } }
+
+/* Work plan (meal_prep) */
+.prep-panel { border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 12px 14px; margin-top: 14px; background: rgba(239,233,218,0.03); }
+.prep-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+.prep-head h4 { margin: 0; font-size: 0.95rem; }
+.prep-phase { margin: 10px 0 0; }
+.prep-phase h5 { margin: 0 0 4px; font-size: 0.86rem; color: var(--gold, #b9852f); }
+.prep-phase ul { margin: 0; padding-left: 18px; font-size: 0.86rem; line-height: 1.45; }
+.prep-phase .prep-for { color: #8f9689; font-size: 0.78rem; }
+.prep-keeping { margin-top: 10px; font-size: 0.82rem; color: #b8bdb2; }
+.gm-ready { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+.gm-ready input { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius); color: var(--paper); padding: 5px 6px; color-scheme: dark; }

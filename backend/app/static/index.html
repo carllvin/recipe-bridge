@@ -123,10 +123,12 @@
           <div id="plan-week" class="plan-week"></div>
           <div id="plan-actions" class="plan-actions hidden">
             <span id="plan-status" class="tools-bulk-status"></span>
+            <button id="plan-prep-btn" class="btn secondary" type="button" data-i18n="prepPlanBtn">🔪 Meal-prep plan</button>
             <button id="plan-shopping-btn" class="btn secondary" type="button" data-i18n="planShoppingBtn">🛒 Shopping list to share</button>
             <button id="plan-apply-btn" class="btn" type="button"></button>
           </div>
         </div>
+        <div id="plan-prep" class="prep-panel hidden"></div>
         <div id="plan-shopping" class="plan-shopping hidden">
           <textarea id="plan-shopping-text" rows="12" readonly></textarea>
           <div class="plan-shopping-actions">
@@ -178,9 +180,12 @@
           <div id="guest-courses" class="guest-courses"></div>
           <div class="plan-shopping-actions">
             <span id="guest-status" class="settings-hint"></span>
+            <label class="gm-ready"><span data-i18n="prepReadyAt">ready at</span> <input id="gm-ready" type="time" value="19:00" /></label>
+            <button id="guest-prep-btn" class="btn secondary" type="button" data-i18n="prepMenuBtn">🔪 Work plan</button>
             <button id="guest-shopping-btn" class="btn secondary" type="button" data-i18n="planShoppingBtn">🛒 Shopping list to share</button>
             <button id="guest-plan-btn" class="btn" type="button" data-i18n="guestToPlan">Into the meal plan</button>
           </div>
+          <div id="guest-prep" class="prep-panel hidden"></div>
           <div id="guest-shopping" class="plan-shopping hidden">
             <textarea id="guest-shopping-text" rows="12" readonly></textarea>
             <div class="plan-shopping-actions">
