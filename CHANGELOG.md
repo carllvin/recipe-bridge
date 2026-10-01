@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+**Import**
+- Cooking videos from YouTube, Instagram and TikTok (description, caption,
+  YouTube subtitles)
+- Voice notes: dictate a recipe in the app or share/drop an audio file
+- Move recipes from Tandoor to Mealie or back – without AI, with photos,
+  tags and cookbooks, through the normal review
+
+**Review**
+- Renaming "gemahlene Mandeln" to "Mandeln" keeps "gemahlen" as the
+  recipe lines' note
+- Suggestions that need a look (⚠️) are left out of "select all"
+
+**Maintain**
+- Amounts into the steps (Tandoor templates that follow the servings,
+  Mealie written out), with the ingredients' comments and a proofreading
+  pass; also part of "process new recipes"
+- Recipe doctor: contradictions found without AI, fixed with it
+- Weak photos found without AI, improved with the image AI
+- Changes by chat, from a fixed catalog of actions, with a warning first
+
+**Plan**
+- Household profile: persons, never / rather not, fixed weekdays
+- The weekly plan uses up rests (cream, herbs …) across the week
+- Shopping list to share, grouped by supermarket aisle
+
+**Also** – `AI_PROVIDER=compatible` for local models (Ollama, LM Studio …)
+and any OpenAI-compatible API
+
 ## 1.0.0-beta.1
 
 The first release of **Recipe Bridge**, as a ready-made Docker image
