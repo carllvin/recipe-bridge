@@ -164,26 +164,141 @@ def amounts_plan(job, recipe) -> dict:
     changed = []
     for index, (step, own, text) in enumerate(zip(steps, keyed, texts)):
         old = step.get("instruction") or ""
-        seen = set()
-
-        def keep(match):
-            key = match.group(1)
-            if key not in own or key in seen:  # another step's or a repeated marker: the plain name
-                return ((own.get(key) or {}).get("food") or {}).get("name", "") if key in own else ""
-            seen.add(key)
-            return match.group(0)
-        text = re.sub(r"(?<=\S)  +(?=\S)", " ", MARK.sub(keep, text)).strip()
+        text, seen = _checked(old, text, own, index)
         if not seen or text == old:
             continue
+        changed.append({"index": index, "text": text, "keys": {k: own[k].get("id") for k in seen},
+                        "ids": [i.get("id") for i in step.get("ingredients") or []], "own": own, "original": old})
+    _proofread(job, changed)
+    for change in changed:
+        del change["own"], change["original"]
+    return {"steps": changed}
+
+
+def _checked(old, text, own, index) -> tuple[str, set]:
+    """The AI's marked text made safe: only this step's markers, each once;
+    articles before a marker dropped; raises ValueError when text or
+    numbers of the original got lost."""
+    seen = set()
+
+    def keep(match):
+        key = match.group(1)
+        if key not in own or key in seen:  # another step's or a repeated marker: the plain name
+            return ((own.get(key) or {}).get("food") or {}).get("name", "") if key in own else ""
+        seen.add(key)
+        return match.group(0)
+    text = _drop_articles(MARK.sub(keep, text))
+    text = re.sub(r"(?<=\S)  +(?=\S)", " ", text).strip()
+    if seen:
         written = MARK.sub(lambda m: amount_text(own[m.group(1)]), text)
         if len(written) < MIN_KEPT_RATIO * len(old.strip()):
             raise ValueError(f"step {index + 1} lost text")
         missing = [x for x in _numbers(old) if x not in _numbers(written)]
         if missing:
             raise ValueError(f"step {index + 1} lost the numbers {missing}")
-        changed.append({"index": index, "text": text, "keys": {k: own[k].get("id") for k in seen},
-                        "ids": [i.get("id") for i in step.get("ingredients") or []]})
-    return {"steps": changed}
+    return text, seen
+
+
+# ---------- does the text still read well? ----------
+
+# An article right before an ingredient that brings its own amount reads
+# double ("die 250 g Mehl") - dropped without asking.
+ARTICLE = re.compile(r"\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|einer|the|an?|le|la|les|il|lo|gli|el|los|las)\s+(?=\[\[i\d+\]\])",
+                     re.I)
+# German prepositions that want the dative - "mit 3 Eier" should be "mit 3 Eiern".
+DATIVE = ("mit", "von", "aus", "zu", "nach", "bei", "samt", "nebst")
+
+
+def _drop_articles(text) -> str:
+    return ARTICLE.sub("", text)
+
+
+def local_issues(text, own) -> list[str]:
+    """What reads wrong in the written-out text, found without AI: a plural
+    ingredient without a unit after a dative preposition ("mit 3 Eier")."""
+    if get_language_code(settings.output_language) != "de":
+        return []
+    issues = []
+    for m in MARK.finditer(text):
+        ing = own.get(m.group(1))
+        before = re.findall(r"[\wäöüß]+", text[:m.start()].casefold())
+        if not ing or not before or before[-1] not in DATIVE:
+            continue
+        shown = amount_text({**ing, "note": ""})
+        last = shown.split()[-1]
+        amount = None if ing.get("no_amount") else ing.get("amount")
+        plural = amount and float(amount) > 1 and not (ing.get("unit") or {}).get("name")
+        if plural and not last.casefold().endswith(("n", "s")):
+            issues.append(f"„{before[-1]} {shown}“")
+    return issues
+
+
+PROOFREAD_PROMPT = """You proofread cooking instructions in {language} into which
+ingredient amounts were just inserted. You will receive a JSON object:
+{"steps": [{"original": string, "marked": string, "reads_as": string,
+"ingredients": [{"key": string, "text": string}]}]}
+"marked" is the new text with markers like [[i0]]; "reads_as" is how it reads
+once each marker is replaced by its ingredient "text" - which can't be
+inflected (it always reads exactly like that).
+
+For each step decide whether "reads_as" is correct, natural {language} that
+says the same as "original" (same actions, order, times, temperatures). If not,
+rewrite "marked" so it does: put an ingredient where its fixed text fits
+(e.g. not "mit 3 Eier" but "3 Eier dazugeben und verrühren"), drop a
+doubled amount or article. Keep the markers (each at most once, only the
+given keys), never write an amount yourself, keep every number of
+"original".
+
+Respond with ONLY a JSON object (no explanation, no markdown fence):
+{"steps": [{"ok": true} or {"ok": false, "marked": <corrected text>|null,
+"problem": <what's wrong, a few words in {language}>}, ...]} - one per step,
+same order.
+"""
+
+
+def _proofread(job, changed) -> None:
+    """Second, cheaper AI call: reads every changed step as it will appear
+    and fixes what doesn't read well. What is still doubtful afterwards gets
+    change["warning"] - the suggestion is flagged for a closer look."""
+    if not changed:
+        return
+    payload = {"steps": [{"original": c["original"], "marked": c["text"],
+                          "reads_as": MARK.sub(lambda m, c=c: amount_text(c["own"][m.group(1)]), c["text"]),
+                          "ingredients": [{"key": k, "text": amount_text(i)} for k, i in c["own"].items()]}
+                         for c in changed]}
+    answers = []
+    try:
+        def ask(system_prompt):
+            out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
+                                                         max_tokens=4000)
+            job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
+            job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
+            return out, usage
+        answer = json_answer.complete(ask, PROOFREAD_PROMPT.replace("{language}", settings.output_language))[0]
+        answers = answer.get("steps") if isinstance(answer, dict) else []
+    except Exception as exc:  # noqa: BLE001 - proofreading is a bonus, the local check still runs
+        log.info("Proofreading the amounts failed: %s", exc)
+    for n, change in enumerate(changed):
+        verdict = answers[n] if isinstance(answers, list) and n < len(answers) and isinstance(answers[n], dict) else {}
+        problem = None
+        if verdict.get("ok") is False:
+            problem = str(verdict.get("problem") or "").strip() or "reads oddly"
+            fixed = verdict.get("marked")
+            if isinstance(fixed, str) and fixed.strip():
+                try:
+                    text, seen = _checked(change["original"], fixed, change["own"], change["index"])
+                except ValueError as exc:
+                    log.info("Proofread fix for step %d not used: %s", change["index"] + 1, exc)
+                else:
+                    if seen:
+                        change["text"] = text
+                        change["keys"] = {k: change["own"][k].get("id") for k in seen}
+                        problem = None
+        issues = local_issues(change["text"], change["own"])
+        if issues:
+            problem = ", ".join(issues)
+        if problem:
+            change["warning"] = problem
 
 
 def render(text, step_ingredients, key_ids, templates: bool) -> str:
@@ -211,7 +326,11 @@ def describe(recipe, plan) -> tuple[str, str]:
         ingredients = step.get("ingredients") or []
         after = _shown(render(change["text"], ingredients, change["keys"], templates=False), ingredients)
         lines += [f"{change['index'] + 1}. BEFORE: {_shown(step.get('instruction') or '', ingredients)}", f"   AFTER:  {after}"]
-    return (f"recipe: amounts into the steps of {recipe.get('name', '')!r} ({len(plan['steps'])} step(s))",
+        if change.get("warning"):
+            lines.append(f"   ⚠️ {change['warning']}")
+    warnings = [c for c in plan["steps"] if c.get("warning")]
+    flag = f"⚠️ check {len(warnings)} step(s) - " if warnings else ""
+    return (f"{flag}recipe: amounts into the steps of {recipe.get('name', '')!r} ({len(plan['steps'])} step(s))",
             "\n".join(lines))
 
 
@@ -264,8 +383,11 @@ def plan_suggestion(job, recipe) -> ToolSuggestion | None:
     if not plan["steps"]:
         return None
     summary, preview = describe(recipe, plan)
+    detail = {"recipe_id": recipe["id"], "plan": plan}
+    if any(c.get("warning") for c in plan["steps"]):
+        detail["flagged"] = True  # left out of "select all" - worth a look first
     return ToolSuggestion(id=uuid.uuid4().hex[:10], kind="amounts_in_steps", summary=summary, preview=preview,
-                          detail={"recipe_id": recipe["id"], "plan": plan})
+                          detail=detail)
 
 
 def check_unchanged(steps, plan) -> None:

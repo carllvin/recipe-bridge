@@ -21,6 +21,7 @@ class FakeAI:
         "restructure": "You improve the STRUCTURE",
         "normalize": "names in a home cook",
         "pick": "You match",
+        "proofread": "You proofread cooking instructions",
     }
 
     def __init__(self, monkeypatch):

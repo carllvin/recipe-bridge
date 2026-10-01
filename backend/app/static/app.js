@@ -1810,7 +1810,10 @@ function renderInbox() {
   }
   el('inbox-groups').innerHTML = visible.map((g) => {
     const selected = g.items.filter((i) => inboxState.selected.has(itemKey(i))).length;
-    const selectable = g.items.filter((i) => !i.queued).length;
+    // "select all" leaves out flagged ones (to be picked one by one)
+    const auto = g.items.filter((i) => !i.queued && !i.flagged);
+    const selectable = auto.length;
+    const selectedAuto = auto.filter((i) => inboxState.selected.has(itemKey(i))).length;
     const selectedRetryable = g.items.filter((i) => inboxState.selected.has(itemKey(i)) && i.retryable).length;
     const busy = inboxState.busyGroup === g.key;
     const collapsed = inboxState.collapsed.has(g.key);
@@ -1820,7 +1823,7 @@ function renderInbox() {
         <button type="button" class="inbox-collapse" data-group="${g.key}">${collapsed ? '▸' : '▾'}</button>
         <h2>${g.icon} ${t('inboxGroup_' + g.key)} <span class="inbox-count">${g.items.length}</span></h2>
         <label class="tools-select-all"><input type="checkbox" class="inbox-select-all" data-group="${g.key}"
-          ${selectable && selected === selectable ? 'checked' : ''} ${busy || !selectable ? 'disabled' : ''}> <span>${t('toolSelectAll')}</span></label>
+          ${selectable && selectedAuto === selectable ? 'checked' : ''} ${busy || !selectable ? 'disabled' : ''}> <span>${t('toolSelectAll')}</span></label>
         <span class="tools-bulk-status" id="inbox-status-${g.key}">${escapeHtml(inboxState.results[g.key] || '')}</span>
         <div class="tools-bulk-actions">
           <button class="btn secondary inbox-skip" type="button" data-group="${g.key}" ${!selected || busy ? 'disabled' : ''}>${t(g.key === 'failed' ? 'inboxDismissBtn' : 'toolSkipBtn')} (${selected})</button>
@@ -1852,7 +1855,8 @@ function renderInbox() {
   }));
   el('inbox-groups').querySelectorAll('.inbox-select-all').forEach((box) => box.addEventListener('change', () => {
     groupItems(box.dataset.group).forEach((i) => {
-      if (box.checked && !i.queued) inboxState.selected.add(itemKey(i)); else inboxState.selected.delete(itemKey(i));
+      // flagged ones (e.g. text that may not read well) are picked one by one
+      if (box.checked && !i.queued && !i.flagged) inboxState.selected.add(itemKey(i)); else inboxState.selected.delete(itemKey(i));
     });
     renderInbox();
   }));
@@ -3195,7 +3199,7 @@ el('tools-select-all').addEventListener('change', (e) => {
   const job = toolsState.job;
   if (!job) return;
   const queued = new Set(job.queued_ids || []);
-  toolsState.selected = new Set(e.target.checked ? job.suggestions.filter((s) => s.status === 'pending' && !queued.has(s.id)).map((s) => s.id) : []);
+  toolsState.selected = new Set(e.target.checked ? job.suggestions.filter((s) => s.status === 'pending' && !queued.has(s.id) && !(s.detail || {}).flagged).map((s) => s.id) : []);
   renderToolSuggestions(job);
 });
 
