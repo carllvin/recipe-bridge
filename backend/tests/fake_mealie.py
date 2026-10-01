@@ -97,7 +97,8 @@ class FakeMealie:
                 if request.url.params.get("tags"):
                     found = [r for r in found if any(t["id"] == request.url.params["tags"] for t in r.get("tags", []))]
                 return self._page([{k: r.get(k) for k in ("id", "name", "slug", "image", "recipeServings", "tags",
-                                                         "description", "totalTime", "rating", "lastMade", "updatedAt")}
+                                                         "description", "totalTime", "rating", "lastMade", "updatedAt",
+                                                         "recipeCategory")}
                                    for r in found], request)
             if request.method == "POST":
                 name = json.loads(request.content)["name"]
