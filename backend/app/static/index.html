@@ -62,6 +62,12 @@
             <input id="hh-avoid" type="text" maxlength="500" data-i18n-placeholder="householdAvoidPlaceholder" placeholder="e.g. nuts, shrimp" /></label>
           <label class="hh-wide"><span data-i18n="householdDislikes">Rather not</span>
             <input id="hh-dislikes" type="text" maxlength="500" data-i18n-placeholder="householdDislikesPlaceholder" placeholder="e.g. mushrooms, coriander" /></label>
+          <label><span data-i18n="householdMaxKcal">Max. kcal per serving</span>
+            <input id="hh-max-kcal" type="number" min="0" max="5000" step="50" placeholder="–" /></label>
+          <label><span data-i18n="householdMinProtein">Min. protein (g) per serving</span>
+            <input id="hh-min-protein" type="number" min="0" max="300" step="5" placeholder="–" /></label>
+          <label class="hh-wide"><span data-i18n="householdGoals">More goals</span>
+            <input id="hh-goals" type="text" maxlength="500" data-i18n-placeholder="householdGoalsPlaceholder" placeholder="e.g. 2x fish a week, little red meat" /></label>
           <div class="hh-wide">
             <span class="hh-label" data-i18n="householdWeekdays">Fixed days</span>
             <div id="hh-weekdays" class="hh-weekdays"></div>
@@ -117,10 +123,12 @@
           <div id="plan-week" class="plan-week"></div>
           <div id="plan-actions" class="plan-actions hidden">
             <span id="plan-status" class="tools-bulk-status"></span>
+            <button id="plan-prep-btn" class="btn secondary" type="button" data-i18n="prepPlanBtn">🔪 Meal-prep plan</button>
             <button id="plan-shopping-btn" class="btn secondary" type="button" data-i18n="planShoppingBtn">🛒 Shopping list to share</button>
             <button id="plan-apply-btn" class="btn" type="button"></button>
           </div>
         </div>
+        <div id="plan-prep" class="prep-panel hidden"></div>
         <div id="plan-shopping" class="plan-shopping hidden">
           <textarea id="plan-shopping-text" rows="12" readonly></textarea>
           <div class="plan-shopping-actions">
@@ -139,6 +147,54 @@
           </form>
         </div>
       </section>
+      <!-- Guest menu (guest_menu.py): a menu from your own recipes for an occasion. -->
+      <details id="guest-card" class="tool-card guest-card">
+        <summary><span data-i18n="guestTitle">🥂 Guest menu</span> <span class="household-summary" data-i18n="guestSummary">a menu from your recipes, with shopping list</span></summary>
+        <form id="guest-form" class="meal-plan-form">
+          <label class="mp-wide"><span data-i18n="guestOccasion">Occasion</span>
+            <input id="gm-occasion" type="text" maxlength="200" data-i18n-placeholder="guestOccasionPlaceholder" placeholder="e.g. birthday, autumn dinner with friends" /></label>
+          <label><span data-i18n="guestDate">Day</span><input id="gm-date" type="date" required /></label>
+          <label><span data-i18n="guestPersons">Persons</span><input id="gm-persons" type="number" min="1" max="50" value="6" required /></label>
+          <div class="mp-wide gm-courses">
+            <span class="hh-label" data-i18n="guestCourses">Courses</span>
+            <label><input type="checkbox" value="starter" checked> <span data-i18n="course_starter">Starter</span></label>
+            <label><input type="checkbox" value="soup"> <span data-i18n="course_soup">Soup</span></label>
+            <label><input type="checkbox" value="main" checked> <span data-i18n="course_main">Main course</span></label>
+            <label><input type="checkbox" value="side"> <span data-i18n="course_side">Side dish</span></label>
+            <label><input type="checkbox" value="dessert" checked> <span data-i18n="course_dessert">Dessert</span></label>
+          </div>
+          <label class="mp-wide"><span data-i18n="guestNever">Guests can't eat</span>
+            <input id="gm-never" type="text" maxlength="500" data-i18n-placeholder="guestNeverPlaceholder" placeholder="e.g. gluten, nuts" /></label>
+          <label class="mp-wide"><span data-i18n="mealPlanWishes">Wishes</span>
+            <input id="gm-wishes" type="text" maxlength="500" data-i18n-placeholder="guestWishesPlaceholder" placeholder="e.g. vegetarian, little work on the day" /></label>
+          <div class="mp-wide mp-foot"><span></span>
+            <button id="gm-start" class="btn" type="submit" data-i18n="guestStart">Suggest a menu</button></div>
+        </form>
+        <div id="guest-progress" class="tools-run-progress hidden">
+          <div class="spinner"></div>
+          <div class="status-text" data-i18n="guestRunning">Putting the menu together …</div>
+        </div>
+        <div id="guest-error" class="error-banner hidden"></div>
+        <div id="guest-result" class="guest-result hidden">
+          <p id="guest-note" class="settings-hint"></p>
+          <div id="guest-courses" class="guest-courses"></div>
+          <div class="plan-shopping-actions">
+            <span id="guest-status" class="settings-hint"></span>
+            <label class="gm-ready"><span data-i18n="prepReadyAt">ready at</span> <input id="gm-ready" type="time" value="19:00" /></label>
+            <button id="guest-prep-btn" class="btn secondary" type="button" data-i18n="prepMenuBtn">🔪 Work plan</button>
+            <button id="guest-shopping-btn" class="btn secondary" type="button" data-i18n="planShoppingBtn">🛒 Shopping list to share</button>
+            <button id="guest-plan-btn" class="btn" type="button" data-i18n="guestToPlan">Into the meal plan</button>
+          </div>
+          <div id="guest-prep" class="prep-panel hidden"></div>
+          <div id="guest-shopping" class="plan-shopping hidden">
+            <textarea id="guest-shopping-text" rows="12" readonly></textarea>
+            <div class="plan-shopping-actions">
+              <button id="guest-shopping-copy" class="btn secondary" type="button" data-i18n="planShoppingCopy">Copy</button>
+              <button id="guest-shopping-share" class="btn hidden" type="button" data-i18n="planShoppingShare">Share</button>
+            </div>
+          </div>
+        </div>
+      </details>
     </div>
 
     <!-- Maintain (tools) -->

@@ -24,8 +24,9 @@ container restarts before that, they simply show up again next time.
 
 After an import through this app the review already covered translation,
 structure, matching (import_matching) and tags (added while reading the
-recipe) - only step 3 runs, and it is applied right away (_apply_all) - and the
-amounts into the steps, which wait for review as they change the text."""
+recipe) - only step 3 and the amounts into the steps run, and both are
+applied right away (_apply_all); only amounts flagged ⚠️ (a sentence that
+may not read well) wait for review."""
 from __future__ import annotations
 
 import asyncio
@@ -640,16 +641,18 @@ def configure(apply_fn) -> None:
 
 def _apply_all(job) -> None:
     """After an import through this app: the ingredient data (plural,
-    nutrition, category, gram conversions) is filled in without review -
-    it's data, not a matter of taste, and every change shows under "recently
-    applied" with undo. Suggestions that fail stay in Review as failed."""
+    nutrition, category, gram conversions) and the amounts in the steps are
+    filled in without review - the recipe was reviewed just before, the
+    amounts come from its own ingredient list, and every change shows under
+    "recently applied" with undo. Amounts flagged ⚠️ wait for review;
+    suggestions that fail stay in Review as failed."""
     if _apply_fn is None:
         return
     job.progress_label = "Filling in the new ingredients..."
     tool_jobs.save_tool_job(job)
     for suggestion in list(job.suggestions):
-        if suggestion.status != "pending" or suggestion.kind == "amounts_in_steps":
-            continue  # the text changes wait for review
+        if suggestion.status != "pending" or suggestion.detail.get("flagged"):
+            continue  # a sentence that may not read well waits for review
         try:
             _apply_fn(job.id, suggestion.id, "apply")
         except Exception as exc:  # noqa: BLE001

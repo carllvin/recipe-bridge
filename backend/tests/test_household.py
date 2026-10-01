@@ -17,9 +17,11 @@ def test_settings_are_validated():
     data = TestClient(main.app).put("/api/settings", json={"household": {
         "persons": "4", "avoid": " Nüsse, Garnelen ", "dislikes": "Pilze",
         "weekdays": {"4": "Pizza", "5": " ", "9": "x", "fri": "y"}}}).json()
-    assert data["household"] == {"persons": 4, "avoid": "Nüsse, Garnelen", "dislikes": "Pilze", "weekdays": {"4": "Pizza"}}
+    assert data["household"] == {"persons": 4, "avoid": "Nüsse, Garnelen", "dislikes": "Pilze", "weekdays": {"4": "Pizza"},
+                                 "max_kcal": 0, "min_protein": 0, "goals": ""}
     assert household.for_ai() == {"persons": 4, "never": ["nüsse", "garnelen"], "dislikes": ["pilze"],
-                                  "fixed_days": {"Friday": "Pizza"}}
+                                  "fixed_days": {"Friday": "Pizza"}, "max_kcal_per_serving": None,
+                                  "min_protein_per_serving": None, "goals": ""}
     assert app_settings.get()["maintenance"]["hour"] == 3  # other sections untouched
 
 

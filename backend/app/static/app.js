@@ -2602,6 +2602,8 @@ function householdSummary(h) {
   return [
     h.persons ? tf('householdSummaryPersons', { n: h.persons }) : '',
     h.avoid ? `🚫 ${h.avoid}` : '',
+    h.max_kcal ? `≤ ${h.max_kcal} kcal` : '',
+    h.min_protein ? `≥ ${h.min_protein} g ${t('householdProteinShort')}` : '',
     Object.keys(h.weekdays || {}).sort().map((d) => `${weekdayName(+d)}: ${h.weekdays[d]}`).join(', '),
   ].filter(Boolean).join(' · ');
 }
@@ -2610,6 +2612,9 @@ function fillHousehold(h) {
   el('hh-persons').value = h.persons || '';
   el('hh-avoid').value = h.avoid || '';
   el('hh-dislikes').value = h.dislikes || '';
+  el('hh-max-kcal').value = h.max_kcal || '';
+  el('hh-min-protein').value = h.min_protein || '';
+  el('hh-goals').value = h.goals || '';
   el('hh-weekdays').innerHTML = [0, 1, 2, 3, 4, 5, 6].map((d) => `<label><span>${escapeHtml(weekdayName(d))}</span>
     <input type="text" maxlength="100" data-day="${d}" value="${escapeHtml((h.weekdays || {})[d] || '')}" placeholder="–" /></label>`).join('');
   el('household-summary').textContent = householdSummary(h);
@@ -2626,7 +2631,8 @@ el('household-form').addEventListener('submit', async (e) => {
   const weekdays = {};
   el('hh-weekdays').querySelectorAll('input').forEach((i) => { if (i.value.trim()) weekdays[i.dataset.day] = i.value.trim(); });
   const household = { persons: +el('hh-persons').value || 0, avoid: el('hh-avoid').value,
-    dislikes: el('hh-dislikes').value, weekdays };
+    dislikes: el('hh-dislikes').value, weekdays, max_kcal: +el('hh-max-kcal').value || 0,
+    min_protein: +el('hh-min-protein').value || 0, goals: el('hh-goals').value };
   try {
     const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ household }) });
@@ -2641,6 +2647,7 @@ el('household-form').addEventListener('submit', async (e) => {
 async function openPlanArea() {
   loadMealPlanOptions();
   loadHousehold();
+  openGuestMenu();
   if (!planState.jobId) {
     try { planState.jobId = localStorage.getItem('th.planJob'); } catch (e) { planState.jobId = null; }
   }
@@ -2711,6 +2718,7 @@ async function pollPlan() {
 
 function renderWeek(job) {
   planState.job = job;
+  if (job.meta.prep && el('plan-prep').classList.contains('hidden')) renderPrep('plan-prep', job.meta.prep);
   const days = job.meta.days || [...new Set(job.suggestions.map((s) => s.detail.date))];
   const taken = new Set(job.meta.taken_days || []);
   const byDate = {};
@@ -2756,7 +2764,9 @@ function formatAmount(n) {
 
 function shoppingText(data) {
   const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(LANG_CODE, { weekday: 'short', day: '2-digit', month: '2-digit' });
-  const range = data.days.length ? `${day(data.days[0])} – ${day(data.days[data.days.length - 1])}` : '';
+  const first = data.days[0];
+  const last = data.days[data.days.length - 1];
+  const range = !first ? '' : first === last ? day(first) : `${day(first)} – ${day(last)}`;
   const line = (i) => `• ${[formatAmount(i.amount), i.unit, i.name].filter(Boolean).join(' ')}`;
   const parts = [`🛒 ${t('planShoppingHeading')}${range ? ` · ${range}` : ''}${data.persons ? ` (${tf('householdSummaryPersons', { n: data.persons })})` : ''}`];
   data.groups.forEach((g) => parts.push(`\n*${g.category || t('planShoppingOther')}*\n${g.items.map(line).join('\n')}`));
@@ -2905,6 +2915,189 @@ el('db-chat-form').addEventListener('submit', async (e) => {
     renderDbChat();
   }
 });
+
+// ---------- Work plan for several recipes (meal_prep) ----------
+function prepText(plan) {
+  const lines = [`🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` (~${plan.total_minutes} min)` : ''}`,
+    plan.recipes.join(' · ')];
+  plan.phases.forEach((ph) => {
+    lines.push('', `*${[ph.time, ph.title].filter(Boolean).join(' – ')}*`);
+    ph.tasks.forEach((tk) => lines.push(`• ${tk.text}${tk.minutes ? ` (${tk.minutes} min)` : ''}`));
+  });
+  if (plan.keeping.length) lines.push('', `*${t('prepKeeping')}*`, ...plan.keeping.map((k) => `• ${k}`));
+  return lines.join('\n');
+}
+
+function renderPrep(box, plan) {
+  if (!plan) { el(box).classList.add('hidden'); return; }
+  el(box).innerHTML = `<div class="prep-head"><h4>🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` · ~${plan.total_minutes} min` : ''}</h4>
+      <button class="btn secondary prep-copy" type="button">${t('planShoppingCopy')}</button></div>
+    <div class="settings-hint">${escapeHtml(plan.recipes.join(' · '))}</div>
+    ${plan.phases.map((ph) => `<div class="prep-phase"><h5>${escapeHtml([ph.time, ph.title].filter(Boolean).join(' – '))}</h5><ul>
+      ${ph.tasks.map((tk) => `<li>${escapeHtml(tk.text)}${tk.minutes ? ` <span class="prep-for">(${tk.minutes} min)</span>` : ''}${
+        tk.recipes.length ? ` <span class="prep-for">– ${escapeHtml(tk.recipes.join(', '))}</span>` : ''}</li>`).join('')}</ul></div>`).join('')}
+    ${plan.keeping.length ? `<div class="prep-keeping"><strong>${t('prepKeeping')}</strong><ul>${plan.keeping.map((k) => `<li>${escapeHtml(k)}</li>`).join('')}</ul></div>` : ''}`;
+  el(box).classList.remove('hidden');
+  el(box).querySelector('.prep-copy').addEventListener('click', async (e) => {
+    try { await navigator.clipboard.writeText(prepText(plan)); e.target.textContent = t('planShoppingCopied'); } catch (err) { /* http */ }
+  });
+}
+
+async function requestPrep(box, button, body) {
+  const btn = el(button);
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('prepRunning');
+  try {
+    const res = await fetch('/api/meal-prep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    renderPrep(box, data);
+    el(box).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    el(box).innerHTML = `<div class="inbox-error">⚠️ ${escapeHtml(err.message)}</div>`;
+    el(box).classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+el('plan-prep-btn').addEventListener('click', () => {
+  if (!planState.jobId) return;
+  const chosen = [...planState.selected];
+  requestPrep('plan-prep', 'plan-prep-btn', { job_id: planState.jobId, suggestion_ids: chosen.length ? chosen : null });
+});
+
+el('guest-prep-btn').addEventListener('click', () => {
+  if (!guestState.job) return;
+  requestPrep('guest-prep', 'guest-prep-btn', { job_id: guestState.job.id, ready_at: el('gm-ready').value || null });
+});
+
+// ---------- Guest menu ----------
+const guestState = { job: null, busy: false };
+
+function recipeLink(recipe) {
+  const link = isMealie() ? (recipe.slug ? importedRecipeUrl(recipe.slug) : null)
+    : (APP_CONFIG.tandoor_url ? `${APP_CONFIG.tandoor_url}/view/recipe/${recipe.id}` : null);
+  return link ? `<a href="${link}" target="_blank" rel="noopener">${escapeHtml(recipe.name)}</a>` : escapeHtml(recipe.name);
+}
+
+function renderGuestMenu(job) {
+  guestState.job = job;
+  try { localStorage.setItem('th.guestJob', job.id); } catch (e) { /* only for this visit */ }
+  const meta = job.meta || {};
+  el('guest-result').classList.toggle('hidden', !(meta.menu || []).length);
+  el('guest-note').textContent = meta.note || '';
+  el('guest-courses').innerHTML = (meta.menu || []).map((m) => `<div class="guest-course">
+      <div class="gc-label">${t('course_' + m.course)}</div>
+      <div class="gc-main"><div class="gc-name">${recipeLink(m.recipe)}</div>
+        <div class="gc-meta">${[m.recipe.minutes ? `${m.recipe.minutes} min` : '', escapeHtml(m.reason || '')].filter(Boolean).join(' · ')}</div></div>
+      <button class="btn secondary gc-reroll" type="button" data-course="${m.course}" ${guestState.busy ? 'disabled' : ''}>🎲 ${t('planReroll')}</button>
+    </div>`).join('');
+  el('guest-courses').querySelectorAll('.gc-reroll').forEach((b) => b.addEventListener('click', () => guestReroll(b.dataset.course)));
+  el('guest-status').textContent = meta.planned ? `✓ ${t('guestPlanned')}` : '';
+  renderPrep('guest-prep', meta.prep);
+}
+
+async function guestRequest(url, body, method = 'POST') {
+  const res = await fetch(url, method === 'GET' ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+
+function guestBusy(on) {
+  guestState.busy = on;
+  el('guest-progress').classList.toggle('hidden', !on);
+  el('gm-start').disabled = on;
+  if (on) el('guest-error').classList.add('hidden');
+}
+
+el('guest-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const courses = [...el('guest-form').querySelectorAll('.gm-courses input:checked')].map((i) => i.value);
+  guestBusy(true);
+  el('guest-shopping').classList.add('hidden');
+  try {
+    renderGuestMenu(await guestRequest('/api/guest-menu', {
+      occasion: el('gm-occasion').value, date: el('gm-date').value, persons: +el('gm-persons').value,
+      courses, guests_never: el('gm-never').value, wishes: el('gm-wishes').value,
+    }));
+  } catch (err) {
+    el('guest-error').textContent = err.message;
+    el('guest-error').classList.remove('hidden');
+  } finally {
+    guestBusy(false);
+    if (guestState.job) renderGuestMenu(guestState.job);
+  }
+});
+
+async function guestReroll(course) {
+  guestBusy(true);
+  try {
+    renderGuestMenu(await guestRequest(`/api/guest-menu/${guestState.job.id}/reroll`, { course }));
+  } catch (err) {
+    el('guest-error').textContent = err.message;
+    el('guest-error').classList.remove('hidden');
+  } finally {
+    guestBusy(false);
+    renderGuestMenu(guestState.job);
+  }
+}
+
+el('guest-shopping-btn').addEventListener('click', async () => {
+  try {
+    const data = await guestRequest(`/api/guest-menu/${guestState.job.id}/shopping-list`, null, 'GET');
+    el('guest-shopping-text').value = shoppingText(data);
+    el('guest-shopping-share').classList.toggle('hidden', !navigator.share);
+    el('guest-shopping').classList.remove('hidden');
+  } catch (err) {
+    el('guest-status').textContent = `${t('planShoppingFailed')}: ${err.message}`;
+  }
+});
+
+el('guest-shopping-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(el('guest-shopping-text').value); } catch (err) {
+    el('guest-shopping-text').select();
+    document.execCommand('copy');
+  }
+  el('guest-status').textContent = t('planShoppingCopied');
+});
+el('guest-shopping-share').addEventListener('click', () => {
+  navigator.share({ text: el('guest-shopping-text').value }).catch(() => { /* cancelled */ });
+});
+
+el('guest-plan-btn').addEventListener('click', async () => {
+  const select = el('mp-meal');
+  const option = select.options[select.selectedIndex];
+  if (!option) return;
+  el('guest-plan-btn').disabled = true;
+  try {
+    await guestRequest(`/api/guest-menu/${guestState.job.id}/plan`, {
+      meal_type: { id: isNaN(+option.value) ? option.value : +option.value, name: option.textContent },
+      add_to_shopping: el('mp-shopping').checked,
+    });
+    guestState.job.meta.planned = true;
+    renderGuestMenu(guestState.job);
+  } catch (err) {
+    el('guest-status').textContent = `⚠️ ${err.message}`;
+  } finally {
+    el('guest-plan-btn').disabled = false;
+  }
+});
+
+async function openGuestMenu() {
+  if (!el('gm-date').value) el('gm-date').value = nextSaturday();
+  if (guestState.job) return;
+  let id = null;
+  try { id = localStorage.getItem('th.guestJob'); } catch (e) { /* none */ }
+  if (!id) return;
+  try {
+    const job = await guestRequest(`/api/tools/jobs/${id}`, null, 'GET');
+    if (job.tool === 'guest_menu') renderGuestMenu(job);
+  } catch (e) { /* gone */ }
+}
 
 // ---------- Changing the plan in a chat ----------
 

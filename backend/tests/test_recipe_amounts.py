@@ -159,7 +159,7 @@ def test_recipes_done_before_get_the_comments_without_ai(monkeypatch, tandoor):
     assert recipe_amounts.needs_amounts(r)
     monkeypatch.setattr(llm_provider, "complete_text", lambda *a, **k: pytest.fail("no AI needed"))
     suggestion = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), r)
-    assert suggestion.summary.startswith("recipe: ingredient comments into the steps")
+    assert suggestion.summary.startswith("recipe: fix the ingredients in the steps")
     assert "AFTER:  250 g Mehl (gesiebt) mit 500 ml Milch und 3 Eier verrühren." in suggestion.preview
     assert [c["index"] for c in suggestion.detail["plan"]["steps"]] == [0]  # step 2: no comments
 
@@ -227,3 +227,33 @@ def test_flagged_suggestions_say_so_in_the_inbox(monkeypatch):
     items = [i for g in data.get("groups", [data]) for i in g.get("items", [])] if isinstance(data, dict) else []
     item = next(i for i in items if i["id"] == s.id)
     assert item["flagged"] is True
+
+
+
+def test_no_zero_pepper_in_new_templates(monkeypatch, tandoor):
+    r = recipe()
+    r["steps"][1]["ingredients"][1].update({"amount": 0, "no_amount": False, "note": "frisch gemahlen"})  # Salz, 0
+    AI(monkeypatch, {"steps": [GOOD["steps"][0], "[[i3]] und [[i4]] in die Pfanne, bei 180 °C 3 Minuten je Seite backen."]})
+    s = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), r)
+    assert "AFTER:  1 EL Butter und Salz (frisch gemahlen) in die Pfanne" in s.preview
+    for i in range(1, 6):
+        tandoor.db.setdefault("food", {})[i] = {"id": i, "name": ["", "Mehl", "Milch", "Ei", "Butter", "Salz"][i]}
+    tandoor.db.setdefault("unit", {})[1] = {"id": 1, "name": "g"}
+    tandoor.add("recipe", r)
+    payload = recipe_amounts.build_payload(tandoor.db["recipe"][7], s.detail["plan"])
+    assert payload["steps"][1]["instruction"].startswith("{{ ingredients[0] }} und Salz (frisch gemahlen) in die Pfanne")
+
+
+def test_old_templates_reading_0_pepper_are_repaired(monkeypatch):
+    r = recipe()
+    r["steps"][1]["instruction"] = "{{ ingredients[0] }} und {{ ingredients[1] }} in die Pfanne geben."
+    r["steps"][1]["ingredients"][1].update({"amount": 0, "no_amount": False})
+    assert recipe_amounts.needs_amounts(r)
+    monkeypatch.setattr(llm_provider, "complete_text", lambda *a, **k: pytest.fail("no AI needed"))
+    s = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), r)
+    assert "BEFORE: 1 EL Butter und 0 Salz in die Pfanne geben." in s.preview
+    assert "AFTER:  1 EL Butter und Salz in die Pfanne geben." in s.preview
+    fixed = s.detail["plan"]["steps"][0]["text"]
+    assert fixed == "{{ ingredients[0] }} und Salz in die Pfanne geben."
+    r["steps"][1]["instruction"] = fixed
+    assert not recipe_amounts.needs_amounts(r)

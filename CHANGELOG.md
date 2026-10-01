@@ -17,13 +17,19 @@
 **Maintain**
 - Amounts into the steps (Tandoor templates that follow the servings,
   Mealie written out), with the ingredients' comments and a proofreading
-  pass; also part of "process new recipes"
+  pass; also part of "process new recipes" and applied right after an import
+  (unless marked ⚠️)
 - Recipe doctor: contradictions found without AI, fixed with it
 - Weak photos found without AI, improved with the image AI
 - Changes by chat, from a fixed catalog of actions, with a warning first
 
 **Plan**
-- Household profile: persons, never / rather not, fixed weekdays
+- Household profile: persons, never / rather not, fixed weekdays,
+  nutrition goals (max. kcal, min. protein per serving, more in words)
+- Guest menu: one recipe per course from your collection, swap a course,
+  into the meal plan for the guests, shopping list
+- Meal-prep plan for the week and work plan for a guest menu (clock times
+  back from "ready at")
 - The weekly plan uses up rests (cream, herbs …) across the week
 - Shopping list to share, grouped by supermarket aisle
 

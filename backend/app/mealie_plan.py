@@ -74,6 +74,7 @@ def as_tandoor(recipe: dict) -> dict:
         "working_time": minutes(recipe), "waiting_time": 0,
         "rating": recipe.get("rating") or None, "last_cooked": recipe.get("lastMade"),
         "servings": recipe.get("recipeServings") or recipe.get("recipeYieldQuantity") or None,
+        "nutrition": recipe.get("nutrition") or None,
         "steps": [{"ingredients": ingredients}],
     }
 
@@ -108,21 +109,23 @@ def plan_entries(client, start: dt.date, end: dt.date) -> list[dict]:
     return result
 
 
-def create_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool) -> dict:
+def create_entry(client, recipe: dict, date: str, meal_type: dict, add_to_shopping: bool,
+                 persons: int | None = None) -> dict:
     entry_type = meal_type.get("id") if meal_type.get("id") in ENTRY_TYPES else "dinner"
     entry = mealie_client._check(client.post("/households/mealplans", json={
         "date": date[:10], "entryType": entry_type, "recipeId": recipe["id"], "title": "", "text": ""}),
         "the meal-plan entry").json()
     if add_to_shopping:
-        add_to_shopping_list(client, recipe["id"], _scale(client, recipe))
+        add_to_shopping_list(client, recipe["id"], _scale(client, recipe, persons))
     return entry
 
 
-def _scale(client, recipe: dict) -> float:
-    """How many times the recipe goes on the shopping list: the household's
-    persons relative to the recipe's servings (1 without a profile)."""
+def _scale(client, recipe: dict, persons: int | None = None) -> float:
+    """How many times the recipe goes on the shopping list: the persons
+    (given, else the household's) relative to the recipe's servings (1
+    without either)."""
     from . import household
-    persons = household.get()["persons"]
+    persons = persons or household.get()["persons"]
     if not persons:
         return 1
     servings = recipe.get("servings")
