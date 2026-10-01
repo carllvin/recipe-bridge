@@ -2925,7 +2925,13 @@ function prepText(plan) {
     ph.tasks.forEach((tk) => lines.push(`• ${tk.text}${tk.minutes ? ` (${tk.minutes} min)` : ''}`));
   });
   if (plan.keeping.length) lines.push('', `*${t('prepKeeping')}*`, ...plan.keeping.map((k) => `• ${k}`));
+  if ((plan.oven || []).length) lines.push('', `*${t('prepOven')}*`, ...prepOvenLines(plan.oven));
   return lines.join('\n');
+}
+
+function prepOvenLines(oven) {
+  return oven.map((g, i) => `${oven.length > 1 ? `${i + 1}) ` : ''}${g.temperature} °C: ${
+    g.dishes.map((d) => `${d.recipe}${d.minutes ? ` ${d.minutes} min` : ''}${d.original.startsWith(`${g.temperature} °C,`) || d.original === `${g.temperature} °C` ? '' : ` (${d.original})`}`).join(', ')}`);
 }
 
 function renderPrep(box, plan) {
@@ -2933,10 +2939,13 @@ function renderPrep(box, plan) {
   el(box).innerHTML = `<div class="prep-head"><h4>🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` · ~${plan.total_minutes} min` : ''}</h4>
       <button class="btn secondary prep-copy" type="button">${t('planShoppingCopy')}</button></div>
     <div class="settings-hint">${escapeHtml(plan.recipes.join(' · '))}</div>
-    ${plan.phases.map((ph) => `<div class="prep-phase"><h5>${escapeHtml([ph.time, ph.title].filter(Boolean).join(' – '))}</h5><ul>
+    ${plan.phases.map((ph) => `<div class="prep-phase"><h5>${escapeHtml([ph.time, ph.title].filter(Boolean).join(' – '))}</h5>
+      ${ph.warning === 'oven' ? `<div class="inbox-error">⚠️ ${t('prepOvenWarning')}</div>` : ''}<ul>
       ${ph.tasks.map((tk) => `<li>${escapeHtml(tk.text)}${tk.minutes ? ` <span class="prep-for">(${tk.minutes} min)</span>` : ''}${
         tk.recipes.length ? ` <span class="prep-for">– ${escapeHtml(tk.recipes.join(', '))}</span>` : ''}</li>`).join('')}</ul></div>`).join('')}
-    ${plan.keeping.length ? `<div class="prep-keeping"><strong>${t('prepKeeping')}</strong><ul>${plan.keeping.map((k) => `<li>${escapeHtml(k)}</li>`).join('')}</ul></div>` : ''}`;
+    ${plan.keeping.length ? `<div class="prep-keeping"><strong>${t('prepKeeping')}</strong><ul>${plan.keeping.map((k) => `<li>${escapeHtml(k)}</li>`).join('')}</ul></div>` : ''}
+    ${(plan.oven || []).length ? `<div class="prep-keeping"><strong>🔥 ${t('prepOven')}</strong><ul>${prepOvenLines(plan.oven).map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>
+      ${plan.oven.some((g) => g.dishes.length > 1) ? `<div class="settings-hint">${t('prepOvenHint')}</div>` : ''}</div>` : ''}`;
   el(box).classList.remove('hidden');
   el(box).querySelector('.prep-copy').addEventListener('click', async (e) => {
     try { await navigator.clipboard.writeText(prepText(plan)); e.target.textContent = t('planShoppingCopied'); } catch (err) { /* http */ }
