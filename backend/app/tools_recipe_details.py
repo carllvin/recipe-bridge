@@ -14,7 +14,7 @@ import os
 import tempfile
 import uuid
 
-from . import ignored, image_gen, recipe_scope, llm_provider, tandoor_client, tool_jobs, tools_tags
+from . import ignored, image_gen, photo_quality, recipe_scope, llm_provider, tandoor_client, tool_jobs, tools_tags
 from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import chunked
@@ -213,6 +213,84 @@ def apply_image_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             tandoor_client.upload_image(client, d["recipe_id"], path)
+        suggestion.status = "applied"
+    except Exception as exc:  # noqa: BLE001
+        suggestion.status, suggestion.error = "error", str(exc)
+    finally:
+        if path and os.path.exists(path):
+            os.remove(path)
+        tool_jobs.save_tool_job(job)
+    return suggestion
+
+
+# ---------- weak photos (photo_quality) ----------
+
+def photo_suggestion(recipe_id, name, address, problems) -> ToolSuggestion:
+    return ToolSuggestion(
+        id=uuid.uuid4().hex[:10], kind="enhance_image",
+        summary=f"improve the photo of {name!r} ({photo_quality.describe(problems)})",
+        detail={"recipe_id": recipe_id, "recipe_name": name, "image": address, "problems": problems})
+
+
+def photo_cost(count) -> str:
+    return (f"{count} weak photo(s), found without AI. Nothing is improved yet - each photo is improved (and "
+            f"paid) only when you apply its suggestion.")
+
+
+def enhanced_file(detail, current_address, fetch) -> str:
+    """The improved photo as a temporary file (the caller uploads and
+    removes it). Refuses when the photo was replaced since the scan."""
+    if not current_address:
+        raise tandoor_client.TandoorError("The recipe has no photo any more.")
+    if current_address != detail["image"]:
+        raise tandoor_client.TandoorError("The photo was replaced since the scan - check it again.")
+    data = image_gen.enhance_image(fetch(current_address))
+    fd, path = tempfile.mkstemp(suffix=".png", dir=settings.data_dir if os.path.isdir(settings.data_dir) else None)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    photo_quality.forget(current_address)
+    return path
+
+
+def run_photos_scan(job_id: str) -> None:
+    job = tool_jobs.get_tool_job(job_id)
+    if job is None:
+        return
+    try:
+        if not image_gen.is_configured():
+            job.status, job.error = "error", image_gen.missing_key_hint()
+            tool_jobs.save_tool_job(job)
+            return
+        with tandoor_client.get_client() as client:
+            job.progress_label = "Checking the photos (no AI)..."
+            tool_jobs.save_tool_job(job)
+            recipes = recipe_scope.recipes_for(client, "recipes_weak_image", lambda r: bool(r.get("image")),
+                                               ignored.keys("recipes_weak_image"), job)
+            weak = photo_quality.problems_of({str(r["id"]): r["image"] for r in recipes if r.get("image")},
+                                             photo_quality.fetcher(client))
+        job.suggestions = [photo_suggestion(r["id"], r.get("name", ""), r["image"], weak[str(r["id"])])
+                           for r in recipes if str(r["id"]) in weak]
+        job.cost_estimate = photo_cost(len(job.suggestions))
+        job.status = "ready"
+        job.progress_label = None
+        tool_jobs.save_tool_job(job)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Photo check failed for job %s", job_id)
+        job.status, job.error = "error", str(exc)
+        tool_jobs.save_tool_job(job)
+
+
+def apply_photo_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
+    job, suggestion = _suggestion(job_id, suggestion_id)
+    if suggestion.status != "pending":
+        return suggestion
+    path = None
+    try:
+        with tandoor_client.get_client() as client:
+            resp = client.get(f"/recipe/{suggestion.detail['recipe_id']}/")
+            resp.raise_for_status()
+            path = enhanced_file(suggestion.detail, resp.json().get("image"), photo_quality.fetcher(client))
+            tandoor_client.upload_image(client, suggestion.detail["recipe_id"], path)
         suggestion.status = "applied"
     except Exception as exc:  # noqa: BLE001
         suggestion.status, suggestion.error = "error", str(exc)

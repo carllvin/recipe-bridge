@@ -4,10 +4,11 @@ A companion web app for your self-hosted recipe manager –
 [Tandoor Recipes](https://tandoor.dev/) or [Mealie](https://mealie.io/).
 It **imports recipes from almost anywhere** – cookbooks (PDF, EPUB, Word),
 phone photos and handwritten cards, web pages, whole recipe websites,
-browser bookmarks, pasted text – with the help of an AI (Claude, ChatGPT or
-Gemini), **keeps your collection tidy** (duplicates, translations, tags,
-nutrition, unit conversions …) and **helps you plan meals** from your own
-recipes. It never changes anything behind your back: every change is shown
+cooking videos, voice notes, browser bookmarks, pasted text – with the help
+of an AI (Claude, ChatGPT, Gemini or a local model), **keeps your collection
+tidy** (duplicates, translations, tags, nutrition, unit conversions,
+contradictions, weak photos … – or just ask in a chat) and **helps you plan
+meals** from your own recipes, for your household. It never changes anything behind your back: every change is shown
 as a suggestion first, and with Tandoor applied changes can be undone.
 
 > **Beta** – version 1.0 is feature-complete but hasn't run on many
@@ -56,19 +57,28 @@ bar). Texts in the app name your recipe manager – "Tandoor" or "Mealie".
 - **Browser bookmarks** – the HTML export of Chrome, Firefox, Safari or Edge
   opens a pick list with the bookmark folders as a filter.
 
-**From the web and the clipboard** – three tabs below the import area:
+**From the web and the clipboard** – one field below the import area; the
+app recognizes what you paste:
 
-- **🔗 Link** – a single recipe page. Afterwards the app offers to scan the
-  same website for more recipes.
-- **🌐 Scan a website** – enter a food blog's homepage or a category page.
-  The app looks for recipe pages – via the site's sitemap, or by following
-  the links of the page you entered up to the chosen **depth** (1–4 levels,
-  incl. "page 2, 3 …") – and recognizes them by the recipe data they embed
-  (schema.org), **without AI**. Results show up while it runs, with photo,
-  time and an *already in your collection* mark; you pick which ones to
-  import. It respects the site's `robots.txt`, reads at most one page per
-  second and checks up to 300 pages.
-- **📝 Paste text** – a recipe from a message, an email or a note.
+- **A recipe page** – imported directly. **🌐 Scan the whole website**
+  instead looks for more recipes on the same site: via its sitemap, or by
+  following the links of the page you entered up to the chosen **depth**
+  (1–4 levels, incl. "page 2, 3 …") – and recognizes them by the recipe
+  data they embed (schema.org), **without AI**. Results show up while it
+  runs, with photo, time and an *already in your collection* mark; you pick
+  which ones to import. It respects the site's `robots.txt`, reads at most
+  one page per second and checks up to 300 pages.
+- **A cooking video** from **YouTube, Instagram or TikTok** – the AI reads
+  the recipe from the description or caption, and for YouTube also from the
+  subtitles (what is said in the video). If a site only shows a login page,
+  the app says so – then paste the caption as text.
+- **Recipe text** – from a message, an email or a note.
+
+**🎙️ Dictate a recipe** – record it in the app (or share / drop a voice note:
+m4a, mp3, ogg, opus, wav, webm). It is transcribed and then read like a
+pasted text. Needs an OpenAI or Gemini key (also when `AI_PROVIDER` is
+`anthropic`) or a local transcription model, see
+[Local AI](#local-ai-ollama--co).
 
 <p align="center">
   <img src="screenshots/scan.png" alt="Picking recipes found by the website scan" width="70%">
@@ -88,6 +98,11 @@ no recipe are skipped and listed in the review.
   on a recipe page sends it to the app.
 - **📂 Watched folder** – files put into a folder (`WATCH_DIR`) are imported
   on their own and wait under ✅ Review → *New imports*.
+- **🚚 Move from Tandoor / Mealie** – when both are configured, all recipes
+  (or one cookbook) of the other recipe manager come over **without AI**:
+  ingredient sections, steps, times, tags, photos and source links. They go
+  through the normal review (recipes that exist already are deselected) and
+  into the cookbooks they were in before.
 
 Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
 **converted to metric** on the way.
@@ -135,8 +150,14 @@ grouped by kind:
   details** (plural, nutrition, supermarket category), **gram conversions**,
   **recipe revisions** (one block of text split into steps, ingredients
   assigned to steps – with a before/after preview), **translations**,
-  **tags & season**, **servings**, **photos** and **unused entries**. (The
-  weekly plan is reviewed and added on the 📅 Plan page itself.)
+  **tags & season**, **servings**, **photos**, **amounts in the steps**,
+  **contradictions** and **unused entries**. (The weekly plan is reviewed
+  and added on the 📅 Plan page itself.)
+- When an ingredient like *gemahlene Mandeln* is renamed to or merged into
+  *Mandeln*, the preparation (*gemahlen*) goes into the note of every
+  recipe line that used it.
+- Suggestions marked **⚠️** need a look first (e.g. a sentence that may not
+  read well, a change to many recipes) – *Select all* leaves them out.
 - Tick what you want and **Apply** or **Skip**. Applying runs **in the
   background on the server**, strictly one after another – you can close the
   page; the queue even survives a restart.
@@ -157,14 +178,16 @@ grouped by kind:
   away, then suggests revising their structure, matching their
   ingredients/units/tags to existing ones, filling in ingredient details and
   conversions (Tandoor) and adding tags. Recipes imported through this app
-  were already covered by the review.
+  were already covered by the review – they only get the *amounts into the
+  steps* suggestion (see below).
 - **State of your collection** counts what's left to do – without AI – in
   groups:
   - *Ingredients*: possible duplicates, without nutrition or supermarket
     category, missing conversions, unused;
   - *Units*: possible duplicates, unused;
   - *Recipes*: not in your language, one block of text / all ingredients in
-    step 1, without a season, few tags, without servings, without a photo;
+    step 1, steps without amounts, contradictions, without a season, few
+    tags, without servings, without a photo, weak photos;
   - *Tags*: not in a tag group, unused.
 
   **Fix** starts the tool for exactly that tile (e.g. only the likely
@@ -174,6 +197,34 @@ grouped by kind:
   collection (all ingredients, all units, tag translate & simplify). Tiles
   show when a fix is running or waiting for review, and the overview
   recounts on its own after you applied something.
+- **Steps without amounts** – "Das Mehl mit der Milch verrühren" becomes
+  "250 g Mehl mit 500 ml Milch verrühren", with an ingredient's comment in
+  brackets. The AI only marks where an ingredient is mentioned – it never
+  writes a number: with Tandoor the step gets Tandoor's templates
+  (`{{ ingredients[0] }}`), so the amounts follow when you change the
+  servings; with Mealie they are written out. A second AI pass proofreads
+  each step as it will read; doubtful ones are marked ⚠️.
+- **Contradictions** (recipe doctor) – found without AI: an ingredient no
+  step mentions, a step naming an ingredient that isn't in the list, an
+  amount that can't be right (400 g salt for 4 servings), a time that
+  doesn't fit the method. Only for those, the AI proposes a fix; if it finds
+  a false alarm, the recipe goes on the tile's ignore list.
+- **Weak photos** – too dark, too bright, washed out, blurry or too small,
+  measured from the pixels **without AI** (each photo once). Applying a
+  suggestion improves the photo with the image AI (`IMAGE_GEN_ENABLED`).
+- **💬 Changes by chat** – ask in plain words: "every recipe with salmon gets
+  the tag Fisch", "rename Paprika rot to rote Paprika", "put all soups into
+  the cookbook Winter", "which recipes have no photo?". The AI only picks
+  from a fixed set of actions (rename/merge ingredients, units, tags;
+  add/remove/delete tags; servings; cookbook; supermarket category; find)
+  and describes which recipes are meant – the app finds them itself. Every
+  change is shown with the recipes it touches and applied only on a click;
+  changes to more than 50 recipes and deleting a tag need a second click. A
+  warning has to be confirmed once before the chat can be used.
+
+  <p align="center">
+    <img src="screenshots/chat.png" alt="Asking for changes in the maintenance chat" width="75%">
+  </p>
 - **Automation & budget** (stored in the app, no restart needed):
   - *Automatic maintenance* – at a chosen time every N days, prepare
     suggestions for the selected tiles.
@@ -188,6 +239,12 @@ grouped by kind:
   <img src="screenshots/plan.png" alt="How was it, what can I cook today and the weekly plan" width="85%">
 </p>
 
+- **🏠 Household** – how many people eat, what must **never** be in a dish
+  (allergies, intolerances), what you'd **rather not** eat, and fixed wishes
+  per weekday ("Friday: pizza"). The weekly plan, its chat and *what can I
+  cook today?* follow it: recipes with a "never" ingredient are left out,
+  disliked ones come last, and planned days get the number of persons as
+  servings (the shopping list scales the amounts).
 - **How was it?** – rate the meals you planned in the last days. With
   Tandoor the rating goes in as a cook log, with Mealie as your rating plus
   the recipe's "last made" date – either way the weekly plan uses it.
@@ -203,14 +260,20 @@ grouped by kind:
     leafy greens, herbs, berries – come first, pantry and frozen dishes
     towards the end;
   - it prefers recipes that use what's **already at home** (typed or from a
-    fridge photo);
+    fridge photo), and **uses up rests**: an ingredient that usually leaves
+    a rest (cream, fresh herbs, feta …) is planned again a day or two later
+    – each day shows it ("🔁 Feta: Tue");
   - it follows your wishes ("2x vegetarian, quick on weekdays"), the season,
     variety, your ratings and how long ago you cooked something;
   - days that are already planned are left out, any day can be re-rolled,
     and a **chat** below the week changes it on request ("something with
     beef on Thursday", "swap Monday and Wednesday");
   - the selected days go into the meal plan, optionally with the
-    ingredients on the shopping list.
+    ingredients on the shopping list;
+  - **🛒 Shopping list to share** – the ingredients of the planned days
+    added up, scaled to the household and grouped by supermarket aisle
+    (Tandoor's categories, Mealie's labels), as text for a messenger or to
+    copy; staples and what's at home come under *check the pantry*.
 
 ### On the phone
 
@@ -232,9 +295,12 @@ default).
 | | Tandoor | Mealie |
 |---|---|---|
 | Import (all sources), review, matching | ✓ | ✓ |
-| Weekly plan, what can I cook today, how was it | ✓ | ✓ (rating + "last made" instead of a cook log) |
+| Weekly plan, what can I cook today, how was it, household, shopping list to share | ✓ | ✓ (rating + "last made" instead of a cook log) |
 | Duplicates, unused entries, servings, photos | ✓ | ✓ |
 | Tags (clean up, season, more tags), translate & revise recipes, process new recipes | ✓ | ✓ |
+| Amounts into the steps | ✓ (templates – follow the servings) | ✓ (written out) |
+| Contradictions, weak photos, changes by chat | ✓ | ✓ (chat without supermarket categories) |
+| Moving recipes from the other one | ✓ | ✓ |
 | Automatic maintenance | ✓ | ✓ (for the tiles above) |
 | Nutrition, supermarket categories, unit conversions, tag groups | ✓ | – (no matching data model) |
 | Undo applied changes | ✓ | – (every change is still reviewed first) |
@@ -259,8 +325,10 @@ Pi or a Synology), so there's nothing to build.
    ```
 
 2. **Fill in `.env`** – at least:
-   - `AI_PROVIDER` – `anthropic` (Claude), `openai` (ChatGPT) or `gemini` (Google)
-   - the matching API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`)
+   - `AI_PROVIDER` – `anthropic` (Claude), `openai` (ChatGPT), `gemini`
+     (Google) or `compatible` (a local model, see [Local AI](#local-ai-ollama--co))
+   - the matching API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or
+     `GEMINI_API_KEY`), or `COMPATIBLE_BASE_URL` and `COMPATIBLE_MODEL`
    - **Tandoor:** `TANDOOR_URL` (**without** a trailing slash) and
      `TANDOOR_TOKEN` (in Tandoor: *user menu → Settings → API → create new
      token*)
@@ -316,7 +384,8 @@ If you build it yourself: `git pull` and the build command above.
 ### In the app
 
 *Automatic maintenance* and the *monthly AI budget* are set on the 🔧
-Maintain page and stored in the data volume – no restart needed.
+Maintain page, the *household profile* on the 📅 Plan page – stored in the
+data volume, no restart needed.
 
 ### `.env`
 
@@ -324,10 +393,12 @@ Maintain page and stored in the data volume – no restart needed.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AI_PROVIDER` | `anthropic` | `anthropic`, `openai` or `gemini` |
+| `AI_PROVIDER` | `anthropic` | `anthropic`, `openai`, `gemini` or `compatible` (any OpenAI-compatible API) |
 | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | – / `claude-sonnet-4-6` | Used when `AI_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | – / `gpt-4o` | Used when `AI_PROVIDER=openai` |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | – / `gemini-2.5-flash` | Used when `AI_PROVIDER=gemini` |
+| `COMPATIBLE_BASE_URL` / `COMPATIBLE_MODEL` / `COMPATIBLE_API_KEY` | – | Used when `AI_PROVIDER=compatible`, see [Local AI](#local-ai-ollama--co) |
+| `OPENAI_TRANSCRIBE_MODEL` / `COMPATIBLE_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` / – | Speech-to-text for voice notes (OpenAI, or a local server; Gemini transcribes with its main model) |
 | `CLAUDE_TOOLS_MODEL` / `OPENAI_TOOLS_MODEL` / `GEMINI_TOOLS_MODEL` | `claude-haiku-4-5-20251001` / – / – | Cheaper model for the maintenance tools and the weekly plan. Cookbook extraction and recipe translation keep the main model. Empty = main model |
 | `RECIPE_MANAGER` | `tandoor` | `tandoor` or `mealie` |
 | `TANDOOR_URL` / `TANDOOR_TOKEN` | – | Your Tandoor instance and API token |
@@ -394,14 +465,34 @@ at [Anthropic](https://docs.claude.com/en/docs/about-claude/models),
 [OpenAI](https://platform.openai.com/docs/models) and
 [Google](https://ai.google.dev/gemini-api/docs/models).
 
+### Local AI (Ollama & co.)
+
+`AI_PROVIDER=compatible` works with any server that offers an
+OpenAI-compatible API – Ollama, LM Studio, vLLM, LocalAI, or a service like
+OpenRouter:
+
+```bash
+AI_PROVIDER=compatible
+COMPATIBLE_BASE_URL=http://ollama:11434/v1
+COMPATIBLE_MODEL=qwen2.5:14b
+# optional: COMPATIBLE_TOOLS_MODEL (smaller model for the tools),
+# COMPATIBLE_API_KEY, COMPATIBLE_TIMEOUT_SECONDS (default 600),
+# COMPATIBLE_TRANSCRIBE_MODEL (speech-to-text for voice notes)
+```
+
+Small local models make more mistakes in long cookbook extractions; for
+photos of pages and the fridge photo the model must be able to read images.
+Everything is still reviewed before it changes your collection.
+
 Keeping costs down:
 
 - The maintenance tools and the weekly plan use the cheaper **tools model**,
   batch many items per request and send only what's needed (e.g. only likely
   duplicates, only recipes that really need a revision).
-- The collection overview, duplicate detection, the website scan, the
-  matching of *what can I cook today?* and the matching before import work
-  **without AI**.
+- The collection overview (including the checks for contradictions and
+  weak photos), duplicate detection, the website scan, moving recipes from
+  the other recipe manager, the matching of *what can I cook today?* and
+  the matching before import work **without AI**.
 - A token badge in the top bar shows what the current import costs; the
   Maintain page shows the usage of the last 30 days per tool.
 - Set a **monthly budget** on the Maintain page so automatic runs stop when
@@ -418,8 +509,9 @@ Everything the app keeps lives in the Docker volume `recipe_bridge_data`
   `JOB_RETENTION_HOURS`),
 - tool runs and suggestions waiting for review, the background queue, the
   last weekly plan with its chat,
-- the undo history (14 days), ignored entries, settings, AI usage, the
-  ingredient index for *what can I cook today?*.
+- the undo history (14 days), ignored entries, settings (incl. the
+  household profile), AI usage, the ingredient index for *what can I cook
+  today?*, the measured photo quality.
 
 Your recipes themselves are always in Tandoor or Mealie – the app doesn't
 have a recipe database of its own. To back up its state, back up the
@@ -484,6 +576,8 @@ backend/
 
     # Import
     pdf_processor.py, epub_processor.py, image_processor.py, url_processor.py (web pages, link lists)
+    video_processor.py      YouTube / Instagram / TikTok: description, caption, subtitles
+    migration.py            Moving recipes from the other recipe manager (no AI)
     docx_processor.py, text_processor.py   Word documents; pasted text, Markdown, .txt (links or text)
     site_scan.py            Website scan: sitemap / link crawl, schema.org recipe detection (no AI)
     ocr.py, image_preprocessing.py   Tesseract OCR, deskew/crop, two-page spreads
@@ -497,13 +591,20 @@ backend/
     apply_queue.py          Background queue that applies/skips/undoes suggestions
     undo.py                 Undo journals: replays recorded writes backwards (Tandoor)
     tools_*.py, recipe_restructure.py, nutrition_properties.py   The individual tools
+    recipe_amounts.py       Amounts into the steps (Tandoor templates / written out), proofreading
+    recipe_doctor.py        Contradictions inside a recipe (found without AI, fixed with it)
+    photo_quality.py        Weak photos, measured from the pixels
+    prep_notes.py           "gemahlene Mandeln" -> "Mandeln" + note "gemahlen"
+    db_chat.py              Changes by chat: fixed action catalog, recipes found by the app
     tools_new_recipes.py    "Process new recipes" workflow and its automatic runs
     mealie_maintenance.py, mealie_tools.py   The tiles and tools with Mealie
     health.py, duplicates.py, ignored.py   Collection overview (no AI)
     maintenance.py, app_settings.py, usage_log.py, notify.py   Automation, budget, usage, notifications
 
     # Plan
-    tools_meal_plan.py      Weekly plan and its chat
+    tools_meal_plan.py      Weekly plan and its chat, rests across the week
+    household.py            Household profile (persons, never / rather not, fixed days)
+    shopping_text.py        Shopping list to share
     perishability.py        Which ingredients spoil quickly (order of the week)
     cook_today.py           "What can I cook today?" ingredient index, matching, fridge photo
     cook_feedback.py        "How was it?"
@@ -519,8 +620,10 @@ backend/
 
 The tricky parts – merging and undo against an in-memory fake Tandoor, the
 Mealie import, tools and planning against a fake Mealie, the background
-queue, duplicate detection, the weekly plan and its chat, *what can I cook
-today?*, budget and schedule, the review inbox – have automated tests. They
+queue, duplicate detection, the weekly plan and its chat, the household
+profile, *what can I cook today?*, video, voice and migration imports, the
+amounts in the steps, the recipe doctor, the photo check, the maintenance
+chat, budget and schedule, the review inbox – have automated tests. They
 need neither a recipe manager nor an AI key and run in a few seconds:
 
 ```bash
@@ -548,6 +651,17 @@ for a pull request that touches the Dockerfile it only builds it.
 - Ingredient-to-step assignment and image matching are done by the AI or
   heuristically – worth a glance in the review screen for complex recipes.
 - Duplicate recipe detection compares titles only, not ingredients.
+- **Allergies** in the household profile are matched by name (ingredients
+  and title) and told to the AI as well – check the plan anyway when it
+  really matters.
+- **Video links**: YouTube, Instagram and TikTok change often and sometimes
+  show bots a login or consent page – then only the caption (or nothing) is
+  found.
+- **Amounts in the steps** with Tandoor use its templates; the comment in
+  brackets uses `{{ ingredients[n].note }}` – if your Tandoor version shows
+  `()` instead, please report it.
+- The **photo check** measures at most 200 new photos per overview refresh;
+  large collections fill the tile over several refreshes.
 - The freshness order of the weekly plan is based on ingredient names
   (German and English word lists) – unusual names may not be recognized.
 - The website scan only finds pages that embed schema.org recipe data, and

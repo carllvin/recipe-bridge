@@ -1227,7 +1227,7 @@ a { color: inherit; }
 .plan-shopping-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 
 /* Maintain -> chat (db_chat) */
-.db-chat { margin-bottom: 18px; }
+.db-chat { margin: 18px 0; }
 .db-chat-card { align-self: stretch; border: 1px solid #2a2f2a; border-radius: var(--radius); padding: 8px 11px; font-size: 0.86rem;
   background: rgba(239,233,218,0.03); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .db-chat-card .db-chat-summary { flex: 1 1 260px; }
