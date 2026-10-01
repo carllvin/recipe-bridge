@@ -15,7 +15,7 @@ import re
 import threading
 import time
 
-from . import mealie_plan, seasonal, tandoor_client, target
+from . import mealie_plan, nutrition, seasonal, tandoor_client, target
 from .config import settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -59,6 +59,7 @@ def build_index(recipes) -> list[dict]:
             "id": r["id"], "slug": r.get("slug"), "name": r.get("name", ""), "foods": list(foods.values()),
             "minutes": (r.get("working_time") or 0) + (r.get("waiting_time") or 0),
             "rating": r.get("rating"), "last_cooked": r.get("last_cooked"),
+            "nutrition": nutrition.per_serving(r),
         })
     return index
 
@@ -86,6 +87,12 @@ def at_home_in(have: list[str], foods) -> list[str]:
 
 def parse_have(text) -> list[str]:
     return [_norm(h) for h in re.split(r"[,;\n]+", text or "") if _norm(h)]
+
+
+def nutrition_by_recipe() -> dict:
+    """Recipe id -> {"kcal", "protein"} per serving (None where unknown)."""
+    data = _load()
+    return {r["id"]: r.get("nutrition") or {} for r in data["recipes"]} if data else {}
 
 
 def seasonal_by_recipe() -> dict[int, list[str]]:

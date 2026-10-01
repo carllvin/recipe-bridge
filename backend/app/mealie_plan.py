@@ -74,6 +74,7 @@ def as_tandoor(recipe: dict) -> dict:
         "working_time": minutes(recipe), "waiting_time": 0,
         "rating": recipe.get("rating") or None, "last_cooked": recipe.get("lastMade"),
         "servings": recipe.get("recipeServings") or recipe.get("recipeYieldQuantity") or None,
+        "nutrition": recipe.get("nutrition") or None,
         "steps": [{"ingredients": ingredients}],
     }
 

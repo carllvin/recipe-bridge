@@ -36,6 +36,9 @@ DEFAULTS = {
         "avoid": "",      # allergies / intolerances - never planned
         "dislikes": "",   # rather not
         "weekdays": {},   # "0" (Monday) .. "6" -> a fixed wish, e.g. "4": "Pizza"
+        "max_kcal": 0,    # per serving, 0 = no limit
+        "min_protein": 0,  # g per serving, 0 = no goal
+        "goals": "",      # more, in words: "2x fish a week, little red meat"
     },
 }
 TEXT_MAX = 500
@@ -83,6 +86,9 @@ def update(changes: dict) -> dict:
             "dislikes": str(h["dislikes"] or "").strip()[:TEXT_MAX],
             "weekdays": {str(k): str(v).strip()[:100] for k, v in dict(h["weekdays"] or {}).items()
                          if str(k) in "0123456" and len(str(k)) == 1 and str(v or "").strip()},
+            "max_kcal": min(5000, max(0, int(h["max_kcal"] or 0))),
+            "min_protein": min(300, max(0, int(h["min_protein"] or 0))),
+            "goals": str(h["goals"] or "").strip()[:TEXT_MAX],
         }
         os.makedirs(settings.data_dir, exist_ok=True)
         tmp = _path() + ".tmp"

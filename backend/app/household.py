@@ -46,7 +46,14 @@ def disliked_in(foods, title="", profile=None) -> list[str]:
 
 def is_empty(profile=None) -> bool:
     p = profile or get()
-    return not (p["persons"] or p["avoid"] or p["dislikes"] or p["weekdays"])
+    return not (p["persons"] or p["avoid"] or p["dislikes"] or p["weekdays"] or p.get("max_kcal")
+                or p.get("min_protein") or p.get("goals"))
+
+
+def too_rich(values, profile=None) -> bool:
+    """Known energy per serving above the household's limit."""
+    limit = (profile or get()).get("max_kcal")
+    return bool(limit and values.get("kcal") and values["kcal"] > limit)
 
 
 def for_ai(profile=None) -> dict:
@@ -57,6 +64,9 @@ def for_ai(profile=None) -> dict:
         "never": _words(p["avoid"]),
         "dislikes": _words(p["dislikes"]),
         "fixed_days": {calendar.day_name[int(k)]: v for k, v in sorted(p["weekdays"].items())},
+        "max_kcal_per_serving": p.get("max_kcal") or None,
+        "min_protein_per_serving": p.get("min_protein") or None,
+        "goals": p.get("goals") or "",
     }
 
 

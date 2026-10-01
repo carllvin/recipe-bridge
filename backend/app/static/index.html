@@ -62,6 +62,12 @@
             <input id="hh-avoid" type="text" maxlength="500" data-i18n-placeholder="householdAvoidPlaceholder" placeholder="e.g. nuts, shrimp" /></label>
           <label class="hh-wide"><span data-i18n="householdDislikes">Rather not</span>
             <input id="hh-dislikes" type="text" maxlength="500" data-i18n-placeholder="householdDislikesPlaceholder" placeholder="e.g. mushrooms, coriander" /></label>
+          <label><span data-i18n="householdMaxKcal">Max. kcal per serving</span>
+            <input id="hh-max-kcal" type="number" min="0" max="5000" step="50" placeholder="–" /></label>
+          <label><span data-i18n="householdMinProtein">Min. protein (g) per serving</span>
+            <input id="hh-min-protein" type="number" min="0" max="300" step="5" placeholder="–" /></label>
+          <label class="hh-wide"><span data-i18n="householdGoals">More goals</span>
+            <input id="hh-goals" type="text" maxlength="500" data-i18n-placeholder="householdGoalsPlaceholder" placeholder="e.g. 2x fish a week, little red meat" /></label>
           <div class="hh-wide">
             <span class="hh-label" data-i18n="householdWeekdays">Fixed days</span>
             <div id="hh-weekdays" class="hh-weekdays"></div>

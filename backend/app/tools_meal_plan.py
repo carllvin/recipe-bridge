@@ -17,7 +17,7 @@ import json
 import logging
 import uuid
 
-from . import cook_today, household, json_answer, llm_provider, mealie_plan, perishability, seasonal, tandoor_client, target, tool_jobs
+from . import cook_today, household, json_answer, llm_provider, mealie_plan, nutrition, perishability, seasonal, tandoor_client, target, tool_jobs
 from .config import settings
 from .schemas import ToolJob, ToolSuggestion
 
@@ -28,7 +28,8 @@ RECENTLY_COOKED_DAYS = 14
 
 # The household profile (household.py) as both prompts read it.
 HOUSEHOLD = """HOUSEHOLD is {"persons": number or null, "never": [string], "dislikes": [string],
-"fixed_days": {weekday: wish}}:
+"fixed_days": {weekday: wish}, "max_kcal_per_serving": number or null,
+"min_protein_per_serving": number or null, "goals": string}:
 - NEVER pick a recipe whose title, tags or ingredients contain anything in
   "never" (allergies / intolerances - "Nüsse" also rules out Walnüsse,
   Haselnüsse, Nusskuchen ...)
@@ -36,11 +37,15 @@ HOUSEHOLD = """HOUSEHOLD is {"persons": number or null, "never": [string], "disl
 - on a weekday in "fixed_days" pick a recipe that fits that wish (e.g.
   "Friday": "Pizza" -> a pizza); this comes before the freshness order. If
   nothing fits, take the closest match and say so in "reason"
+- nutrition goals: stay below "max_kcal_per_serving" and reach
+  "min_protein_per_serving" where a recipe's energy/protein are known (the
+  last field of a recipe); follow "goals" over the whole plan (e.g. "2x fish
+  a week" = two days with fish)
 """
 
 # One recipe as the AI sees it (the "recipes" list of both prompts).
 RECIPE_LINE = """Each RECIPE is one line:
-"<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>|<perishable level 3/2 and those ingredients, or ->|<its ingredients that are at home, or ->|<its fresh ingredients that usually leave a rest (cream, fresh herbs, feta ...), or ->"
+"<id>|<title>|<tags>|<minutes>|<rating 1-5 or ->|<days since last cooked or never>|<its in-season ingredients>|<perishable level 3/2 and those ingredients, or ->|<its ingredients that are at home, or ->|<its fresh ingredients that usually leave a rest (cream, fresh herbs, feta ...), or ->|<energy and protein per serving, or ->"
 """
 
 SYSTEM_PROMPT = """You plan meals for a home cook from their own recipe
@@ -149,6 +154,10 @@ def _candidates(client) -> list[dict]:
     if profile["avoid"]:
         foods = cook_today.foods_by_recipe()
         recipes = [r for r in recipes if not household.avoided_in(foods.get(r["id"], []), r.get("name", ""), profile)]
+    # Above the energy limit per serving (where known): out as well.
+    if profile.get("max_kcal"):
+        values = cook_today.nutrition_by_recipe()
+        recipes = [r for r in recipes if not household.too_rich(values.get(r["id"]) or {}, profile)]
     # Well rated and long not cooked first (unrated counts as average); the
     # AI weighs it again, this only decides who makes the capped list.
     recipes.sort(key=lambda r: -((r.get("rating") or 3) + min(_days_since_cooked(r) or 60, 180) / 60))
@@ -168,6 +177,7 @@ class _Lines:
         self.in_season = cook_today.seasonal_by_recipe()
         self.foods = cook_today.foods_by_recipe()
         self.have = cook_today.parse_have(at_home_text)
+        self.nutrition = cook_today.nutrition_by_recipe()
 
     def line(self, r) -> str:
         tags = ",".join(k.get("label") or k.get("name", "") for k in r.get("keywords") or [])
@@ -178,7 +188,8 @@ class _Lines:
         home = cook_today.at_home_in(self.have, foods) if self.have else []
         return (f"{r['id']}|{r.get('name', '')}|{tags}|{_minutes(r) or '?'}|{rating}|{'never' if days is None else days}"
                 f"|{','.join(self.in_season.get(r['id'], []))}|{f'{level}:' + ','.join(perishable) if level else '-'}"
-                f"|{','.join(home) or '-'}|{','.join(perishability.leftovers_of(n[0] for n in foods).values()) or '-'}")
+                f"|{','.join(home) or '-'}|{','.join(perishability.leftovers_of(n[0] for n in foods).values()) or '-'}"
+                f"|{nutrition.line(self.nutrition.get(r['id']) or {})}")
 
 
 def _add_usage(job, usage) -> None:

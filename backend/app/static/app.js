@@ -2602,6 +2602,8 @@ function householdSummary(h) {
   return [
     h.persons ? tf('householdSummaryPersons', { n: h.persons }) : '',
     h.avoid ? `🚫 ${h.avoid}` : '',
+    h.max_kcal ? `≤ ${h.max_kcal} kcal` : '',
+    h.min_protein ? `≥ ${h.min_protein} g ${t('householdProteinShort')}` : '',
     Object.keys(h.weekdays || {}).sort().map((d) => `${weekdayName(+d)}: ${h.weekdays[d]}`).join(', '),
   ].filter(Boolean).join(' · ');
 }
@@ -2610,6 +2612,9 @@ function fillHousehold(h) {
   el('hh-persons').value = h.persons || '';
   el('hh-avoid').value = h.avoid || '';
   el('hh-dislikes').value = h.dislikes || '';
+  el('hh-max-kcal').value = h.max_kcal || '';
+  el('hh-min-protein').value = h.min_protein || '';
+  el('hh-goals').value = h.goals || '';
   el('hh-weekdays').innerHTML = [0, 1, 2, 3, 4, 5, 6].map((d) => `<label><span>${escapeHtml(weekdayName(d))}</span>
     <input type="text" maxlength="100" data-day="${d}" value="${escapeHtml((h.weekdays || {})[d] || '')}" placeholder="–" /></label>`).join('');
   el('household-summary').textContent = householdSummary(h);
@@ -2626,7 +2631,8 @@ el('household-form').addEventListener('submit', async (e) => {
   const weekdays = {};
   el('hh-weekdays').querySelectorAll('input').forEach((i) => { if (i.value.trim()) weekdays[i.dataset.day] = i.value.trim(); });
   const household = { persons: +el('hh-persons').value || 0, avoid: el('hh-avoid').value,
-    dislikes: el('hh-dislikes').value, weekdays };
+    dislikes: el('hh-dislikes').value, weekdays, max_kcal: +el('hh-max-kcal').value || 0,
+    min_protein: +el('hh-min-protein').value || 0, goals: el('hh-goals').value };
   try {
     const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ household }) });
