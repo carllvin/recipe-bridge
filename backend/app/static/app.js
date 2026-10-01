@@ -2796,6 +2796,112 @@ el('plan-shopping-share').addEventListener('click', () => {
   navigator.share({ text: el('plan-shopping-text').value }).catch(() => { /* cancelled */ });
 });
 
+// ---------- Maintain -> chat (changes in plain words) ----------
+const dbChat = { jobId: null, log: [], suggestions: {}, pending: null, confirm: new Set() };
+
+function dbChatCard(s) {
+  const d = s.detail || {};
+  const count = (d.recipe_ids || []).length;
+  let actions = '';
+  if (s.status === 'pending') {
+    const sure = dbChat.confirm.has(s.id);
+    const label = d.confirm && !sure ? t('dbChatApply')
+      : d.confirm ? (count ? tf('dbChatConfirmCount', { n: count }) : t('dbChatConfirm')) : t('dbChatApply');
+    actions = `<button class="btn db-chat-apply" data-id="${s.id}" type="button">${escapeHtml(label)}</button>
+      <button class="btn secondary db-chat-skip" data-id="${s.id}" type="button">${t('dbChatSkip')}</button>`;
+  }
+  const state = s.status === 'applied' ? `✓ ${t('dbChatApplied')}${s.undoable ? ` · ${t('dbChatUndoHint')}` : ''}`
+    : s.status === 'skipped' ? t('dbChatSkipped') : s.status === 'error' ? `⚠️ ${escapeHtml(s.error || '')}` : '';
+  return `<div class="db-chat-card ${s.status}">
+    <span class="db-chat-summary">${escapeHtml(s.summary)}</span>${actions}
+    ${state ? `<span class="db-chat-state">${state}</span>` : ''}
+    ${s.preview ? `<details><summary>${tf('dbChatRecipes', { n: count || s.preview.split('\n').length })}</summary><pre>${escapeHtml(s.preview)}</pre></details>` : ''}
+  </div>`;
+}
+
+function renderDbChat() {
+  const parts = dbChat.log.map((m) => {
+    if (m.role === 'user') return `<div class="plan-chat-msg user">${escapeHtml(m.text)}</div>`;
+    const answers = (m.answers || []).map((a) => `<div class="db-chat-card"><span class="db-chat-summary">${tf('dbChatFound', { n: a.count })}</span>
+      ${a.recipes.length ? `<details><summary>${t('dbChatShow')}</summary><pre>${escapeHtml(a.recipes.map((r) => `• ${r.name}`).join('\n'))}${a.count > a.recipes.length ? '\n…' : ''}</pre></details>` : ''}</div>`).join('');
+    const problems = (m.problems || []).map((p) => `<div class="db-chat-problem">⚠️ ${t('dbChatNotPossible')}: ${escapeHtml(p)}</div>`).join('');
+    const cards = (m.suggestion_ids || []).map((id) => dbChat.suggestions[id]).filter(Boolean).map(dbChatCard).join('');
+    return `<div class="plan-chat-msg assistant">${escapeHtml(m.reply || m.text || '')}</div>${problems}${answers}${cards}`;
+  });
+  if (dbChat.pending) parts.push(`<div class="plan-chat-msg user">${escapeHtml(dbChat.pending)}</div><div class="plan-chat-msg assistant pending">${t('planChatThinking')}</div>`);
+  el('db-chat-log').innerHTML = parts.join('');
+  el('db-chat-log').querySelectorAll('.db-chat-apply').forEach((b) => b.addEventListener('click', () => dbChatAct(b.dataset.id, 'apply')));
+  el('db-chat-log').querySelectorAll('.db-chat-skip').forEach((b) => b.addEventListener('click', () => dbChatAct(b.dataset.id, 'skip')));
+}
+
+async function dbChatAct(id, action) {
+  const s = dbChat.suggestions[id];
+  if (action === 'apply' && (s.detail || {}).confirm && !dbChat.confirm.has(id)) {
+    dbChat.confirm.add(id);  // big change or deleting: a second click
+    renderDbChat();
+    return;
+  }
+  el('db-chat-log').querySelectorAll(`[data-id="${id}"]`).forEach((b) => { b.disabled = true; });
+  try {
+    const res = await fetch(`/api/tools/jobs/${dbChat.jobId}/suggestions/${id}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    dbChat.suggestions[id] = data;
+  } catch (err) {
+    dbChat.suggestions[id] = { ...s, status: 'error', error: err.message };
+  }
+  renderDbChat();
+  updateInboxBadge();
+}
+
+// The warning before the chat: confirmed once per browser.
+function initDbChatWarning() {
+  let accepted = false;
+  try { accepted = localStorage.getItem('th.dbChatAccepted') === '1'; } catch (e) { /* ask again */ }
+  if (isMealie()) {  // nothing to undo with Mealie
+    el('db-chat-warn-undo').setAttribute('data-i18n', 'dbChatWarn2Mealie');
+    el('db-chat-warn-undo').textContent = t('dbChatWarn2Mealie');
+  }
+  el('db-chat-warning').classList.toggle('hidden', accepted);
+  el('db-chat-form').classList.toggle('hidden', !accepted);
+}
+
+el('db-chat-accept').addEventListener('change', () => {
+  if (!el('db-chat-accept').checked) return;
+  try { localStorage.setItem('th.dbChatAccepted', '1'); } catch (e) { /* only for this visit */ }
+  el('db-chat-warning').classList.add('hidden');
+  el('db-chat-form').classList.remove('hidden');
+  el('db-chat-input').focus();
+});
+
+el('db-chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = el('db-chat-input');
+  const message = input.value.trim();
+  if (!message || dbChat.pending) return;
+  dbChat.pending = message;
+  input.value = '';
+  el('db-chat-send').disabled = true;
+  renderDbChat();
+  try {
+    const res = await fetch('/api/tools/db-chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, job_id: dbChat.jobId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    dbChat.jobId = data.job_id;
+    (data.suggestions || []).forEach((s) => { dbChat.suggestions[s.id] = s; });
+    dbChat.log.push({ role: 'user', text: message }, { role: 'assistant', ...data });
+    updateInboxBadge();  // the proposals also show under Review
+  } catch (err) {
+    dbChat.log.push({ role: 'user', text: message }, { role: 'assistant', reply: `⚠️ ${err.message}` });
+  } finally {
+    dbChat.pending = null;
+    el('db-chat-send').disabled = false;
+    renderDbChat();
+  }
+});
+
 // ---------- Changing the plan in a chat ----------
 
 function renderPlanChat(job, show) {
@@ -3291,6 +3397,7 @@ if ('serviceWorker' in navigator) {
   initEnhancePhotos();
   initVoice();
   initMigration();
+  initDbChatWarning();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
