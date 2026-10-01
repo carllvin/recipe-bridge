@@ -70,6 +70,47 @@ def test_work_plan_for_a_guest_menu(tandoor, ai):
     assert ai[0]["recipes"][1]["scale"] == 4
 
 
+def test_guest_menu_courses_one_after_another(tandoor, ai):
+    kitchen(tandoor)
+    tandoor.add("recipe", {"id": 13, "name": "Tarte", "servings": 2,
+                           "steps": [{"instruction": "Bei 180 °C 30 Minuten backen.", "ingredients": []}]})
+    tandoor.add("recipe", {"id": 14, "name": "Braten", "servings": 2,
+                           "steps": [{"instruction": "Bei 170 °C 60 Minuten garen.", "ingredients": []}]})
+    job = tool_jobs.create_tool_job("guest_menu")
+    job.meta = {"params": {"persons": 4, "date": "2026-10-10"},
+                "menu": [{"course": "starter", "recipe": {"id": 12, "name": "Salat"}},
+                         {"course": "main", "recipe": {"id": 14, "name": "Braten"}},
+                         {"course": "side", "recipe": {"id": 11, "name": "Curry"}},
+                         {"course": "dessert", "recipe": {"id": 13, "name": "Tarte"}}]}
+    tool_jobs.save_tool_job(job)
+    data = TestClient(main.app).post("/api/meal-prep", json={"job_id": job.id, "ready_at": "19:30",
+                                                             "course_gap": 25}).json()
+    assert ai[0]["courses"] == [{"course": "starter", "recipes": ["Salat"], "serve_at": "19:30"},
+                                {"course": "main", "recipes": ["Braten"], "serve_at": "19:55"},
+                                {"course": "side", "recipes": ["Curry"], "serve_at": "19:55"},  # with the main
+                                {"course": "dessert", "recipes": ["Tarte"], "serve_at": "20:20"}]
+    # close temperatures, but for different courses: baked course by course
+    assert [(g["temperature"], g["serve_at"]) for g in ai[0]["oven"]] == [(170, "19:55"), (180, "20:20")]
+    assert data["courses"] == ai[0]["courses"]
+
+
+def test_guest_menu_all_together_without_gap(tandoor, ai):
+    kitchen(tandoor)
+    job = tool_jobs.create_tool_job("guest_menu")
+    job.meta = {"params": {"persons": 4, "date": "2026-10-10"},
+                "menu": [{"course": "starter", "recipe": {"id": 12, "name": "Salat"}},
+                         {"course": "main", "recipe": {"id": 11, "name": "Curry"}}]}
+    tool_jobs.save_tool_job(job)
+    TestClient(main.app).post("/api/meal-prep", json={"job_id": job.id, "ready_at": "19:30", "course_gap": "x"})
+    assert ai[0]["courses"] is None
+
+
+def test_serving_times_past_midnight():
+    from app import meal_prep
+    assert meal_prep.serving_times(["starter", "side", "main", "dessert"], "23:30", 20) == \
+        ["23:30", "23:50", "23:50", "00:10"]
+
+
 def test_unknown_run():
     assert TestClient(main.app).post("/api/meal-prep", json={"job_id": "nope"}).status_code == 400
 
@@ -106,6 +147,6 @@ def test_meal_prep_sends_the_oven_plan(tandoor, ai):
                                       detail={"date": "2026-10-03", "recipe": {"id": 20, "name": "Brot"}})]
     tool_jobs.save_tool_job(job)
     data = TestClient(main.app).post("/api/meal-prep", json={"job_id": job.id}).json()
-    assert ai[0]["oven"] == [{"temperature": 230, "dishes": [
+    assert ai[0]["oven"] == [{"temperature": 230, "serve_at": None, "dishes": [
         {"recipe": "Brot", "step": "Bei 230 °C 35 Minuten backen.", "original": "230 °C, 35 min", "minutes": 35}]}]
     assert data["oven"] == ai[0]["oven"]

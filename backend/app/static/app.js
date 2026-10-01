@@ -2920,6 +2920,7 @@ el('db-chat-form').addEventListener('submit', async (e) => {
 function prepText(plan) {
   const lines = [`🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` (~${plan.total_minutes} min)` : ''}`,
     plan.recipes.join(' · ')];
+  if ((plan.courses || []).length) lines.push(prepServing(plan.courses));
   plan.phases.forEach((ph) => {
     lines.push('', `*${[ph.time, ph.title].filter(Boolean).join(' – ')}*`);
     ph.tasks.forEach((tk) => lines.push(`• ${tk.text}${tk.minutes ? ` (${tk.minutes} min)` : ''}`));
@@ -2929,8 +2930,12 @@ function prepText(plan) {
   return lines.join('\n');
 }
 
+function prepServing(courses) {
+  return `${t('prepServing')}: ${courses.map((c) => `${c.serve_at} ${t('course_' + c.course)}`).join(' · ')}`;
+}
+
 function prepOvenLines(oven) {
-  return oven.map((g, i) => `${oven.length > 1 ? `${i + 1}) ` : ''}${g.temperature} °C: ${
+  return oven.map((g, i) => `${oven.length > 1 ? `${i + 1}) ` : ''}${g.temperature} °C${g.serve_at ? ` (→ ${g.serve_at})` : ''}: ${
     g.dishes.map((d) => `${d.recipe}${d.minutes ? ` ${d.minutes} min` : ''}${d.original.startsWith(`${g.temperature} °C,`) || d.original === `${g.temperature} °C` ? '' : ` (${d.original})`}`).join(', ')}`);
 }
 
@@ -2939,6 +2944,7 @@ function renderPrep(box, plan) {
   el(box).innerHTML = `<div class="prep-head"><h4>🔪 ${t(plan.mode === 'menu' ? 'prepMenuTitle' : 'prepPlanTitle')}${plan.total_minutes ? ` · ~${plan.total_minutes} min` : ''}</h4>
       <button class="btn secondary prep-copy" type="button">${t('planShoppingCopy')}</button></div>
     <div class="settings-hint">${escapeHtml(plan.recipes.join(' · '))}</div>
+    ${(plan.courses || []).length ? `<div class="settings-hint">🍽️ ${escapeHtml(prepServing(plan.courses))}</div>` : ''}
     ${plan.phases.map((ph) => `<div class="prep-phase"><h5>${escapeHtml([ph.time, ph.title].filter(Boolean).join(' – '))}</h5>
       ${ph.warning === 'oven' ? `<div class="inbox-error">⚠️ ${t('prepOvenWarning')}</div>` : ''}<ul>
       ${ph.tasks.map((tk) => `<li>${escapeHtml(tk.text)}${tk.minutes ? ` <span class="prep-for">(${tk.minutes} min)</span>` : ''}${
@@ -2980,7 +2986,8 @@ el('plan-prep-btn').addEventListener('click', () => {
 
 el('guest-prep-btn').addEventListener('click', () => {
   if (!guestState.job) return;
-  requestPrep('guest-prep', 'guest-prep-btn', { job_id: guestState.job.id, ready_at: el('gm-ready').value || null });
+  requestPrep('guest-prep', 'guest-prep-btn', { job_id: guestState.job.id, ready_at: el('gm-ready').value || null,
+    course_gap: Number(el('gm-gap').value) || 0 });
 });
 
 // ---------- Guest menu ----------
