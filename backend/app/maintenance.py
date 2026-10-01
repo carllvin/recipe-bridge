@@ -32,7 +32,8 @@ METRIC_TOOLS = {
     "recipes_without_season": ("tags_season", {}),
     "recipes_few_tags": ("tags_suggest_more", {}),
     "recipes_without_servings": ("recipes_servings", {}),
-    "recipes_without_image": ("recipes_images", {}),  # costs per image only when applied
+    "recipes_without_image": ("recipes_images", {}),
+    "recipes_weak_image": ("recipes_photos", {}),  # costs per photo only when applied  # costs per image only when applied
     "foods_unused": ("unused_foods", {}),
     "units_unused": ("unused_units", {}),
     "keywords_unused": ("unused_keywords", {}),

@@ -18,7 +18,7 @@ import os
 import tempfile
 import uuid
 
-from . import duplicates, ignored, image_gen, llm_provider, mealie_client, mealie_tools, prep_notes, tool_jobs, tools_recipe_details, tools_tags
+from . import duplicates, ignored, image_gen, llm_provider, mealie_client, mealie_tools, photo_quality, prep_notes, tool_jobs, tools_recipe_details, tools_tags
 from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_client import TandoorError
@@ -27,9 +27,9 @@ from .tools_unused import find_unused
 log = logging.getLogger("recipe-bridge")
 
 METRICS = ["foods_duplicates", "units_duplicates", "foods_unused", "units_unused", "keywords_unused",
-           "recipes_without_servings", "recipes_without_image", *mealie_tools.METRICS]
+           "recipes_without_servings", "recipes_without_image", "recipes_weak_image", *mealie_tools.METRICS]
 TOOLS = ["ingredients_review", "units_review", "unused_foods", "unused_units", "unused_keywords",
-         "recipes_servings", "recipes_images", *mealie_tools.TOOLS]
+         "recipes_servings", "recipes_images", "recipes_photos", *mealie_tools.TOOLS]
 ENTITY_PATHS = {"food": "/foods", "unit": "/units", "keyword": "/organizers/tags"}
 UNUSED_TOOLS = {"unused_foods": ("food", "foods_unused"), "unused_units": ("unit", "units_unused"),
                 "unused_keywords": ("keyword", "keywords_unused")}
@@ -100,6 +100,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
         log.exception("Saving the recipe index failed")
     lists = {entity: mealie_client.fetch_all_items(client, entity) for entity in ENTITY_PATHS}
     used = used_ids(recipes)
+    weak = photo_quality.problems_of({r["slug"]: photo_quality.mealie_address(r) for r in recipes
+                                      if photo_quality.mealie_address(r)}, photo_quality.fetcher(client))
 
     def recipe_items(matches):
         return [{"key": r["slug"], "name": r.get("name", ""), "recipe_id": r["slug"]}
@@ -113,6 +115,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
            for entity, metric in (("food", "foods_unused"), ("unit", "units_unused"), ("keyword", "keywords_unused"))},
         "recipes_without_servings": recipe_items(lambda r: lacks_servings(r) and ingredient_lines(r)),
         "recipes_without_image": recipe_items(lacks_image),
+        "recipes_weak_image": [{**i, "name": f"{i['name']} ({photo_quality.describe(weak[i['key']])})"}
+                               for i in recipe_items(lambda r: r["slug"] in weak)],
         **mealie_tools.metric_items(recipes, lists["food"]),
     }
     versions = {r["slug"]: version_of(r) for r in recipes}
@@ -281,6 +285,22 @@ def _servings(job, client):
         job.progress_current = min(start + len(batch), len(recipes))
 
 
+def _photos(job, client):
+    """Weak photos (photo_quality) - improved by the AI on apply."""
+    if not image_gen.is_configured():
+        raise RuntimeError(image_gen.missing_key_hint())
+    skip = ignored.keys("recipes_weak_image")
+    _progress(job, "Checking the photos (no AI)...")
+    recipes = [r for r in mealie_client._paged(client, "/recipes") if r.get("slug") not in skip]
+    addresses = {r["slug"]: photo_quality.mealie_address(r) for r in recipes if photo_quality.mealie_address(r)}
+    weak = photo_quality.problems_of(addresses, photo_quality.fetcher(client))
+    for recipe in recipes:
+        if recipe["slug"] in weak:
+            job.suggestions.append(tools_recipe_details.photo_suggestion(
+                recipe["slug"], recipe.get("name", ""), addresses[recipe["slug"]], weak[recipe["slug"]]))
+    job.cost_estimate = tools_recipe_details.photo_cost(len(job.suggestions))
+
+
 def _images(job, client):
     if not image_gen.is_configured():
         raise RuntimeError(image_gen.missing_key_hint())
@@ -300,7 +320,7 @@ def _images(job, client):
 
 
 SCANS = {"ingredients_review": _duplicates, "units_review": _duplicates, "unused_foods": _unused,
-         "unused_units": _unused, "unused_keywords": _unused, "recipes_servings": _servings, "recipes_images": _images,
+         "unused_units": _unused, "unused_keywords": _unused, "recipes_servings": _servings, "recipes_images": _images, "recipes_photos": _photos,
          **mealie_tools.SCANS}
 
 
@@ -340,6 +360,11 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
             elif suggestion.kind == "set_servings":
                 mealie_client._check(client.patch(f"/recipes/{d['recipe_id']}", json={"recipeServings": d["servings"]}),
                                      "the servings")
+            elif suggestion.kind == "enhance_image":
+                current = mealie_client._check(client.get(f"/recipes/{d['recipe_id']}"), "loading the recipe").json()
+                path = tools_recipe_details.enhanced_file(
+                    d, photo_quality.mealie_address(current), photo_quality.fetcher(client))
+                mealie_client.upload_image(client, d["recipe_id"], path)
             elif suggestion.kind == "generate_image":
                 current = mealie_client._check(client.get(f"/recipes/{d['recipe_id']}"), "loading the recipe").json()
                 if current.get("image"):

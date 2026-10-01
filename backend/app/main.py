@@ -1142,6 +1142,7 @@ _TOOL_SCANS = {
     "meal_plan": tools_meal_plan.run_scan,
     "recipes_servings": tools_recipe_details.run_servings_scan,
     "recipes_images": tools_recipe_details.run_images_scan,
+    "recipes_photos": tools_recipe_details.run_photos_scan,
     "unused_foods": tools_unused.run_scan,
     "unused_units": tools_unused.run_scan,
     "unused_keywords": tools_unused.run_scan,
@@ -1167,6 +1168,7 @@ _TOOL_APPLY = {
     "meal_plan": tools_meal_plan.apply_suggestion,
     "recipes_servings": tools_recipe_details.apply_servings_suggestion,
     "recipes_images": tools_recipe_details.apply_image_suggestion,
+    "recipes_photos": tools_recipe_details.apply_photo_suggestion,
     "unused_foods": tools_unused.apply_suggestion,
     "unused_units": tools_unused.apply_suggestion,
     "unused_keywords": tools_unused.apply_suggestion,
@@ -1442,6 +1444,11 @@ async def db_chat_message(body: dict = Body(...)):
         raise HTTPException(502, str(exc))
     job = tool_jobs.get_tool_job(turn["job_id"])
     return {**turn, "suggestions": [s.model_dump() for s in job.suggestions if s.id in turn["suggestion_ids"]]}
+
+
+@app.post("/api/tools/recipes/photos")
+async def start_recipes_photos():
+    return _start_tool_job("recipes_photos")
 
 
 @app.post("/api/tools/recipes/amounts")
