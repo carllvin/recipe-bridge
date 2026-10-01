@@ -390,6 +390,19 @@ def plan_suggestion(job, recipe) -> ToolSuggestion | None:
                           detail=detail)
 
 
+def follow_up(job, recipe) -> ToolSuggestion | None:
+    """In the new-recipes run: once a recipe's structure revision was
+    applied, its amounts suggestion joins the same run (the revision has to
+    come first - see needs_amounts)."""
+    if not needs_amounts(recipe):
+        return None
+    suggestion = plan_suggestion(job, recipe)
+    if suggestion:
+        job.suggestions.append(suggestion)
+        tool_jobs.save_tool_job(job)
+    return suggestion
+
+
 def check_unchanged(steps, plan) -> None:
     for change in plan["steps"]:
         if change["index"] >= len(steps) or [i.get("id") for i in steps[change["index"]].get("ingredients") or []] != change["ids"]:
