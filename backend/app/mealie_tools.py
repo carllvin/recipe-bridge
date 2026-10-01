@@ -499,7 +499,8 @@ def new_recipes(job, client):
         if resp.status_code == 200:
             raw.append(resp.json())
     job.cost_estimate = (f"{len(raw)} new recipe(s): up to one AI call per recipe needing translation and one per "
-                         f"recipe needing a structural revision, plus a few batched calls for ingredients, units and tags.")
+                         f"recipe needing a structural revision, up to two small ones per recipe lacking the amounts in its "
+                         f"steps, plus a few batched calls for ingredients, units and tags.")
     tool_jobs.save_tool_job(job)
     suggestions = []
 
@@ -534,6 +535,11 @@ def new_recipes(job, client):
         if recipe_restructure.needs_restructure(v):
             _progress(job, f"Revising {v['name']!r}...")
             suggestion = recipe_restructure.plan_suggestion(job, v)
+            if suggestion:
+                suggestions.append(suggestion)
+        elif recipe_amounts.needs_amounts(v):  # a revised one follows once the revision is applied
+            _progress(job, f"Amounts into the steps of {v['name']!r}...")
+            suggestion = recipe_amounts.plan_suggestion(job, v)
             if suggestion:
                 suggestions.append(suggestion)
 

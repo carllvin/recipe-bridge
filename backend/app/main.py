@@ -670,6 +670,7 @@ async def inbox():
                 "trigger": job.meta.get("trigger"), "auto": bool(job.meta.get("auto")),
                 "id": s.id, "kind": s.kind, "entity": s.detail.get("entity"),
                 "summary": s.summary, "preview": s.preview, "queued": (job.id, s.id) in queued,
+                "flagged": bool(s.detail.get("flagged")),
                 # Failed ones stay visible until retried or dismissed.
                 "failed": s.status == "error", "error": s.error,
                 "retryable": s.status == "error" and _retryable(job, s),

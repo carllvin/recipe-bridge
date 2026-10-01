@@ -361,6 +361,12 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
             os.remove(path)
         tool_jobs.save_tool_job(job)
     if job.tool == "new_recipes":
-        from . import tools_new_recipes
+        from . import recipe_amounts, tools_new_recipes
+        if suggestion.kind == "restructure_recipe" and suggestion.status == "applied":
+            try:  # the amounts follow the revision (recipe_amounts.follow_up)
+                with mealie_client.get_client() as client:
+                    recipe_amounts.follow_up(job, mealie_tools.view(mealie_tools._fetch(client, d["recipe_id"])))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Amounts after the revision failed: %s", exc)
         tools_new_recipes.after_action(job)
     return suggestion

@@ -25,15 +25,25 @@ def recipe():
 
 
 class AI:
-    def __init__(self, monkeypatch, answer):
-        self.seen, self.answer = [], answer
+    """answer: the amounts call; proofread: the check (default: all fine)."""
+
+    def __init__(self, monkeypatch, answer, proofread=None):
+        self.seen, self.checked, self.answer, self.proofread = [], [], answer, proofread
         monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
         monkeypatch.setattr(llm_provider, "complete_text", self.ask)
+        monkeypatch.setattr(llm_provider, "complete_tool_text", self.check)
 
     def ask(self, prompt, content, max_tokens=0, **kw):
         assert "add the ingredient amounts" in prompt
         self.seen.append(json.loads(content))
         return json.dumps(self.answer), None
+
+    def check(self, prompt, content, max_tokens=0, **kw):
+        assert "You proofread cooking instructions" in prompt
+        payload = json.loads(content)
+        self.checked.append(payload)
+        answer = self.proofread(payload) if self.proofread else {"steps": [{"ok": True} for _ in payload["steps"]]}
+        return json.dumps(answer), None
 
 
 GOOD = {"steps": ["[[i0]] mit [[i1]] und [[i2]] verrühren.", "[[i3]] in der Pfanne bei 180 °C 3 Minuten je Seite backen."]}
@@ -162,3 +172,58 @@ def test_recipes_done_before_get_the_comments_without_ai(monkeypatch, tandoor):
     assert text == "{{ ingredients[0] }} ({{ ingredients[0].note }}) mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren."
     r["steps"][0]["instruction"] = text
     assert not recipe_amounts.needs_amounts(r)  # done
+
+
+def plan_for(monkeypatch, first_step, proofread=None):
+    ai = AI(monkeypatch, {"steps": [first_step, "In der Pfanne bei 180 °C 3 Minuten je Seite backen."]}, proofread)
+    return ai, recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), recipe())
+
+
+def test_articles_before_an_amount_are_dropped(monkeypatch):
+    _ai, s = plan_for(monkeypatch, "Die [[i0]] mit der [[i1]] und den [[i2]] verrühren.")
+    assert s.detail["plan"]["steps"][0]["text"] == "[[i0]] mit [[i1]] und [[i2]] verrühren."
+    assert not s.detail.get("flagged")
+
+
+def test_wrong_case_is_flagged_when_the_proofreading_misses_it(monkeypatch):
+    _ai, s = plan_for(monkeypatch, "[[i0]] und [[i1]] mit [[i2]] verrühren.")  # "mit 3 Eier"
+    assert s.detail["flagged"] and s.summary.startswith("⚠️ check 1 step(s)")
+    assert "⚠️ „mit 3 Eier“" in s.preview
+
+
+def test_the_proofreading_fix_is_used(monkeypatch):
+    def proofread(payload):
+        assert payload["steps"][0]["reads_as"] == "250 g Mehl und 500 ml Milch mit 3 Eier verrühren."
+        return {"steps": [{"ok": False, "marked": "[[i0]], [[i1]] und [[i2]] verrühren.", "problem": "Fall"}]}
+    ai, s = plan_for(monkeypatch, "[[i0]] und [[i1]] mit [[i2]] verrühren.", proofread)
+    assert s.detail["plan"]["steps"][0]["text"] == "[[i0]], [[i1]] und [[i2]] verrühren."
+    assert not s.detail.get("flagged") and "⚠️" not in s.preview
+
+
+def test_an_unsafe_fix_is_not_used_but_flagged(monkeypatch):
+    def proofread(payload):  # the "fix" drops most of the text
+        return {"steps": [{"ok": False, "marked": "[[i0]].", "problem": "Satz holpert"}]}
+    _ai, s = plan_for(monkeypatch, "[[i0]], [[i1]] und [[i2]] gut verrühren.", proofread)
+    assert s.detail["plan"]["steps"][0]["text"] == "[[i0]], [[i1]] und [[i2]] gut verrühren."
+    assert s.detail["flagged"] and "⚠️ Satz holpert" in s.preview
+
+
+def test_proofreading_failing_does_not_stop_it(monkeypatch):
+    ai = AI(monkeypatch, GOOD)
+    monkeypatch.setattr(llm_provider, "complete_tool_text", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    s = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), recipe())
+    assert s is not None and not s.detail.get("flagged")
+
+
+def test_flagged_suggestions_say_so_in_the_inbox(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+    _ai, s = plan_for(monkeypatch, "[[i0]] und [[i1]] mit [[i2]] verrühren.")
+    job = tool_jobs.create_tool_job("recipes_amounts")
+    job.status = "ready"
+    job.suggestions = [s]
+    tool_jobs.save_tool_job(job)
+    data = TestClient(main.app).get("/api/inbox").json()
+    items = [i for g in data.get("groups", [data]) for i in g.get("items", [])] if isinstance(data, dict) else []
+    item = next(i for i in items if i["id"] == s.id)
+    assert item["flagged"] is True

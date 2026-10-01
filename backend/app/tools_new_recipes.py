@@ -10,7 +10,9 @@ Per run, for the new recipes only:
 1. Translate recipe text into OUTPUT_LANGUAGE - applied automatically.
    Then, where needed (decided locally): revise the content - split a long
    method into steps, assign ingredients to the steps using them, fill in
-   servings/times (reviewed like the rest).
+   servings/times (reviewed like the rest). And the amounts into the steps
+   (recipe_amounts) - for a recipe that gets revised, once the revision is
+   applied.
 2. Match the units, ingredients and tags these recipes introduced against
    the existing ones (translate / merge into an existing entry).
 3. Fill in plural, nutrition and supermarket category for new ingredients,
@@ -22,7 +24,8 @@ container restarts before that, they simply show up again next time.
 
 After an import through this app the review already covered translation,
 structure, matching (import_matching) and tags (added while reading the
-recipe) - only step 3 runs, and it is applied right away (_apply_all)."""
+recipe) - only step 3 runs, and it is applied right away (_apply_all) - and the
+amounts into the steps, which wait for review as they change the text."""
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +37,7 @@ import threading
 import time
 import uuid
 
-from . import llm_provider, nutrition_properties, recipe_restructure, tandoor_client, target, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
+from . import llm_provider, nutrition_properties, recipe_amounts, recipe_restructure, tandoor_client, target, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import find_recipes_by_filter, resolve_name_collisions
@@ -415,10 +418,12 @@ def run_scan(job_id: str) -> None:
                 if resp.status_code == 200:
                     recipes.append(resp.json())
             job.cost_estimate = (
-                f"{len(recipes)} new recipe(s): a few batched AI calls for ingredients, units and tags."
+                f"{len(recipes)} new recipe(s): a few batched AI calls for ingredients, units and tags, plus up to "
+                f"two small calls per recipe lacking the amounts in its steps."
                 if job.meta.get("trigger") == "import" else
                 f"{len(recipes)} new recipe(s): up to one AI call per recipe needing translation and one per "
-                f"recipe needing a structural revision, plus a few batched calls for ingredients, units and tags."
+                f"recipe needing a structural revision, up to two small ones per recipe lacking the amounts in its "
+                f"steps, plus a few batched calls for ingredients, units and tags."
             )
             tool_jobs.save_tool_job(job)
             suggestions: list[ToolSuggestion] = []
@@ -474,6 +479,19 @@ def run_scan(job_id: str) -> None:
                 job.progress_label = f"Revising {recipe.get('name', '')!r}..."
                 tool_jobs.save_tool_job(job)
                 suggestion = recipe_restructure.plan_suggestion(job, recipe)
+                if suggestion:
+                    suggestions.append(suggestion)
+
+            # 1c. Amounts into the steps - reviewed. Recipes that get revised
+            # above follow once the revision is applied (apply_suggestion).
+            for recipe in recipes:
+                if job.cancel_requested:
+                    break
+                if not recipe_amounts.needs_amounts(recipe):
+                    continue
+                job.progress_label = f"Amounts into the steps of {recipe.get('name', '')!r}..."
+                tool_jobs.save_tool_job(job)
+                suggestion = recipe_amounts.plan_suggestion(job, recipe)
                 if suggestion:
                     suggestions.append(suggestion)
 
@@ -630,8 +648,8 @@ def _apply_all(job) -> None:
     job.progress_label = "Filling in the new ingredients..."
     tool_jobs.save_tool_job(job)
     for suggestion in list(job.suggestions):
-        if suggestion.status != "pending":
-            continue
+        if suggestion.status != "pending" or suggestion.kind == "amounts_in_steps":
+            continue  # the text changes wait for review
         try:
             _apply_fn(job.id, suggestion.id, "apply")
         except Exception as exc:  # noqa: BLE001
@@ -665,6 +683,16 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     entity = suggestion.detail.get("entity")
     if suggestion.kind == "restructure_recipe":
         result = recipe_restructure.apply_plan(job, suggestion)
+        if result.status == "applied":
+            try:
+                with tandoor_client.get_client() as client:
+                    resp = client.get(f"/recipe/{suggestion.detail['recipe_id']}/")
+                if resp.status_code == 200:
+                    recipe_amounts.follow_up(job, resp.json())
+            except Exception as exc:  # noqa: BLE001 - the revision itself is done
+                log.warning("Amounts after the revision failed: %s", exc)
+    elif suggestion.kind == "amounts_in_steps":
+        result = recipe_amounts.apply_plan(job, suggestion)
     elif entity == "food":
         result = tools_ingredients.apply_suggestion(job_id, suggestion_id)
     elif entity == "unit":
