@@ -1239,3 +1239,7 @@ a { color: inherit; }
 .db-chat-card.error { border-color: #a5533f; }
 .db-chat-state { font-size: 0.8rem; color: #8f9689; }
 .db-chat-problem { color: #d9a441; font-size: 0.84rem; }
+.db-chat-warning { border: 1px solid #a5803f; background: rgba(217,164,65,0.08); border-radius: var(--radius); padding: 10px 14px; margin: 10px 0; font-size: 0.86rem; }
+.db-chat-warning p { margin: 0 0 6px; }
+.db-chat-warning ul { margin: 0 0 8px; padding-left: 18px; }
+.db-chat-warning li { margin: 2px 0; }

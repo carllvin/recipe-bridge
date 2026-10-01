@@ -150,8 +150,18 @@
         <section id="db-chat" class="tool-card db-chat">
           <h3 data-i18n="dbChatTitle">💬 Ask for changes</h3>
           <p class="settings-hint" data-i18n="dbChatHint">e.g. "Every recipe with salmon gets the tag Fisch", "Rename Paprika rot to rote Paprika", "Which recipes have no photo?" – you see what would change before anything happens.</p>
+          <!-- Shown until confirmed once (remembered in this browser). -->
+          <div id="db-chat-warning" class="db-chat-warning">
+            <p><strong data-i18n="dbChatWarnTitle">⚠️ Changes go straight into your recipe database</strong></p>
+            <ul>
+              <li data-i18n="dbChatWarn1">The AI can misunderstand a request – check the listed recipes on every card before you apply it.</li>
+              <li id="db-chat-warn-undo" data-i18n="dbChatWarn2">Applied changes can be undone under Review → Recently applied.</li>
+              <li data-i18n="dbChatWarn3">Make a backup of your recipe manager before large changes.</li>
+            </ul>
+            <label class="settings-check"><input id="db-chat-accept" type="checkbox" /> <span data-i18n="dbChatAccept">Understood – show the chat</span></label>
+          </div>
           <div id="db-chat-log" class="plan-chat-log"></div>
-          <form id="db-chat-form" class="plan-chat-form">
+          <form id="db-chat-form" class="plan-chat-form hidden">
             <input id="db-chat-input" type="text" autocomplete="off" maxlength="1000" data-i18n-placeholder="dbChatPlaceholder" placeholder="What should change?" />
             <button id="db-chat-send" class="btn" type="submit" data-i18n="planChatSend">Send</button>
           </form>

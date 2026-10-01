@@ -2854,6 +2854,26 @@ async function dbChatAct(id, action) {
   updateInboxBadge();
 }
 
+// The warning before the chat: confirmed once per browser.
+function initDbChatWarning() {
+  let accepted = false;
+  try { accepted = localStorage.getItem('th.dbChatAccepted') === '1'; } catch (e) { /* ask again */ }
+  if (isMealie()) {  // nothing to undo with Mealie
+    el('db-chat-warn-undo').setAttribute('data-i18n', 'dbChatWarn2Mealie');
+    el('db-chat-warn-undo').textContent = t('dbChatWarn2Mealie');
+  }
+  el('db-chat-warning').classList.toggle('hidden', accepted);
+  el('db-chat-form').classList.toggle('hidden', !accepted);
+}
+
+el('db-chat-accept').addEventListener('change', () => {
+  if (!el('db-chat-accept').checked) return;
+  try { localStorage.setItem('th.dbChatAccepted', '1'); } catch (e) { /* only for this visit */ }
+  el('db-chat-warning').classList.add('hidden');
+  el('db-chat-form').classList.remove('hidden');
+  el('db-chat-input').focus();
+});
+
 el('db-chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const input = el('db-chat-input');
@@ -3377,6 +3397,7 @@ if ('serviceWorker' in navigator) {
   initEnhancePhotos();
   initVoice();
   initMigration();
+  initDbChatWarning();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();
