@@ -181,6 +181,12 @@
           <div class="plan-shopping-actions">
             <span id="guest-status" class="settings-hint"></span>
             <label class="gm-ready"><span data-i18n="prepReadyAt">ready at</span> <input id="gm-ready" type="time" value="19:00" /></label>
+            <label class="gm-ready"><select id="gm-gap">
+              <option value="0" data-i18n="prepGapTogether">all courses together</option>
+              <option value="15" data-i18n="prepGap15">courses 15 min apart</option>
+              <option value="25" data-i18n="prepGap25" selected>courses 25 min apart</option>
+              <option value="40" data-i18n="prepGap40">courses 40 min apart</option>
+            </select></label>
             <button id="guest-prep-btn" class="btn secondary" type="button" data-i18n="prepMenuBtn">🔪 Work plan</button>
             <button id="guest-shopping-btn" class="btn secondary" type="button" data-i18n="planShoppingBtn">🛒 Shopping list to share</button>
             <button id="guest-plan-btn" class="btn" type="button" data-i18n="guestToPlan">Into the meal plan</button>

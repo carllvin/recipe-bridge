@@ -20,19 +20,44 @@ from .config import settings
 log = logging.getLogger("recipe-bridge")
 
 MAX_RECIPES = 8
+OVEN_SPREAD = 20       # °C - dishes this close share one temperature
+FAN_BONUS = 20         # fan oven 160 °C ~ conventional 180 °C
+TEMPERATURE = re.compile(r"(\d{2,3})\s*(?:°\s*C\b|°|grad\b|degrees?\b)", re.I)
+FAN = re.compile(r"umluft|heißluft|heissluft|fan|convection|chaleur tournante|ventilato|ventilado", re.I)
+PREHEAT = re.compile(r"vorheiz|preheat|préchauff|preriscald|precalent", re.I)
 
 PROMPT = """You turn several recipes into ONE work plan for a home cook,
 written in {language}. You will receive a JSON object:
 {"mode": "prep" | "menu", "ready_at": "HH:MM" | null, "persons": int|null,
 "recipes": [{"name": string, "scale": number, "servings": number|null,
-"ingredients": [string], "steps": [{"text": string, "minutes": int|null}]}]}
+"ingredients": [string], "steps": [{"text": string, "minutes": int|null}]}],
+"oven": [{"temperature": int, "serve_at": "HH:MM"|null, "dishes": [{"recipe": string,
+"step": string, "original": string, "minutes": int|null}]}],
+"courses": [{"course": string, "recipes": [string], "serve_at": "HH:MM"}] | null}
 
 "prep": a meal-prep session - cook or prepare the recipes ahead for the
 coming days; say how to keep each part and what to finish on the day.
 "menu": everything is served together at "ready_at" (if given) - give
-clock times, counting back from "ready_at".
+clock times, counting back from "ready_at". If "courses" is given, the
+courses are served one after another instead, each at its "serve_at": every
+course is finished right then (not all at "ready_at"); prepare as much as
+possible ahead, and put only the final steps of a course (searing, sauce,
+heating up, plating, garnishing) between the courses, right before it - as
+their own phases, titled with the course, so the cook spends little time
+away from the table.
+
+"oven": the oven, already planned for you - groups in the given order, one
+after another, each with one temperature (conventional heat) and the dishes
+baked together at it, with their baking minutes already adjusted to that
+temperature (with "serve_at": the course they are for).
 
 Rules:
+- use the oven EXACTLY as in "oven": only one temperature at a time, never
+  preheat to two temperatures at once; bake each group's dishes together
+  at its temperature for their "minutes" (say "check whether it's done"
+  where the minutes were adjusted); between two groups plan changing the
+  temperature (heating up takes ~10 min, cooling down longer). Use the
+  waiting time for hob work and preparation
 - do shared preparation once (e.g. "dice the onions for A and B: 3 onions")
   with the combined amounts ("scale" = the factor for the persons)
 - start what takes longest first; use oven and hob in parallel; put
@@ -66,6 +91,66 @@ def _ingredient_lines(recipe, scale) -> list[str]:
     return lines
 
 
+# ---------- the oven, planned without AI ----------
+
+def _step_minutes(step) -> int | None:
+    from .recipe_doctor import DURATION
+    longest = 0
+    for m in DURATION.finditer(step["text"]):
+        value = float((m.group(2) or m.group(1)).replace(",", "."))
+        longest = max(longest, value * 60 if m.group(3).casefold().startswith(("st", "h")) else value)
+    return int(longest) or step.get("minutes") or None
+
+
+def oven_uses(recipes) -> list[dict]:
+    """Every step that bakes: {"recipe", "step", "temp" (conventional °C), "label", "minutes",
+    "serve_at" (the course's time when served one after another, else None)}."""
+    uses = []
+    for recipe in recipes:
+        for step in recipe["steps"]:
+            temps = [int(t) for t in TEMPERATURE.findall(step["text"]) if 100 <= int(t) <= 300]
+            if not temps:
+                continue
+            fan = bool(FAN.search(step["text"]))
+            minutes = _step_minutes(step)
+            for n, temp in enumerate(dict.fromkeys(temps)):
+                uses.append({"recipe": recipe["name"], "step": step["text"][:90],
+                             "temp": temp + (FAN_BONUS if fan else 0),
+                             "label": f"{temp} °C{' (fan)' if fan else ''}" + (f", {minutes} min" if minutes and n == 0 else ""),
+                             "minutes": minutes if n == 0 else None, "serve_at": recipe.get("serve_at")})
+    return uses
+
+
+def oven_plan(uses) -> list[dict]:
+    """Dishes within OVEN_SPREAD °C share one temperature (their mean, to 5 °C;
+    baking time scaled inversely); bigger differences one after another,
+    the lower first (heating up is quicker than cooling down). Courses
+    served one after another are baked course by course."""
+    groups = []
+    for use in sorted(uses, key=lambda u: (u.get("serve_at") or "", u["temp"])):
+        if groups and use.get("serve_at") == groups[-1][0].get("serve_at") \
+                and use["temp"] - groups[-1][0]["temp"] <= OVEN_SPREAD:
+            groups[-1].append(use)
+        else:
+            groups.append([use])
+    plan = []
+    for group in groups:
+        temp = int(round(sum(u["temp"] for u in group) / len(group) / 5) * 5)
+        plan.append({"temperature": temp, "serve_at": group[0].get("serve_at"), "dishes": [
+            {"recipe": u["recipe"], "step": u["step"], "original": u["label"],
+             "minutes": round(u["minutes"] * u["temp"] / temp) if u["minutes"] else None} for u in group]})
+    return plan
+
+
+def _oven_warning(phase) -> bool:
+    """A phase preheating to two clearly different temperatures."""
+    temps = set()
+    for task in phase["tasks"]:
+        if PREHEAT.search(task["text"]):
+            temps |= {int(t) for t in TEMPERATURE.findall(task["text"]) if 100 <= int(t) <= 300}
+    return bool(temps) and max(temps) - min(temps) > OVEN_SPREAD
+
+
 def _load(client, wanted) -> dict | None:
     if target.is_mealie():
         from .mealie_tools import view
@@ -80,8 +165,25 @@ def _load(client, wanted) -> dict | None:
     return resp.json() if resp.status_code == 200 else None
 
 
+def _clock(start: str, minutes: int) -> str:
+    h, m = map(int, start.split(":"))
+    total = (h * 60 + m + minutes) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def serving_times(courses: list[str], ready_at: str, gap: int) -> list[str]:
+    """The time each course is served: the first at ready_at, then every
+    `gap` minutes - a side dish comes with the main course."""
+    times, slot = [], -1
+    for n, course in enumerate(courses):
+        if not (course == "side" and n and courses[n - 1] == "main" or course == "main" and n and courses[n - 1] == "side"):
+            slot += 1
+        times.append(_clock(ready_at, slot * gap))
+    return times
+
+
 def plan(job, recipes: list[dict], persons: int | None, mode: str, ready_at: str | None = None) -> dict:
-    """recipes: [{"id", "slug"?, "name"}]. One AI call; returns the plan."""
+    """recipes: [{"id", "slug"?, "name", "course"?, "serve_at"?}]. One AI call; returns the plan."""
     if not llm_provider.is_configured():
         raise tandoor_client.TandoorError(llm_provider.missing_key_hint())
     if not recipes:
@@ -97,12 +199,20 @@ def plan(job, recipes: list[dict], persons: int | None, mode: str, ready_at: str
             scale = round(persons / servings, 2) if persons and servings else 1
             loaded.append({"name": wanted.get("name") or recipe.get("name", ""), "scale": scale,
                            "servings": servings or None, "ingredients": _ingredient_lines(recipe, scale),
-                           "steps": _text_steps(recipe)})
+                           "steps": _text_steps(recipe),
+                           **({"course": wanted["course"], "serve_at": wanted["serve_at"]} if wanted.get("serve_at") else {})})
     if not loaded:
         raise tandoor_client.TandoorError("The recipes couldn't be read.")
     if ready_at and not re.fullmatch(r"\d{1,2}:\d{2}", ready_at):
         ready_at = None
-    payload = {"mode": mode, "ready_at": ready_at, "persons": persons, "recipes": loaded}
+    oven = oven_plan(oven_uses(loaded))
+    courses = {}
+    for r in loaded:
+        if r.get("serve_at"):
+            courses.setdefault((r["serve_at"], r["course"]), []).append(r["name"])
+    courses = [{"course": c, "recipes": names, "serve_at": at} for (at, c), names in courses.items()] or None
+    payload = {"mode": mode, "ready_at": ready_at, "persons": persons, "recipes": loaded, "oven": oven,
+               "courses": courses}
 
     def ask(system_prompt):
         out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
@@ -124,24 +234,36 @@ def plan(job, recipes: list[dict], persons: int | None, mode: str, ready_at: str
         if tasks:
             time = phase.get("time") if isinstance(phase.get("time"), str) and re.fullmatch(r"\d{1,2}:\d{2}", phase["time"]) else None
             phases.append({"title": str(phase.get("title") or "").strip(), "time": time, "tasks": tasks})
+            if _oven_warning(phases[-1]):
+                phases[-1]["warning"] = "oven"
     if not phases:
         raise tandoor_client.TandoorError("The AI returned no usable plan - try again.")
     result = {"mode": mode, "ready_at": ready_at, "persons": persons, "recipes": [r["name"] for r in loaded],
               "total_minutes": answer.get("total_minutes") if isinstance(answer.get("total_minutes"), int) else None,
-              "phases": phases, "keeping": [str(k) for k in answer.get("keeping") or [] if str(k).strip()]}
+              "phases": phases, "keeping": [str(k) for k in answer.get("keeping") or [] if str(k).strip()],
+              "oven": oven, "courses": courses}
     job.meta["prep"] = result
     tool_jobs.save_tool_job(job)
     return result
 
 
-def for_job(job_id: str, ready_at: str | None = None, suggestion_ids: list | None = None) -> dict:
+def for_job(job_id: str, ready_at: str | None = None, suggestion_ids: list | None = None,
+            course_gap: int | None = None) -> dict:
     """The plan for a weekly plan (its open days, or the given ones) or a
-    guest menu."""
+    guest menu - its courses all at once, or `course_gap` minutes apart."""
     job = tool_jobs.get_tool_job(job_id)
     if job is None or job.tool not in ("meal_plan", "guest_menu"):
         raise tandoor_client.TandoorError("Plan not found.")
     if job.tool == "guest_menu":
-        recipes = [m["recipe"] for m in job.meta.get("menu", [])]
+        menu = job.meta.get("menu", [])
+        recipes = [m["recipe"] for m in menu]
+        try:
+            gap = max(0, min(180, int(course_gap or 0)))
+        except (TypeError, ValueError):
+            gap = 0
+        if gap and ready_at and re.fullmatch(r"\d{1,2}:\d{2}", ready_at) and len(menu) > 1:
+            times = serving_times([m["course"] for m in menu], ready_at, gap)
+            recipes = [{**m["recipe"], "course": m["course"], "serve_at": at} for m, at in zip(menu, times)]
         return plan(job, recipes, job.meta["params"]["persons"], "menu", ready_at)
     chosen = [s for s in job.suggestions if s.status != "skipped" and (not suggestion_ids or s.id in suggestion_ids)]
     chosen.sort(key=lambda s: s.detail["date"])

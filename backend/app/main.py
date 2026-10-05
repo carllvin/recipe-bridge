@@ -1476,13 +1476,14 @@ async def guest_menu_plan(job_id: str, body: dict = Body(...)):
 
 @app.post("/api/meal-prep")
 async def meal_prep_plan(body: dict = Body(...)):
-    """{"job_id", "ready_at"?, "suggestion_ids"?} - one work plan for the
-    weekly plan's days (meal prep) or a guest menu (ready at a time)."""
+    """{"job_id", "ready_at"?, "suggestion_ids"?, "course_gap"?} - one work plan
+    for the weekly plan's days (meal prep) or a guest menu (ready at a time,
+    or the courses `course_gap` minutes apart)."""
     _check_budget()
     job = tool_jobs.get_tool_job(str(body.get("job_id") or ""))
     before = job.token_usage.model_copy() if job else None
     result = await asyncio.to_thread(_guest_call, meal_prep.for_job, str(body.get("job_id") or ""),
-                                     body.get("ready_at"), body.get("suggestion_ids"))
+                                     body.get("ready_at"), body.get("suggestion_ids"), body.get("course_gap"))
     if job and before:
         job = tool_jobs.get_tool_job(job.id)
         usage_log.record("meal_prep", job.token_usage.input_tokens - before.input_tokens,

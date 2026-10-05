@@ -1268,4 +1268,4 @@ a { color: inherit; }
 .prep-phase .prep-for { color: #8f9689; font-size: 0.78rem; }
 .prep-keeping { margin-top: 10px; font-size: 0.82rem; color: #b8bdb2; }
 .gm-ready { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; }
-.gm-ready input { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius); color: var(--paper); padding: 5px 6px; color-scheme: dark; }
+.gm-ready input, .gm-ready select { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius); color: var(--paper); padding: 5px 6px; color-scheme: dark; }

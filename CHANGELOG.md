@@ -29,7 +29,10 @@
 - Guest menu: one recipe per course from your collection, swap a course,
   into the meal plan for the guests, shopping list
 - Meal-prep plan for the week and work plan for a guest menu (clock times
-  back from "ready at")
+  back from "ready at"); the oven is planned first: similar temperatures
+  share their mean with adjusted baking times, very different ones come one
+  after another; a guest menu's courses can be served one after another
+  (15/25/40 min apart) with the final steps planned between the courses
 - The weekly plan uses up rests (cream, herbs …) across the week
 - Shopping list to share, grouped by supermarket aisle
 
