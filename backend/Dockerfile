@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# Docker Hub's official image via Google's mirror - Docker Hub rate-limits the CI runners (429)
+FROM mirror.gcr.io/library/python:3.12-slim
 
 WORKDIR /app
 
