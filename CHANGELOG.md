@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+Docker image `ghcr.io/carllvin/recipe-bridge:1.1.0` (or `:1.1`). No changes
+to the configuration are needed; voice notes need an OpenAI or Gemini key or
+a local transcription model (see `.env.example`).
 
 **Import**
 - Cooking videos from YouTube, Instagram and TikTok (description, caption,
