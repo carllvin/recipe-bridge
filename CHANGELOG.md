@@ -47,7 +47,7 @@ and any OpenAI-compatible API
 
 The first release of **Recipe Bridge**, as a ready-made Docker image
 (`ghcr.io/carllvin/recipe-bridge:1.0.0-beta.1`, amd64 and arm64). See the
-[README](README.md) for setup.
+[setup guide](docs/setup.md).
 
 **Import** – into Tandoor or Mealie (`RECIPE_MANAGER`)
 - Cookbooks (PDF, EPUB, Word), photos of cookbook pages and handwritten
