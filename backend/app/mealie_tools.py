@@ -23,7 +23,7 @@ import re
 import time
 import uuid
 
-from . import ignored, llm_provider, mealie_client, prep_notes, recipe_amounts, recipe_doctor, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
+from . import app_settings, ignored, llm_provider, mealie_client, prep_notes, recipe_amounts, recipe_doctor, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .mealie_plan import minutes as _parse_minutes
 from .schemas import ToolSuggestion
@@ -562,7 +562,7 @@ def new_recipes(job, client):
     expected = get_language_code(settings.output_language)
     for i, recipe in enumerate(list(raw)):
         v = view(recipe)
-        if job.cancel_requested:
+        if job.cancel_requested or not app_settings.translating():
             break
         if tools_recipes.already_in_target_language(v, expected):
             continue

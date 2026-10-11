@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Import**
+- Import options on the import page: translate recipes into your language
+  or keep the original language; further photos of a recipe into the step
+  they show (recipe-page step photos, cookbook photos placed by the image
+  AI) or all into step 1 – shown and movable per step in the review, with
+  Tandoor as step files, with Mealie as recipe assets in the step text
+
 ## 1.1.0
 
 Docker image `ghcr.io/carllvin/recipe-bridge:1.1.0` (or `:1.1`). No changes

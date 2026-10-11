@@ -53,10 +53,13 @@ def configure(scans: dict) -> None:
 def available_metrics() -> list[str]:
     """The tiles the automation can work on - with Mealie only those its
     tools cover (mealie_maintenance)."""
+    metrics = list(app_settings.MAINTENANCE_METRICS)
+    if not app_settings.translating():  # recipes stay in their own language
+        metrics.remove("recipes_not_translated")
     if target.is_mealie():
         from . import mealie_maintenance
-        return [m for m in app_settings.MAINTENANCE_METRICS if m in mealie_maintenance.METRICS]
-    return list(app_settings.MAINTENANCE_METRICS)
+        return [m for m in metrics if m in mealie_maintenance.METRICS]
+    return metrics
 
 
 def _scan(tool):

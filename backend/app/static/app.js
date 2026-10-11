@@ -1075,10 +1075,21 @@ function renderDetail(r) {
     ? `<div class="ing-match-summary">${escapeHtml(tf('matchSummary', matchCounts))}</div>`
     : '';
 
+  // Further photos in the steps (import option, image_steps.py): move to another step or leave out.
+  const stepPhotos = (s, i) => (s.image_ids || []).length ? `<div class="step-photos">${s.image_ids.map((iid) => `
+      <div class="step-photo" style="background-image:url('${imageUrl(iid)}')">
+        <select class="step-photo-move" data-image-id="${iid}" data-from="${i}" title="${escapeHtml(t('stepPhotoMove'))}">
+          ${r.steps.map((_, si) => `<option value="${si}" ${si === i ? 'selected' : ''}>${tf('stepPhotoStep', { n: si + 1 })}</option>`).join('')}
+          <option value="-1">✕ ${t('stepPhotoRemove')}</option>
+        </select>
+      </div>`).join('')}</div>` : '';
   const stepsHtml = r.steps.map((s, i) => `
     <div class="step-row" data-idx="${i}">
       <div class="step-num">${i + 1}</div>
-      <textarea class="step-instruction">${escapeHtml(s.instruction)}</textarea>
+      <div class="step-body">
+        <textarea class="step-instruction">${escapeHtml(s.instruction)}</textarea>
+        ${stepPhotos(s, i)}
+      </div>
     </div>
   `).join('') || `<p style="color:#8f9689;font-size:0.88rem;">${t('noSteps')}</p>`;
 
@@ -1160,6 +1171,16 @@ function renderDetail(r) {
   }));
 
   // Image selection / AI generation tile
+  detail.querySelectorAll('.step-photo-move').forEach((sel) => sel.addEventListener('change', (e) => {
+    e.stopPropagation();
+    const { imageId, from } = sel.dataset;
+    const to = +sel.value;
+    r.steps[+from].image_ids = r.steps[+from].image_ids.filter((x) => x !== imageId);
+    if (to >= 0) r.steps[to].image_ids = [...(r.steps[to].image_ids || []), imageId];
+    patchRecipe(r.id, { steps: r.steps });
+    renderDetail(r);
+  }));
+
   detail.querySelectorAll('.image-choice').forEach((elm) => {
     if (elm.dataset.generate) {
       elm.addEventListener('click', () => triggerImageGeneration(r, elm));
@@ -1205,10 +1226,11 @@ function renderDetail(r) {
       };
     });
 
-    r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row) => ({
+    r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row, i) => ({
       instruction: row.querySelector('.step-instruction').value,
       title: null,
       time_minutes: null,
+      image_ids: (r.steps[i] || {}).image_ids || [],
     }));
 
     patchRecipe(r.id, {
@@ -2233,7 +2255,8 @@ function renderHealth(data) {
   };
   const available = APP_CONFIG.health_metrics;  // null = all (Tandoor)
   el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
-    const metrics = g.metrics.filter((k) => !available || available.includes(k)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    const metrics = g.metrics.filter((k) => (!available || available.includes(k))
+      && (k !== 'recipes_not_translated' || APP_CONFIG.translate_recipes !== false)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
     if (!metrics.length) return '';
     // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
     const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
@@ -2618,6 +2641,35 @@ function fillHousehold(h) {
   el('hh-weekdays').innerHTML = [0, 1, 2, 3, 4, 5, 6].map((d) => `<label><span>${escapeHtml(weekdayName(d))}</span>
     <input type="text" maxlength="100" data-day="${d}" value="${escapeHtml((h.weekdays || {})[d] || '')}" placeholder="–" /></label>`).join('');
   el('household-summary').textContent = householdSummary(h);
+}
+
+// ---------- Import options (recipe language, photos in the steps) ----------
+function fillImportOptions(opts) {
+  el('io-translate').value = opts.translate ? '1' : '0';
+  el('io-step-images').value = opts.step_images || 'off';
+  APP_CONFIG.translate_recipes = !!opts.translate;
+  el('import-options-summary').textContent = [
+    opts.translate ? tf('importLanguageTranslate', { language: APP_CONFIG.output_language || 'English' }) : t('importLanguageKeep'),
+    t({ off: 'stepImagesOff', steps: 'stepImagesSteps', first: 'stepImagesFirst' }[opts.step_images] || 'stepImagesOff'),
+  ].join(' · ');
+}
+
+async function initImportOptions() {
+  el('io-translate-yes').textContent = tf('importLanguageTranslate', { language: APP_CONFIG.output_language || 'English' });
+  try {
+    fillImportOptions((await (await fetch('/api/settings')).json()).import || {});
+  } catch (err) { /* stays at the defaults */ }
+  ['io-translate', 'io-step-images'].forEach((id) => el(id).addEventListener('change', async () => {
+    const body = { import: { translate: el('io-translate').value === '1', step_images: el('io-step-images').value } };
+    try {
+      const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+      fillImportOptions((await res.json()).import);
+      el('io-status').textContent = `✓ ${t('householdSaved')}`;
+    } catch (err) {
+      el('io-status').textContent = `${t('householdSaveFailed')}: ${err.message}`;
+    }
+  }));
 }
 
 async function loadHousehold() {
@@ -3611,6 +3663,7 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
+  initImportOptions();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

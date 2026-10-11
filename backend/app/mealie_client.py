@@ -187,8 +187,9 @@ def _lookup_for(client) -> _Lookup:
     return lookup
 
 
-def create_recipe(client, recipe: ExtractedRecipe) -> str:
-    """Returns the new recipe's slug (Mealie's id in URLs)."""
+def create_recipe(client, recipe: ExtractedRecipe, step_images=None, warnings=None) -> str:
+    """Returns the new recipe's slug (Mealie's id in URLs). step_images: per
+    step the photo paths to show in it (image_steps.py)."""
     lookup = _lookup_for(client)
     payload = build_payload(recipe, lookup)
     try:
@@ -200,7 +201,38 @@ def create_recipe(client, recipe: ExtractedRecipe) -> str:
     except Exception:
         delete_recipe(client, slug)  # no empty shell left behind
         raise
+    if any(step_images or []):
+        try:
+            _add_step_photos(client, slug, step_images)
+        except TandoorError as exc:
+            (warnings if warnings is not None else []).append(str(exc))
     return slug
+
+
+def _add_step_photos(client, slug: str, step_images) -> None:
+    """Mealie has no photo per step: each one becomes an asset of the recipe,
+    shown as an image in its step's text (Mealie renders Markdown there)."""
+    recipe = _check(client.get(f"/recipes/{slug}"), "the recipe").json()
+    instructions, assets = recipe.get("recipeInstructions") or [], list(recipe.get("assets") or [])
+    for index, paths in enumerate(step_images):
+        if index >= len(instructions):
+            break
+        for n, path in enumerate(paths, 1):
+            extension = os.path.splitext(path)[1].lstrip(".").lower() or "jpg"
+            try:
+                with open(path, "rb") as f:
+                    resp = client.post(f"/recipes/{slug}/assets",
+                                       files={"file": (os.path.basename(path), f, "application/octet-stream")},
+                                       data={"name": f"Step {index + 1}.{n}", "icon": "mdi-file-image",
+                                             "extension": extension})
+            except httpx.HTTPError as exc:
+                raise TandoorError(f"Network error uploading a step photo: {exc}") from exc
+            asset = _check(resp, "a step photo").json()
+            assets.append(asset)
+            instructions[index]["text"] = (instructions[index].get("text") or "") + \
+                f"\n\n![](/api/media/recipes/{recipe['id']}/assets/{asset['fileName']})"
+    _check(client.patch(f"/recipes/{slug}", json={"recipeInstructions": instructions, "assets": assets}),
+           "the step photos")
 
 
 def delete_recipe(client, recipe_id) -> None:

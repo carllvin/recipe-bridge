@@ -30,6 +30,7 @@ backend/
     ai_extractor.py         Recipe extraction: prompt, chunking, dedup, language detection
     import_matching.py      Match ingredients, units and tags before the review
     image_gen.py            Optional AI images for recipes without a photo
+    image_steps.py          Further photos into the steps (step images of a page, contact sheet for the image AI)
     jobs.py, watcher.py     Import jobs; the watched folder
 
     # Review & maintenance

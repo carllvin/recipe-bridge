@@ -85,6 +85,7 @@ def process_images(image_paths: list[str], images_dir: str, handwriting: bool = 
 
         images[image_id] = {
             "page": index,
+            "kind": "page",  # the photographed page itself - never a step photo
             "path": out_path,
             "filename": filename,
             "width": img.width,

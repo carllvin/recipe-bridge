@@ -22,6 +22,7 @@ class Step(BaseModel):
     instruction: str
     title: Optional[str] = None
     time_minutes: Optional[int] = None
+    image_ids: list[str] = Field(default_factory=list)  # further photos shown in this step (image_steps.py)
 
 
 class TokenUsage(BaseModel):
@@ -62,6 +63,7 @@ class ExtractedRecipe(BaseModel):
     duplicate_exact: bool = False            # True = (near-)exact title match, False = only similar
     source_url: Optional[str] = None         # web page the recipe was imported from (URL import) -> Tandoor's "source_url"
     cookbooks: list[str] = Field(default_factory=list)  # moved from the other manager: the cookbooks it was in there
+    step_file_ids: list[int] = Field(default_factory=list)  # Tandoor: the step photos' files, deleted again on undo
 
 
 class Job(BaseModel):

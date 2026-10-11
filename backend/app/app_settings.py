@@ -1,6 +1,7 @@
 """Settings changed in the UI (unlike .env, which needs a restart): the
-automatic maintenance schedule, the monthly AI budget and the household
-profile (household.py). Stored as settings.json in the data volume."""
+automatic maintenance schedule, the monthly AI budget, the household
+profile (household.py) and the import options (recipe language, photos in
+the steps). Stored as settings.json in the data volume."""
 from __future__ import annotations
 
 import copy
@@ -42,6 +43,14 @@ DEFAULTS = {
     },
 }
 TEXT_MAX = 500
+STEP_IMAGE_MODES = ("off", "steps", "first")
+
+
+def _import_defaults() -> dict:
+    """From .env, so an installation keeps its choice until it's changed in the app."""
+    mode = (settings.step_images or "off").strip().lower()
+    return {"translate": bool(settings.translate_recipes),
+            "step_images": mode if mode in STEP_IMAGE_MODES else "off"}
 
 _lock = threading.Lock()
 
@@ -51,7 +60,7 @@ def _path() -> str:
 
 
 def get() -> dict:
-    result = copy.deepcopy(DEFAULTS)
+    result = {**copy.deepcopy(DEFAULTS), "import": _import_defaults()}
     try:
         with open(_path(), encoding="utf-8") as f:
             stored = json.load(f)
@@ -70,6 +79,11 @@ def update(changes: dict) -> dict:
         m = {**current["maintenance"], **(changes.get("maintenance") or {})}
         b = {**current["budget"], **(changes.get("budget") or {})}
         h = {**current["household"], **(changes.get("household") or {})}
+        i = {**current["import"], **(changes.get("import") or {})}
+        current["import"] = {
+            "translate": bool(i["translate"]),
+            "step_images": i["step_images"] if i["step_images"] in STEP_IMAGE_MODES else "off",
+        }
         current["maintenance"] = {
             "enabled": bool(m["enabled"]),
             "hour": min(23, max(0, int(m["hour"]))),
@@ -96,3 +110,20 @@ def update(changes: dict) -> dict:
             json.dump(current, f, indent=1)
         os.replace(tmp, _path())
         return current
+
+
+def translating() -> bool:
+    """Recipes are translated into OUTPUT_LANGUAGE (else kept in their own language)."""
+    return get()["import"]["translate"]
+
+
+def recipe_language() -> str:
+    """What the AI prompts say the recipe text is (or is to be) written in."""
+    if translating():
+        return settings.output_language.strip() or "English"
+    return "the recipe's own language (keep it, don't translate)"
+
+
+def step_images() -> str:
+    """off | steps | first - see image_steps.py."""
+    return get()["import"]["step_images"]

@@ -33,7 +33,9 @@ def _detect_source_language(pages: list[dict]) -> Optional[str]:
 
 
 def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]] = None) -> str:
-    language = settings.output_language.strip() or "English"
+    from . import app_settings
+    translate = app_settings.translating()
+    language = (settings.output_language.strip() or "English") if translate else "the cookbook's own language"
 
     unit_instruction = (
         f"IMPORTANT - Units: Convert any US/UK-style units (cups, fluid ounces, oz, "
@@ -47,7 +49,15 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
         "Units: Keep the units used in the original text unchanged (no conversion)."
     )
 
-    if same_language:
+    if not translate:
+        # The user keeps every recipe in the language it was written in.
+        language_instruction = (
+            "IMPORTANT - Language: Do NOT translate. Write all text fields (title, "
+            "description, ingredient names, units, notes, steps, tags) in the "
+            "language the recipe itself is written in. Only fix obvious OCR/scan "
+            "errors and join words split across line breaks."
+        )
+    elif same_language:
         # The cookbook already appears to be written in the target language, so no
         # translation is needed. This saves the AI unnecessary "rewriting" work and
         # avoids phrasing being changed for no reason.
@@ -202,6 +212,11 @@ If this excerpt contains no recipe at all, respond with [].
 """
 
 
+def _title_language() -> str:
+    from . import app_settings
+    return (settings.output_language.strip() or "English") if app_settings.translating() else "the cookbook's own language"
+
+
 def guess_cookbook_title(pages: list[dict], filename: str, metadata_title: str = "") -> tuple[str, TokenUsage]:
     """Derives a cookbook-name suggestion, preferring (in order) the PDF's own
     title metadata, an AI guess from the first pages, and finally the filename."""
@@ -230,7 +245,7 @@ def guess_cookbook_title(pages: list[dict], filename: str, metadata_title: str =
                 f"These are the first pages of a scanned cookbook PDF "
                 f"(filename: \"{filename}\"):\n\n{intro_text}\n\n"
                 f"Respond with ONLY the likely title of this cookbook as plain text "
-                f"in {settings.output_language.strip() or 'English'} "
+                f"in {_title_language()} "
                 f"(no quotation marks, no explanation, no subtitle). "
                 f"If no title is recognizable, derive a short, sensible name from "
                 f"the filename instead."

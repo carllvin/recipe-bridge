@@ -19,7 +19,7 @@ import re
 
 import uuid
 
-from . import ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
+from . import app_settings, ignored, llm_provider, recipe_scope, tandoor_client, tool_jobs
 from .config import settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import format_cost_estimate, minimal_ref
@@ -256,7 +256,7 @@ def apply_plan(job, suggestion) -> ToolSuggestion:
 def plan_suggestion(job, recipe) -> ToolSuggestion | None:
     """AI revision for one recipe as a suggestion (None if it failed)."""
     try:
-        plan, usage = restructure_plan(recipe, settings.output_language)
+        plan, usage = restructure_plan(recipe, app_settings.recipe_language())
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
     except Exception as exc:  # noqa: BLE001

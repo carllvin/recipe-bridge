@@ -21,7 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from . import video_processor
+from . import app_settings, video_processor
 
 log = logging.getLogger("recipe-bridge")
 
@@ -31,6 +31,7 @@ HEADERS = {
 }
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_STEP_IMAGES = 15   # photos the page shows with its steps (image_steps.py)
 MAX_TEXT_CHARS = 30000
 
 
@@ -113,6 +114,34 @@ def _instructions(value) -> list[str]:
         elif isinstance(item, dict):
             lines.append(_text(item.get("text") or item.get("name") or ""))
     return [line for line in lines if line]
+
+
+def _image_of(value) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, dict):
+        value = value.get("url") or value.get("contentUrl")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _step_images(value) -> tuple[list[tuple[int, str]], int]:
+    """([(step position 0.., image url)], number of steps) from the
+    HowToSteps of recipeInstructions - the photos the page shows with a step."""
+    found, count = [], 0
+
+    def walk(items):
+        nonlocal count
+        for item in items or []:
+            if isinstance(item, dict) and "HowToSection" in _types(item):
+                walk(item.get("itemListElement"))
+            elif isinstance(item, (dict, str)):
+                image = _image_of(item.get("image")) if isinstance(item, dict) else None
+                if image:
+                    found.append((count, image))
+                count += 1
+    if isinstance(value, list):
+        walk(value)
+    return found, count
 
 
 def _recipe_to_text(recipe: dict, url: str) -> str:
@@ -247,6 +276,12 @@ def process_url(url: str, images_dir: str) -> dict:
             saved = _save_image(client, image_url, images_dir)
             if saved:
                 images[saved.pop("id")] = saved
+        if recipe and app_settings.step_images() != "off":
+            step_images, steps = _step_images(recipe.get("recipeInstructions"))
+            for order, (position, step_url) in enumerate(step_images[:MAX_STEP_IMAGES]):
+                saved = _save_image(client, urljoin(str(resp.url), step_url), images_dir)
+                if saved:
+                    images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
 
     return {
         "pages": [{"page": 1, "text": text}],

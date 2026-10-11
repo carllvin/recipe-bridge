@@ -76,6 +76,12 @@ class FakeTandoor:
             return httpx.Response(404, json={})
         endpoint, obj_id = match.group(1), int(match.group(2)) if match.group(2) else None
         store = self.db.setdefault(endpoint, {})
+        if endpoint == "user-file" and request.method == "POST":  # multipart: name + file
+            name = re.search(rb'name="name"\r\n\r\n([^\r]*)', request.content)
+            obj = self.add(endpoint, {"name": name.group(1).decode() if name else "", "size": len(request.content)})
+            obj["file_download"] = f"/api/download-file/{obj['id']}/"
+            obj["preview"] = f"/media/files/{obj['id']}.jpg"
+            return httpx.Response(201, json=obj)
         body = json.loads(request.content) if request.content else None
         try:
             if request.method == "GET":

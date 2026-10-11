@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -192,10 +192,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             raise ValueError(f"Unknown document type: {doc_type}")
 
         job.page_count = result["page_count"]
-        job.images = {
-            iid: {"page": info["page"], "filename": info["filename"]}
-            for iid, info in result["images"].items()
-        }
+        job.images = {iid: _image_entry(info, info["page"]) for iid, info in result["images"].items()}
         jobs.save_job(job)
 
         def progress_cb(idx: int, total: int, page_start: int, page_end: int) -> None:
@@ -252,8 +249,20 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         jobs.save_job(job)
 
 
-def _finish_extraction(job) -> None:
+def _image_entry(info: dict, page: int) -> dict:
+    """What the job keeps of an extracted image (the step hints of a recipe
+    page and the kind, see image_steps.py)."""
+    return {"page": page, "filename": info["filename"],
+            **{k: info[k] for k in ("kind", "step", "of", "order") if info.get(k) is not None}}
+
+
+def _finish_extraction(job, step_photos: bool = True) -> None:
     """The steps after extraction shared by every import type."""
+    if step_photos:
+        try:
+            image_steps.assign_all(job, os.path.join(_job_dir(job.id), "images"))
+        except Exception as exc:  # noqa: BLE001 - photos in the steps are a nice-to-have
+            log.warning("Placing photos into the steps failed: %s", exc)
     job.progress_label = "Checking for duplicates already in Tandoor …"
     jobs.save_job(job)
     _mark_duplicates(job)
@@ -285,7 +294,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             try:
                 result = process_url(url, images_dir)
                 for image_id, info in result["images"].items():
-                    job.images[image_id] = {"page": number, "filename": info["filename"]}
+                    job.images[image_id] = _image_entry(info, number)
                 page = {"page": number, "text": result["pages"][0]["text"]}
                 recipes, usage = extract_recipes_from_pages([page], existing_tags=existing_tags)
                 job.token_usage.add(usage)
@@ -455,7 +464,7 @@ def _run_migration(job_id: str, cookbook: str | None) -> None:
         # All recipes of one cookbook -> that cookbook; the whole collection
         # keeps each recipe's own cookbooks (recipe.cookbooks) instead.
         job.suggested_cookbook_name = job.cookbook_name = cookbook or None
-        _finish_extraction(job)
+        _finish_extraction(job, step_photos=False)
     except Exception as exc:  # noqa: BLE001
         log.exception("Moving recipes failed for job %s", job_id)
         job.status = "error"
@@ -899,8 +908,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 warnings: list[str] = []
                 if recipe.id in enhance_failed:
                     warnings.append("The photo could not be improved - the original was used.")
+                # further photos shown in the steps (image_steps.py) - not the main photo again
+                step_images = [[os.path.join(_job_dir(job_id), "images", job.images[iid]["filename"])
+                                for iid in step.image_ids
+                                if iid in job.images and iid != recipe.selected_image_id]
+                               for step in recipe.steps]
                 try:
-                    tandoor_id = api.create_recipe(client, recipe)
+                    tandoor_id = api.create_recipe(client, recipe, step_images=step_images, warnings=warnings)
                     recipe.tandoor_recipe_id = tandoor_id
 
                     if image_path and os.path.exists(image_path):
@@ -988,7 +1002,7 @@ async def undo_import(job_id: str, recipe_id: str):
 
     try:
         with target.client().get_client() as client:
-            target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+            _delete_imported(client, recipe)
     except tandoor_client.TandoorError as exc:
         raise HTTPException(502, f"Could not undo the import: {exc}")
 
@@ -998,6 +1012,15 @@ async def undo_import(job_id: str, recipe_id: str):
     jobs.save_job(job)
 
     return recipe.model_dump()
+
+
+def _delete_imported(client, recipe) -> None:
+    """Undo an import: the recipe - and with Tandoor its step photos, which
+    live in Tandoor's file storage on their own."""
+    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+    if recipe.step_file_ids and not target.is_mealie():
+        tandoor_client.delete_user_files(client, recipe.step_file_ids)
+        recipe.step_file_ids = []
 
 
 @app.post("/api/jobs/{job_id}/undo-all-imports")
@@ -1018,7 +1041,7 @@ async def undo_all_imports(job_id: str):
         with target.client().get_client() as client:
             for recipe in imported:
                 try:
-                    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+                    _delete_imported(client, recipe)
                     recipe.import_status = "pending"
                     recipe.tandoor_recipe_id = None
                     recipe.import_error = None
@@ -1779,6 +1802,7 @@ async def get_config():
         "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
         # the tiles that work with Mealie (None = all of them, Tandoor)
         "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
+        "translate_recipes": app_settings.translating(),
         "available_tools": mealie_maintenance.TOOLS if target.is_mealie() else None,
     }
 
