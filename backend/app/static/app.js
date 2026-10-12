@@ -3713,6 +3713,10 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
+  if (APP_CONFIG.translate_recipes === false) {  // TRANSLATE_RECIPES=false - so it's visible that it took effect
+    el('lang-note').textContent = `🌐 ${t('langNoteKeep')}`;
+    el('lang-note').classList.remove('hidden');
+  }
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

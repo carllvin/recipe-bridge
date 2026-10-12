@@ -11,7 +11,9 @@
   usage*; `STEP_PHOTOS_AI=false` leaves the AI out); with Tandoor as step
   files, with Mealie as recipe assets in the step text
 - `TRANSLATE_RECIPES=false` keeps recipes in the language they were
-  written in
+  written in – also the ingredient/unit/tag clean-up of *Process new
+  recipes* and the reuse of existing tags; the import page shows when it's
+  active
 - Sites with bot protection (403): the app asks like a browser and tries a
   second time; the bookmark button now hands over the page your browser
   already shows, so such sites import too (drag the button in again once)

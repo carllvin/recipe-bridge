@@ -52,3 +52,13 @@ def test_new_recipes_are_not_translated(tandoor, monkeypatch, keep_original):
     tool_jobs.save_tool_job(job)
     tools_new_recipes.run_scan(job.id)
     assert calls == ["restructure"]
+
+
+def test_name_cleanup_and_tags_keep_the_language(isolated, keep_original):
+    from app.tools_new_recipes import NORMALIZE_SYSTEM_PROMPT, PICK_SYSTEM_PROMPT, _prompt
+    assert "translate it if it's in another language" in _prompt(NORMALIZE_SYSTEM_PROMPT, "food")
+    keep_original()
+    normalize = _prompt(NORMALIZE_SYSTEM_PROMPT, "food")
+    assert "never translate it" in normalize and "Deutsch" not in normalize and "translate it if" not in normalize
+    assert "Keep every name in its own language" in _prompt(PICK_SYSTEM_PROMPT, "food")
+    assert "never translate a tag" in ai_extractor._build_system_prompt(False, existing_tags=["Kuchen"])

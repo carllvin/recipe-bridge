@@ -1133,6 +1133,7 @@ a { color: inherit; }
 .smart-form textarea { width: 100%; box-sizing: border-box; resize: none; overflow-y: auto; min-height: 46px; line-height: 1.4;
   font: inherit; font-size: 0.95rem; padding: 11px 14px; border-radius: var(--radius); border: 1px solid #2a2f2a; background: rgba(239,233,218,0.05); color: var(--paper); }
 .smart-form textarea:focus { outline: none; border-color: var(--gold); }
+.lang-note { margin: -6px 0 14px; }
 .smart-row { display: flex; gap: 8px; align-items: flex-start; }
 .smart-row textarea { flex: 1; }
 .smart-row .btn { flex-shrink: 0; min-height: 46px; }

@@ -274,6 +274,11 @@ MAX_CANDIDATES = 5
 
 
 def _prompt(template, entity):
+    if not app_settings.translating():  # TRANSLATE_RECIPES=false: names keep their language
+        template = (template.replace("The target language is {language}.", "Keep every name in its own language.")
+                    .replace("the standard {language} name a {language} cookbook\nwould use ({style}) - translate it if it's in another language, e.g.\n{variants}.",
+                             "the standard name a cookbook in the name's own language\nwould use ({style}) - never translate it.")
+                    .replace("other common {language} names", "other common names in the same language"))
     for key, value in {**ENTITY_RULES[entity], "language": settings.output_language}.items():
         template = template.replace("{" + key + "}", value)
     return template

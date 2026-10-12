@@ -85,7 +85,9 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
             f"these tags: {tag_list}. Whenever one of them fits (even if the wording "
             f"differs slightly, e.g. singular/plural or a synonym), REUSE it exactly as "
             f"written above instead of inventing a near-duplicate. Only add a new tag "
-            f"when nothing existing fits.\n"
+            f"when nothing existing fits."
+            + ("" if translate else " Only reuse a tag that is in the recipe's own language - never translate a tag.")
+            + "\n"
         )
 
     # Diet / allergen tags right away, so an import through this app needs no
