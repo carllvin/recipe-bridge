@@ -4,11 +4,12 @@
 
 **Import**
 - Photos in the steps: in the review every photo can be the main photo,
-  go into a step or stay unused; a recipe page's step photos are placed
-  right away, a cookbook's on request with **Place photos into the steps**
-  (image AI, tools model, only sure placements, hand-placed photos stay,
-  its own line in *AI usage*, `STEP_PHOTOS_AI=false` hides it); with
-  Tandoor as step files, with Mealie as recipe assets in the step text
+  go into a step or stay unused; nothing is placed until you ask with
+  **Place photos into the steps** (per recipe or for all): a recipe page's
+  step photos by position (free), the others by the image AI (tools model,
+  only sure placements, hand-placed photos stay, its own line in *AI
+  usage*; `STEP_PHOTOS_AI=false` leaves the AI out); with Tandoor as step
+  files, with Mealie as recipe assets in the step text
 - `TRANSLATE_RECIPES=false` keeps recipes in the language they were
   written in
 - Sites with bot protection (403): the app asks like a browser and tries a

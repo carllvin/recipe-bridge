@@ -1152,16 +1152,15 @@ def _enhance_image(job, recipe, image_id: str) -> str:
 @app.post("/api/jobs/{job_id}/place-photos")
 async def place_photos(job_id: str, body: dict = Body(default={})):
     """{"recipe_ids"?: [...]} (default: all) - the review's "place photos
-    into the steps" button: the image AI places each recipe's unplaced
-    photos (image_steps.place_with_ai)."""
+    into the steps" button: each recipe's unplaced photos - a recipe page's
+    step photos by position, the others by the image AI unless it's off
+    (image_steps.place)."""
     job = jobs.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found.")
-    if not settings.step_photos_ai:
-        raise HTTPException(400, "Placing photos by AI is switched off (STEP_PHOTOS_AI=false).")
-    if not llm_provider.is_configured():
-        raise HTTPException(400, llm_provider.missing_key_hint())
-    _check_budget()
+    use_ai = settings.step_photos_ai and llm_provider.is_configured()
+    if use_ai:
+        _check_budget()
     wanted = set(body.get("recipe_ids") or [r.id for r in job.recipes])
     images_dir = os.path.join(_job_dir(job_id), "images")
     placed, failed, usage = 0, [], TokenUsage()
@@ -1169,7 +1168,7 @@ async def place_photos(job_id: str, body: dict = Body(default={})):
         if recipe.id not in wanted or recipe.import_status == "imported":
             continue
         try:
-            n, used = await asyncio.to_thread(image_steps.place_with_ai, job, recipe, images_dir)
+            n, used = await asyncio.to_thread(image_steps.place, job, recipe, images_dir, use_ai)
         except Exception as exc:  # noqa: BLE001 - e.g. a model that doesn't read images
             log.warning("Placing the photos of %r failed: %s", recipe.title, exc)
             failed.append(recipe.title)

@@ -93,22 +93,24 @@ out.
 
 **Photos in the steps** – besides its main photo, a recipe can show
 further photos in its steps. In the review every photo has a menu: *main
-photo*, *step 1 … n* or *not used*. A recipe page's own step photos
-(schema.org `HowToStep`) are placed right away, by position, without AI. A
-cookbook's photos start out unused; the button **🪄 Place photos into the
-steps** (for the recipe or *for all recipes*) lets the image AI do it: one
-call per recipe looks at its unplaced photos at once (a contact sheet of
-numbered thumbnails next to the steps) and says which step each one shows
-and whether it is sure – only sure answers are used, the finished dish or
-a picture of another recipe stays unused, and photos you placed yourself
-stay where they are. It uses the cheaper tools model and small thumbnails
-and shows as its own line in *AI usage*; decoration (an image repeated on
-several pages, duplicates, narrow banners) is sorted out without AI
-beforehand. Photographed cookbook pages are never step photos.
-`STEP_PHOTOS_AI=false` hides the button. With Tandoor the first photo of a
-step becomes the step's file and further ones appear in its text (stored
-in Tandoor's *Files*, removed again when an import is undone); with Mealie
-they become assets of the recipe shown in the step text.
+photo*, *step 1 … n* or *not used*. All photos start out unused; the
+button **🪄 Place photos into the steps** (for the recipe or *for all
+recipes*) places the ones not placed yet: a recipe page's own step photos
+(schema.org `HowToStep`) go to the step at the same position, free and
+without AI; the others go to the image AI – one call per recipe looks at
+them at once (a contact sheet of numbered thumbnails next to the steps)
+and says which step each one shows and whether it is sure. Only sure
+answers are used, the finished dish or a picture of another recipe stays
+unused, and photos you placed yourself stay where they are. It uses the
+cheaper tools model and small thumbnails and shows as its own line in *AI
+usage*; decoration (an image repeated on several pages, duplicates, narrow
+banners) is sorted out without AI beforehand. Photographed cookbook pages
+are never step photos. `STEP_PHOTOS_AI=false` leaves out the AI – the
+button then only places a page's own step photos. With Tandoor the first
+photo of a step becomes the step's file and further ones appear in its
+text (stored in Tandoor's *Files*, removed again when an import is
+undone); with Mealie they become assets of the recipe shown in the step
+text.
 
 > **Recipes from other apps** (Paprika, Nextcloud Cookbook, RecipeSage, …):
 > Tandoor and Mealie import their export files themselves. Afterwards run

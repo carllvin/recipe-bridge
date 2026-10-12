@@ -83,8 +83,9 @@ def test_button_ai_fails_or_switched_off(isolated, monkeypatch):
     res = api.post(f"/api/jobs/{job.id}/place-photos", json={})
     assert res.status_code == 502 and "read images" in res.json()["detail"]
     assert placed(jobs.get_job(job.id).recipes[0]) == [[], [], []]
-    monkeypatch.setattr(settings, "step_photos_ai", False)
-    assert api.post(f"/api/jobs/{job.id}/place-photos", json={}).status_code == 400
+    monkeypatch.setattr(settings, "step_photos_ai", False)  # no AI: nothing a page didn't place itself
+    data = api.post(f"/api/jobs/{job.id}/place-photos", json={}).json()
+    assert data["placed"] == 0 and placed(jobs.get_job(job.id).recipes[0]) == [[], [], []]
     assert api.get("/api/config").json()["step_photos_ai"] is False
 
 
@@ -95,7 +96,17 @@ def test_recipe_page_step_images_by_position(isolated):
                   "s1": {"page": 1, "filename": "a.jpg", "step": 0, "of": 6},
                   "s5": {"page": 1, "filename": "b.jpg", "step": 4, "of": 6}}
     image_steps.assign_all(job, images_dir)
-    assert placed(job.recipes[0]) == [["s1"], [], ["s5"]]
+    assert placed(job.recipes[0]) == [[], [], []]  # nothing until the button
+    jobs.save_job(job)
+    from app.config import settings
+    settings_ai = settings.step_photos_ai
+    try:
+        settings.step_photos_ai = False  # free: no AI needed for a page's own step photos
+        data = TestClient(main.app).post(f"/api/jobs/{job.id}/place-photos", json={"recipe_ids": ["r1"]}).json()
+    finally:
+        settings.step_photos_ai = settings_ai
+    assert data["placed"] == 2 and [s["image_ids"] for s in data["recipes"][0]["steps"]] == [["s1"], [], ["s5"]]
+    assert data["token_usage"]["input_tokens"] == 0
 
 
 def test_howto_step_images_are_read():

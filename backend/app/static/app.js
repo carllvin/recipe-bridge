@@ -1157,7 +1157,8 @@ function renderDetail(r) {
 
     <div class="section-title">${t('fieldImage')}</div>
     <div class="image-picker">${imageChoicesHtml}</div>
-    ${APP_CONFIG.step_photos_ai && r.steps.length && r.candidate_image_ids.length > 1 && r.import_status !== 'imported'
+    ${r.steps.length && r.candidate_image_ids.length > 1 && r.import_status !== 'imported'
+      && (APP_CONFIG.step_photos_ai || r.candidate_image_ids.some((iid) => ((state.job.images || {})[iid] || {}).step != null))
     ? `<div class="place-photos">
         <button type="button" class="btn secondary place-photos-btn" data-scope="one">🪄 ${t('placePhotosBtn')}</button>
         ${state.job.recipes.length > 1 ? `<button type="button" class="btn secondary place-photos-btn" data-scope="all">${t('placePhotosAll')}</button>` : ''}

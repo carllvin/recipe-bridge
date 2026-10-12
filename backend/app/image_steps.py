@@ -3,17 +3,16 @@
 into the step they show - always, the review is where it's changed: every
 photo of a recipe gets a menu there (main photo / step n / not used).
 
-Which step a photo belongs to: a recipe page names the step itself (the
-schema.org HowToStep's "image" - mapped by the step's position, since the
-AI may have merged or split steps) - placed right away, without AI. A
-cookbook's photos start out unassigned; the review's "place photos into
-the steps" button (one recipe or all of them) lets the image AI do it: one
-call per recipe looks at all its unplaced photos at once - a contact sheet
-of numbered thumbnails next to the step texts - and says which step each
-one shows and whether it is sure. Only sure answers are used; photos
-already placed by hand stay where they are. Kept cheap: the tools model,
-small thumbnails, the start of each step only. STEP_PHOTOS_AI=false hides
-the button (placing by hand only).
+All photos start out unassigned. The review's "place photos into the
+steps" button (one recipe or all of them) places the ones not placed yet:
+a recipe page names the step itself (the schema.org HowToStep's "image" -
+mapped by the step's position, since the AI may have merged or split
+steps), free; the others go to the image AI: one call per recipe looks at
+them at once - a contact sheet of numbered thumbnails next to the step
+texts - and says which step each one shows and whether it is sure. Only
+sure answers are used; photos placed by hand stay where they are. Kept
+cheap: the tools model, small thumbnails, the start of each step only.
+STEP_PHOTOS_AI=false: only the free placement (and by hand).
 
 Decoration never gets that far: an image repeated on several pages (a
 logo, a frame), a duplicate or a narrow banner is marked when the import
@@ -160,36 +159,33 @@ def _by_position(job: Job, recipe, ids: list[str]) -> dict[str, int]:
     return out
 
 
-def assign(job: Job, recipe) -> None:
-    """While reading the import: only what needs no AI - a recipe page's own
-    step photos."""
-    for step in recipe.steps:
-        step.image_ids = []
-    if not recipe.steps:
-        return
-    ids = [iid for iid in extra_images(job, recipe) if job.images[iid].get("step") is not None]
-    for iid, step in _by_position(job, recipe, ids).items():
-        recipe.steps[step].image_ids.append(iid)
-
-
 def assign_all(job: Job, images_dir: str) -> None:
+    """While reading the import: only sort out decoration - nothing is
+    placed into the steps until the review's button asks for it."""
     for image_id in decoration(job, images_dir):
         job.images[image_id]["kind"] = "decoration"
     for recipe in job.recipes:
-        assign(job, recipe)
+        for step in recipe.steps:
+            step.image_ids = []
 
 
-def place_with_ai(job: Job, recipe, images_dir: str) -> tuple[int, TokenUsage]:
-    """The review's button: the image AI places the recipe's photos that
-    aren't the main photo or in a step yet. Returns (photos placed, usage);
-    raises when the AI call fails (e.g. a model that doesn't read images)."""
+def place(job: Job, recipe, images_dir: str, use_ai: bool) -> tuple[int, TokenUsage]:
+    """The review's button: places the recipe's photos that aren't the main
+    photo or in a step yet - a recipe page's own step photos by position
+    (no AI), the others by the image AI (use_ai). Returns (photos placed,
+    usage); raises when the AI call fails (e.g. a model that doesn't read
+    images)."""
     if not recipe.steps:
         return 0, TokenUsage()
     in_steps = {iid for step in recipe.steps for iid in step.image_ids}
     ids = [iid for iid in extra_images(job, recipe) if iid not in in_steps]
-    if not ids:
-        return 0, TokenUsage()
-    answer, usage = _ask_ai(recipe, [os.path.join(images_dir, job.images[iid]["filename"]) for iid in ids])
-    for i in sorted(answer):  # page order within a step
-        recipe.steps[answer[i]].image_ids.append(ids[i])
-    return len(answer), usage
+    placed = _by_position(job, recipe, [iid for iid in ids if job.images[iid].get("step") is not None])
+    rest = [iid for iid in ids if iid not in placed]
+    usage = TokenUsage()
+    if rest and use_ai:
+        answer, usage = _ask_ai(recipe, [os.path.join(images_dir, job.images[iid]["filename"]) for iid in rest])
+        placed.update({rest[i]: step for i, step in answer.items()})
+    for iid in ids:  # page order within a step
+        if iid in placed:
+            recipe.steps[placed[iid]].image_ids.append(iid)
+    return len(placed), usage
