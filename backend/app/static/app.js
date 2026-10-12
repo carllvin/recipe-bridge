@@ -3709,32 +3709,91 @@ async function runBulkAction(action) {
 // Bookmarklet: opens this app with ?import=<page address> in a new tab.
 // The bookmark button opens the app with the page's address and then hands
 // over the page itself (postMessage) - the app doesn't have to load it, so
-// sites that block scripts work too. Without the hand-over (an old button, a
-// site that cuts the link between the tabs) the address is loaded as before.
+// sites that block scripts work too. Then the app names the page's photos
+// (rbWant) and the button fetches them in the recipe's tab, where the site
+// lets the browser have them (rbPhotos: one Blob or null each). Without the
+// hand-over (an old button, a site that cuts the link between the tabs) the
+// address is loaded as before.
 el('bookmarklet').href = `javascript:(()=>{const o=${JSON.stringify(location.origin)},u=location.href,`
   + `h=document.documentElement.outerHTML,w=window.open(o+'/?import='+encodeURIComponent(u)+'&page=1','_blank');`
-  + `addEventListener('message',e=>{if(e.origin===o&&e.data==='rb-ready'&&w)w.postMessage({rbPage:{url:u,html:h}},o)})})()`;
+  + `addEventListener('message',e=>{const d=e.data;if(e.origin!==o||!w)return;`
+  + `if(d==='rb-ready')w.postMessage({rbPage:{url:u,html:h,v:2}},o);`
+  + `else if(d&&Array.isArray(d.rbWant))Promise.all(d.rbWant.map(x=>fetch(x).then(r=>r.ok?r.blob():null).catch(()=>null)))`
+  + `.then(b=>w.postMessage({rbPhotos:b},o))})})()`;
 el('bookmarklet').addEventListener('click', (e) => { e.preventDefault(); showUploadError(t('bookmarkletClick')); });
 
 // Imports handed over in the address: ?import=<url> (bookmarklet),
 // ?text=<recipe text>, ?error=<message> (a failed share from the phone).
+const PAGE_PHOTO_BYTES = 10 * 1024 * 1024;  // per photo (url_processor.MAX_IMAGE_BYTES)
+const PAGE_PHOTOS_TOTAL = 40 * 1024 * 1024;
+const PAGE_PHOTOS_WAIT = 10000;             // ms - then the import goes on without them
+
 // The bookmark button's page hand-over (see el('bookmarklet').href).
 function receivePage(pageUrl) {
   let done = false;
-  const finish = (html) => {
+  const finish = (page) => {
     if (done) return;
     done = true;
     window.removeEventListener('message', onMessage);
-    if (html) startImportRequest('/api/import-page', { url: pageUrl, html }, t('urlImportLoading'));
-    else startImportRequest('/api/import-url', { url: pageUrl }, t('urlImportLoading'));
+    if (!page) startImportRequest('/api/import-url', { url: pageUrl }, t('urlImportLoading'));
+    else if (page.v >= 2) withPagePhotos(pageUrl, page.html);
+    else startImportRequest('/api/import-page', { url: pageUrl, html: page.html }, t('urlImportLoading'));
   };
   const onMessage = (e) => {
     const page = e.data && e.data.rbPage;
-    if (e.source === window.opener && page && page.url === pageUrl && typeof page.html === 'string') finish(page.html);
+    if (e.source === window.opener && page && page.url === pageUrl && typeof page.html === 'string') finish(page);
   };
   window.addEventListener('message', onMessage);
   try { window.opener.postMessage('rb-ready', '*'); } catch (e) { finish(null); return; }
   setTimeout(() => finish(null), 4000);
+}
+
+// Asks the recipe's tab for the page's photos, then starts the import - with
+// the ones the browser could fetch (the app loads the others itself).
+async function withPagePhotos(pageUrl, html) {
+  el('upload-screen').classList.add('hidden');
+  el('processing-screen').classList.remove('hidden');
+  el('progress-track').classList.add('hidden');
+  el('processing-text').textContent = t('urlImportLoading');
+  const photos = {};
+  try {
+    const res = await fetch('/api/page-photos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: pageUrl, html }),
+    });
+    const urls = res.ok ? (await res.json()).urls || [] : [];
+    const blobs = urls.length ? await askOpenerForPhotos(urls) : [];
+    let total = 0;
+    for (let i = 0; i < urls.length; i++) {
+      const blob = blobs[i];
+      if (!(blob instanceof Blob) || !blob.type.startsWith('image/') || blob.size > PAGE_PHOTO_BYTES) continue;
+      if (total + blob.size > PAGE_PHOTOS_TOTAL) break;
+      total += blob.size;
+      photos[urls[i]] = await blobToDataUrl(blob);
+    }
+  } catch (e) { /* without photos - the app loads them itself */ }
+  startImportRequest('/api/import-page', { url: pageUrl, html, photos }, t('urlImportLoading'));
+}
+
+function askOpenerForPhotos(urls) {
+  return new Promise((resolve) => {
+    const onMessage = (e) => {
+      if (e.source !== window.opener || !e.data || !Array.isArray(e.data.rbPhotos)) return;
+      window.removeEventListener('message', onMessage);
+      resolve(e.data.rbPhotos);
+    };
+    window.addEventListener('message', onMessage);
+    setTimeout(() => { window.removeEventListener('message', onMessage); resolve([]); }, PAGE_PHOTOS_WAIT);
+    try { window.opener.postMessage({ rbWant: urls }, '*'); } catch (e) { resolve([]); }
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 function handleIncomingParams() {

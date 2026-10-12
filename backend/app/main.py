@@ -23,7 +23,8 @@ from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
 from .pdf_processor import process_pdf
-from .url_processor import MAX_PAGE_BYTES, UrlImportError, links_from_text, process_url, validate_url
+from .url_processor import (MAX_IMAGE_BYTES, MAX_PAGE_BYTES, UrlImportError, links_from_text, page_photo_urls,
+                            process_url, validate_url)
 from .text_processor import looks_like_link_list, process_text, title_from_text
 from .docx_processor import process_docx
 from .schemas import ExtractedRecipe, TokenUsage
@@ -161,7 +162,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             if os.path.exists(page):
                 with open(page, encoding="utf-8", errors="replace") as f:
                     html = f.read()
-            result = process_url(source_paths[0], images_dir, html=html)
+            result = process_url(source_paths[0], images_dir, html=html, given_photos=_given_photos(job.id))
         elif doc_type == "txt":
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -433,9 +434,11 @@ def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recip
                                                     handwriting and doc_type == "images"), daemon=True).start()
 
 
-def _start_url_job(url: str, source: str | None = None, html: str | None = None):
+def _start_url_job(url: str, source: str | None = None, html: str | None = None,
+                   photos: dict[str, bytes] | None = None):
     """Raises HTTPException(400) for an invalid address. html: the page as
-    the browser has it (bookmark button) - not loaded again then."""
+    the browser has it (bookmark button) - not loaded again then; photos:
+    its photos the browser already fetched ({address: bytes})."""
     try:
         url = validate_url(url)
     except UrlImportError as exc:
@@ -446,9 +449,37 @@ def _start_url_job(url: str, source: str | None = None, html: str | None = None)
     if html:
         with open(os.path.join(_job_dir(job.id), "page.html"), "w", encoding="utf-8") as f:
             f.write(html)
+    if photos:
+        folder = os.path.join(_job_dir(job.id), "page-photos")
+        os.makedirs(folder, exist_ok=True)
+        index = {}
+        for n, (address, data) in enumerate(photos.items()):
+            with open(os.path.join(folder, f"{n}.bin"), "wb") as f:
+                f.write(data)
+            index[address] = f"{n}.bin"
+        with open(os.path.join(folder, "index.json"), "w", encoding="utf-8") as f:
+            json.dump(index, f)
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
     return job
+
+
+def _given_photos(job_id: str) -> dict[str, bytes]:
+    """The photos the bookmark button sent along (see _start_url_job)."""
+    folder = os.path.join(_job_dir(job_id), "page-photos")
+    try:
+        with open(os.path.join(folder, "index.json"), encoding="utf-8") as f:
+            index = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for address, name in index.items():
+        try:
+            with open(os.path.join(folder, os.path.basename(name)), "rb") as f:
+                out[address] = f.read()
+        except OSError:
+            continue
+    return out
 
 
 def _start_text_job(text: str, source: str | None = None):
@@ -538,15 +569,51 @@ async def import_url(body: dict = Body(...)):
     return {"job_id": _start_url_job(body.get("url", "")).id}
 
 
+MAX_PAGE_PHOTOS = 16  # the main photo and the step photos (url_processor.MAX_STEP_IMAGES)
+
+
 @app.post("/api/import-page")
 async def import_page(body: dict = Body(...)):
-    """{"url", "html"} - a recipe page as the browser has it (the bookmark
-    button sends it), for sites that refuse to be loaded by the app."""
+    """{"url", "html", "photos"?} - a recipe page as the browser has it (the
+    bookmark button sends it), for sites that refuse to be loaded by the
+    app; photos: {address: data URL} of the photos the browser could fetch
+    (see /api/page-photos)."""
     _check_budget()
     html = str(body.get("html") or "")
     if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
         raise HTTPException(413, "The page is too large.")
-    return {"job_id": _start_url_job(body.get("url") or "", html=html or None).id}
+    photos = _page_photos(body.get("photos"))
+    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos).id}
+
+
+@app.post("/api/page-photos")
+async def page_photos(body: dict = Body(...)):
+    """{"url", "html"} -> {"urls"}: the photos an import of the page would
+    load - the bookmark button lets the browser fetch them first."""
+    html = str(body.get("html") or "")
+    if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+        raise HTTPException(413, "The page is too large.")
+    return {"urls": page_photo_urls(str(body.get("url") or ""), html)[:MAX_PAGE_PHOTOS]}
+
+
+def _page_photos(photos) -> dict[str, bytes]:
+    """{address: data URL} from the browser -> {address: bytes} of the ones
+    that are pictures (anything else is left out and loaded as usual)."""
+    import base64
+    out = {}
+    for url, data_url in list((photos if isinstance(photos, dict) else {}).items())[:MAX_PAGE_PHOTOS]:
+        if not (isinstance(url, str) and isinstance(data_url, str) and data_url.startswith("data:image/")):
+            continue
+        try:
+            data = base64.b64decode(data_url.split(",", 1)[1], validate=False)
+            if len(data) > MAX_IMAGE_BYTES:
+                continue
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+        except Exception:  # noqa: BLE001 - not a picture Pillow reads
+            continue
+        out[url] = data
+    return out
 
 
 @app.post("/api/import-text")

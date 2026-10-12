@@ -165,3 +165,53 @@ def test_tesco_lower_case_recipe_with_step_photos(monkeypatch, tmp_path):
 def test_page_text_inside_a_form_is_kept(tmp_path):
     text = from_browser(ASPNET, tmp_path)
     assert "make a well in the centre" in text and "Knead the dough for 10 mins" in text and "Menu" not in text
+
+
+def _jpeg(color):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_bookmark_button_names_the_photos(isolated):
+    page = f'<script type="application/ld+json">{json.dumps(TESCO_RECIPE)}</script>{ASPNET}'
+    urls = TestClient(main.app).post("/api/page-photos", json={"url": URL, "html": page}).json()["urls"]
+    assert urls == ["https://realfood.example/media/main-472x310.jpg",
+                    "https://realfood.example/media/step-1.jpg", "https://realfood.example/media/step-2.jpg"]
+
+
+def test_photos_from_the_browser_are_not_loaded_again(isolated, monkeypatch):
+    """The site refuses the app its photos (403) - the ones the browser sent
+    are used, the one it couldn't fetch is tried as usual."""
+    import base64
+    asked = []
+
+    def handler(request):
+        asked.append(str(request.url))
+        return httpx.Response(403)
+    monkeypatch.setattr(url_processor, "_client", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    captured = {}
+
+    def run(job_id, sources, doc_type, *a):
+        captured["result"] = url_processor.process_url(sources[0], str(isolated / "img"), html=PAGE_WITH_PHOTOS,
+                                                       given_photos=main._given_photos(job_id))
+    monkeypatch.setattr(main, "_run_extraction", run)
+    data_url = "data:image/jpeg;base64," + base64.b64encode(_jpeg("orange")).decode()
+    photos = {"https://realfood.example/media/main-472x310.jpg": data_url,
+              "https://realfood.example/media/step-1.jpg": data_url,
+              "https://realfood.example/media/step-2.jpg": "data:image/jpeg;base64,bm90IGFuIGltYWdl"}  # not a picture
+    res = TestClient(main.app).post("/api/import-page", json={"url": URL, "html": PAGE_WITH_PHOTOS, "photos": photos})
+    assert res.status_code == 200, res.text
+    import time
+    for _ in range(50):
+        if "result" in captured:
+            break
+        time.sleep(0.02)
+    images = captured["result"]["images"].values()
+    assert len(images) == 2 and [i["step"] for i in images if "step" in i] == [0]
+    assert asked == ["https://realfood.example/media/step-2.jpg"]
+
+
+PAGE_WITH_PHOTOS = f'<script type="application/ld+json">{json.dumps(TESCO_RECIPE)}</script>{ASPNET}'

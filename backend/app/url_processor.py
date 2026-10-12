@@ -259,20 +259,26 @@ def _image_url(recipe: dict | None, soup: BeautifulSoup, base: str) -> str | Non
 
 
 def _save_image(client: httpx.Client, url: str, images_dir: str, gate: dict | None = None) -> dict | None:
-    """gate: {"until": deadline, "blocked": hosts} shared by a recipe's
-    photos - past the deadline, or once a host timed out or refused, the
+    """gate: {"until": deadline, "blocked": hosts, "given": {url: bytes}}
+    shared by a recipe's photos - a photo the browser already sent isn't
+    loaded; past the deadline, or once a host timed out or refused, the
     rest of them aren't tried."""
     host = urlparse(url).netloc
-    if gate is not None and (time.monotonic() > gate["until"] or host in gate["blocked"]):
+    given = (gate or {}).get("given", {}).get(url)
+    if given is None and gate is not None and (time.monotonic() > gate["until"] or host in gate["blocked"]):
         return None
     try:
-        resp = client.get(url, timeout=IMAGE_TIMEOUT)
-        if gate is not None and resp.status_code in BLOCKED_STATUS:
-            gate["blocked"].add(host)
-        resp.raise_for_status()
-        if len(resp.content) > MAX_IMAGE_BYTES:
+        if given is not None:
+            content = given
+        else:
+            resp = client.get(url, timeout=IMAGE_TIMEOUT)
+            if gate is not None and resp.status_code in BLOCKED_STATUS:
+                gate["blocked"].add(host)
+            resp.raise_for_status()
+            content = resp.content
+        if len(content) > MAX_IMAGE_BYTES:
             return None
-        img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+        img = Image.open(io.BytesIO(content)).convert("RGB")
     except Exception as exc:  # noqa: BLE001
         if gate is not None and isinstance(exc, httpx.TimeoutException):
             gate["blocked"].add(host)
@@ -331,9 +337,51 @@ def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
     return resp.text, str(resp.url)
 
 
-def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
+def _page_recipe(soup: BeautifulSoup) -> tuple[dict | None, dict | None]:
+    """(the page's schema.org recipe with ingredients or method, a Recipe
+    entry with only name, image, address - its photo is still good)."""
+    recipe = None
+    scripts = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            scripts.append(json.loads(script.string or script.get_text() or ""))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    stub = None
+    for kind in ("Recipe", "HowTo"):  # a recipe first, else a step-by-step guide
+        found = next((r for r in (_find_recipe(d, kind) for d in scripts) if r), None)
+        if found and kind == "HowTo":
+            found = _howto_as_recipe(found)
+        if found and (found.get("recipeIngredient") or found.get("ingredients")
+                      or _instructions(found.get("recipeInstructions"))):
+            recipe = found
+            break
+        stub = stub or found
+    return recipe, stub
+
+
+def _photo_urls(recipe, stub, soup, page_url) -> tuple[str | None, list[tuple[int, str]], int]:
+    """(main photo, [(step position, step photo)], number of original steps)."""
+    step_images, steps = _step_images(recipe.get("recipeInstructions")) if recipe else ([], 0)
+    return (_image_url(recipe or stub, soup, page_url),
+            [(position, urljoin(page_url, u)) for position, u in step_images[:MAX_STEP_IMAGES]], steps)
+
+
+def page_photo_urls(url: str, html: str) -> list[str]:
+    """The photos an import of this page would load - the bookmark button
+    lets the browser fetch them (sites that refuse the app their photos)."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    recipe, stub = _page_recipe(soup)
+    main, steps, _ = _photo_urls(recipe, stub, soup, url)
+    return list(dict.fromkeys(([main] if main else []) + [u for _, u in steps]))
+
+
+def process_url(url: str, images_dir: str, html: str | None = None,
+                given_photos: dict[str, bytes] | None = None) -> dict:
     """html: the page as the browser already has it (bookmark button) - then
-    it isn't loaded again (sites with bot protection refuse that)."""
+    it isn't loaded again (sites with bot protection refuse that); its
+    photos too, as far as the browser could fetch them (given_photos:
+    {address: bytes}) - the others are loaded as usual."""
     os.makedirs(images_dir, exist_ok=True)
     if video_processor.platform(url) and html is None:
         return _process_video(url, images_dir)
@@ -346,23 +394,7 @@ def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
                 raise UrlImportError("The page is too large.")
         soup = BeautifulSoup(html, "html.parser")
 
-        recipe = None
-        scripts = []
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                scripts.append(json.loads(script.string or script.get_text() or ""))
-            except (json.JSONDecodeError, TypeError):
-                continue
-        stub = None  # a Recipe entry with only name, image, address - its photo is still good
-        for kind in ("Recipe", "HowTo"):  # a recipe first, else a step-by-step guide
-            found = next((r for r in (_find_recipe(d, kind) for d in scripts) if r), None)
-            if found and kind == "HowTo":
-                found = _howto_as_recipe(found)
-            if found and (found.get("recipeIngredient") or found.get("ingredients")
-                          or _instructions(found.get("recipeInstructions"))):
-                recipe = found
-                break
-            stub = stub or found
+        recipe, stub = _page_recipe(soup)
 
         def page_text():
             visible = _visible_text(BeautifulSoup(html, "html.parser"))
@@ -382,18 +414,16 @@ def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
             raise UrlImportError("No recipe text found on that page.")
 
         images = {}
-        gate = {"until": time.monotonic() + PHOTOS_SECONDS, "blocked": set()}
-        image_url = _image_url(recipe or stub, soup, page_url)
+        gate = {"until": time.monotonic() + PHOTOS_SECONDS, "blocked": set(), "given": given_photos or {}}
+        image_url, step_images, steps = _photo_urls(recipe, stub, soup, page_url)
         if image_url:
             saved = _save_image(client, image_url, images_dir, gate)
             if saved:
                 images[saved.pop("id")] = saved
-        if recipe:
-            step_images, steps = _step_images(recipe.get("recipeInstructions"))
-            for order, (position, step_url) in enumerate(step_images[:MAX_STEP_IMAGES]):
-                saved = _save_image(client, urljoin(page_url, step_url), images_dir, gate)
-                if saved:
-                    images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
+        for order, (position, step_url) in enumerate(step_images):
+            saved = _save_image(client, step_url, images_dir, gate)
+            if saved:
+                images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
 
     return {
         "pages": [{"page": 1, "text": text}],

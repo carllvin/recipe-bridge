@@ -73,8 +73,9 @@ no recipe are skipped and listed in the review.
 - **🔖 Bookmark button** – drag it to your browser's bookmark bar; one click
   on a recipe page sends it to the app – the page itself, as your browser
   shows it, so it also works for sites that block the app (bot protection:
-  "403 Forbidden"). A button dragged in before version 1.2 only sends the
-  address – drag it in again once.
+  "403 Forbidden"), together with the recipe's photos as your browser
+  loads them. A button dragged in before version 1.2 only sends the
+  address, one from before the photos only the page – drag it in again once.
 - **📂 Watched folder** – files put into a folder (`WATCH_DIR`) are imported
   on their own and wait under ✅ Review → *New imports*.
 - **🚚 Move from Tandoor / Mealie** – when both are configured, all recipes
