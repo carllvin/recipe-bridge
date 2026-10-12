@@ -244,9 +244,17 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.error = str(exc)
     finally:
         if doc_type != "links":  # _run_link_list records its own usage
-            usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+            _record_usage(job)
             notify.import_finished(job)
         jobs.save_job(job)
+
+
+def _record_usage(job) -> None:
+    """An import's tokens - the photos in the steps as their own line."""
+    photos = job.photo_usage
+    usage_log.record("import", job.token_usage.input_tokens - photos.input_tokens,
+                     job.token_usage.output_tokens - photos.output_tokens)
+    usage_log.record("step_photos", photos.input_tokens, photos.output_tokens)
 
 
 def _image_entry(info: dict, page: int) -> dict:
@@ -322,7 +330,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.status = "error"
         job.error = str(exc)
     finally:
-        usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        _record_usage(job)
         notify.import_finished(job)
         jobs.save_job(job)
 

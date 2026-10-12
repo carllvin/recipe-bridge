@@ -1684,6 +1684,7 @@ function openAreaStart(area) {
 document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
+  step_photos: 'usageStepPhotos',
   tags_groups: 'toolTagGroupsTitle',
   unused_foods: 'toolUnusedFoodsTitle',
   unused_units: 'toolUnusedUnitsTitle',

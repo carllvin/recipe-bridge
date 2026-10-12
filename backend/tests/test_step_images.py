@@ -24,9 +24,9 @@ def recipe_job(pages=(1, 1)):
         steps=[Step(instruction="Teig kneten."), Step(instruction="Formen."), Step(instruction="Backen.")])]
     images_dir = os.path.join(main._job_dir(job.id), "images")
     os.makedirs(images_dir, exist_ok=True)
-    for iid, page, kind in [("main", 1, None), ("a", 1, None), ("b", 2, None), ("c", 2, None),
-                            ("next", 3, None), ("scan", 1, "page")]:
-        Image.new("RGB", (60, 40), "orange").save(os.path.join(images_dir, f"{iid}.jpg"))
+    for n, (iid, page, kind) in enumerate([("main", 1, None), ("a", 1, None), ("b", 2, None), ("c", 2, None),
+                                           ("next", 3, None), ("scan", 1, "page")]):
+        Image.new("RGB", (60, 40), (40 * n, 90, 200 - 30 * n)).save(os.path.join(images_dir, f"{iid}.jpg"))
         job.images[iid] = {"page": page, "filename": f"{iid}.jpg", **({"kind": kind} if kind else {})}
     job.recipes[0].selected_image_id = "main"
     jobs.save_job(job)
@@ -52,7 +52,8 @@ def test_each_photo_into_its_step_by_the_ai(isolated, monkeypatch):
     job, images_dir = recipe_job(pages=(1, 2))
     seen = []
 
-    def look(jpeg, prompt, max_tokens=0):
+    def look(jpeg, prompt, max_tokens=0, tools=False):
+        assert tools  # the cheaper tools model
         seen.append(prompt)
         assert jpeg[:2] == b"\xff\xd8"  # one contact sheet
         return json.dumps({"photos": [{"n": 1, "step": 2, "sure": True}, {"n": 2, "step": None, "sure": True},
@@ -133,3 +134,41 @@ def test_review_keeps_moved_photos(isolated):
              {"instruction": "Backen."}]
     data = TestClient(main.app).put(f"/api/jobs/{job.id}/recipes/r1", json={"steps": steps}).json()
     assert [s["image_ids"] for s in data["steps"]] == [[], ["a"], []]
+
+
+def test_cheap_no_ai_for_one_photo_or_when_switched_off(isolated, monkeypatch):
+    from app.config import settings
+    calls = []
+    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: calls.append(1) or ("{}", None))
+    job, images_dir = recipe_job()  # page 1 only: one further photo ("a")
+    image_steps.assign_all(job, images_dir)
+    assert calls == [] and placed(job.recipes[0]) == [[], [], []]
+    monkeypatch.setattr(settings, "step_photos_ai", False)
+    job, images_dir = recipe_job(pages=(1, 2))  # three further photos, but the AI is off
+    image_steps.assign_all(job, images_dir)
+    assert calls == []
+
+
+def test_decoration_never_reaches_the_ai(isolated):
+    job, images_dir = recipe_job(pages=(1, 3))
+    logo = Image.new("RGB", (50, 50), "white")
+    for page in (1, 2, 3):  # the same image on every page
+        logo.save(os.path.join(images_dir, f"logo{page}.jpg"))
+        job.images[f"logo{page}"] = {"page": page, "filename": f"logo{page}.jpg"}
+    Image.new("RGB", (400, 40), "blue").save(os.path.join(images_dir, "banner.jpg"))
+    job.images["banner"] = {"page": 2, "filename": "banner.jpg"}
+    skip = image_steps.decoration(job, images_dir)
+    assert skip == {"logo1", "logo2", "logo3", "banner"}
+    assert image_steps.extra_images(job, job.recipes[0], skip) == ["a", "b", "c", "next"]
+
+
+def test_photo_tokens_counted_on_their_own(isolated, monkeypatch):
+    from app import usage_log
+    job, _ = recipe_job()
+    job.token_usage.input_tokens, job.token_usage.output_tokens = 1000, 200
+    job.photo_usage.input_tokens, job.photo_usage.output_tokens = 300, 20
+    main._record_usage(job)
+    by_source = usage_log.summary()["by_source"]
+    assert by_source["import"] == {"input_tokens": 700, "output_tokens": 180}
+    assert by_source["step_photos"] == {"input_tokens": 300, "output_tokens": 20}

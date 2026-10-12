@@ -96,7 +96,13 @@ of numbered thumbnails next to the steps) and says which step each one
 shows and whether it is sure. Only sure answers are used – the finished
 dish, a picture of another recipe or a photo the AI isn't sure about (or
 can't look at, e.g. with a local model that doesn't read images) stays
-unused. Photographed cookbook pages are never step photos. In the review
+unused. Photographed cookbook pages are never step photos. To keep it
+cheap the AI only looks when a recipe has at least two further photos
+(one alone is usually the finished dish), with the tools model and small
+thumbnails; decoration (an image repeated on several pages, duplicates,
+narrow banners) is sorted out beforehand without AI, and *AI usage* on
+the Maintain page shows the cost as its own line. `STEP_PHOTOS_AI=false`
+switches the AI off – photos are then only assigned by hand. In the review
 every photo has a menu: *main photo*, *step 1 … n* or *not used*. With
 Tandoor the first photo of a step becomes the step's file and further ones
 appear in its text (stored in Tandoor's *Files*, removed again when an

@@ -80,6 +80,7 @@ class Job(BaseModel):
     progress_total: int = 0
     progress_label: Optional[str] = None
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
+    photo_usage: TokenUsage = Field(default_factory=TokenUsage)  # the part of token_usage for photos in the steps
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox

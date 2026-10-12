@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     # Output settings
     output_language: str = "English"   # target language for title/description/ingredients/steps AND the UI language
     translate_recipes: bool = True     # true = translate recipes into output_language, false = keep each recipe in its own language
+    step_photos_ai: bool = True        # the image AI places a cookbook's photos into the steps; false = only by hand in the review
     convert_to_metric: bool = True     # convert US/UK units (cups, oz, lb, °F, inch) to metric
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them

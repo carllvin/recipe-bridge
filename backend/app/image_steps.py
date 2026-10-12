@@ -12,10 +12,17 @@ whether it is sure. Only sure answers are used: a photo the AI isn't sure
 about (or can't look at - e.g. a local model that doesn't read images)
 stays unassigned, i.e. not used unless picked in the review.
 
+Kept cheap: the tools model, small thumbnails, the start of each step
+only, and no AI call at all for a single further photo (that's the
+finished dish far more often than a step) or with STEP_PHOTOS_AI=false
+(then only by hand). Decoration never gets that far: an image repeated on
+several pages (a logo, a frame), a duplicate or a narrow banner.
+
 Photos of cookbook pages (the photo import) are the pages themselves, not
 pictures in them - they never go into the steps."""
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
@@ -23,13 +30,18 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 from . import json_answer, llm_provider
+from .config import settings
 from .schemas import Job, TokenUsage
 
 log = logging.getLogger("recipe-bridge")
 
 MAX_PER_RECIPE = 12   # more is rarely a step-by-step series (a whole photo spread)
-TILE = 300            # px, one thumbnail on the contact sheet
+TILE = 220            # px, one thumbnail on the contact sheet - enough to tell the steps apart
 COLUMNS = 4
+STEP_CHARS = 160      # of each step's text - enough to recognise it
+MIN_FOR_AI = 2        # one further photo alone is usually the finished dish
+REPEATED_ON = 3       # the same image on this many pages is decoration
+MAX_ASPECT = 3        # wider (or taller) than 3:1 is a banner or a border
 
 PROMPT = """The picture is a contact sheet of {n} numbered photos (the number is
 in the top left corner of each photo) found with a recipe in a cookbook.
@@ -48,13 +60,41 @@ Respond with ONLY a JSON object (no explanation, no markdown fence):
 {{"photos": [{{"n": <photo number>, "step": <step number 1-{m}> | null, "sure": true | false}}, ...]}}"""
 
 
-def extra_images(job: Job, recipe) -> list[str]:
+def decoration(job: Job, images_dir: str) -> set[str]:
+    """Images that are no recipe photos: repeated on several pages, second
+    copies of the same image, narrow banners - found without AI."""
+    pages: dict[str, set] = {}
+    first: dict[str, str] = {}
+    out = set()
+    for image_id, info in job.images.items():
+        if info.get("kind") == "page" or info.get("ai"):
+            continue
+        path = os.path.join(images_dir, info["filename"])
+        try:
+            with open(path, "rb") as f:
+                digest = hashlib.md5(f.read()).hexdigest()
+            with Image.open(path) as img:
+                w, h = img.size
+        except OSError:
+            continue
+        if max(w, h) > MAX_ASPECT * max(1, min(w, h)):
+            out.add(image_id)
+        pages.setdefault(digest, set()).add(info.get("page"))
+        if digest in first:
+            out.add(image_id)
+        else:
+            first[digest] = image_id
+    out |= {first[d] for d, p in pages.items() if len(p) >= REPEATED_ON}
+    return out
+
+
+def extra_images(job: Job, recipe, skip: set[str] = frozenset()) -> list[str]:
     """The recipe's photos besides its main photo, in page order: those on
     its own pages (no neighbouring pages - they may belong to the next
-    recipe), never photographed cookbook pages or AI images."""
+    recipe), never photographed cookbook pages, AI images or decoration."""
     out = []
     for image_id, info in job.images.items():
-        if image_id == recipe.selected_image_id or info.get("kind") == "page" or info.get("ai"):
+        if image_id == recipe.selected_image_id or info.get("kind") == "page" or info.get("ai") or image_id in skip:
             continue
         if recipe.source_page_start <= (info.get("page") or 0) <= recipe.source_page_end:
             out.append(image_id)
@@ -87,9 +127,9 @@ def _contact_sheet(paths: list[str]) -> bytes:
 
 def _ask_ai(recipe, paths: list[str]) -> tuple[dict[int, int], TokenUsage]:
     """{photo index: step index} for the photos the AI placed - and is sure about."""
-    steps = "\n".join(f"{i}. {s.instruction[:300]}" for i, s in enumerate(recipe.steps, 1))
+    steps = "\n".join(f"{i}. {s.instruction[:STEP_CHARS]}" for i, s in enumerate(recipe.steps, 1))
     prompt = PROMPT.format(n=len(paths), steps=steps, m=len(recipe.steps))
-    text, usage = llm_provider.transcribe_image(_contact_sheet(paths), prompt, max_tokens=800)
+    text, usage = llm_provider.transcribe_image(_contact_sheet(paths), prompt, max_tokens=600, tools=True)
     try:
         answer = json_answer.parse(text)
     except Exception:  # noqa: BLE001
@@ -121,17 +161,17 @@ def _by_position(job: Job, recipe, ids: list[str]) -> dict[str, int]:
     return out
 
 
-def assign(job: Job, recipe, images_dir: str) -> TokenUsage:
+def assign(job: Job, recipe, images_dir: str, skip: set[str] = frozenset()) -> TokenUsage:
     usage = TokenUsage()
     for step in recipe.steps:
         step.image_ids = []
-    ids = extra_images(job, recipe)
+    ids = extra_images(job, recipe, skip)
     if not ids or not recipe.steps:
         return usage
     hinted = [iid for iid in ids if job.images[iid].get("step") is not None]
     placed = _by_position(job, recipe, hinted)
     rest = [iid for iid in ids if iid not in placed]
-    if rest and llm_provider.is_configured():
+    if len(rest) >= MIN_FOR_AI and settings.step_photos_ai and llm_provider.is_configured():
         try:
             answer, usage = _ask_ai(recipe, [os.path.join(images_dir, job.images[iid]["filename"]) for iid in rest])
             placed.update({rest[i]: step for i, step in answer.items()})
@@ -144,7 +184,10 @@ def assign(job: Job, recipe, images_dir: str) -> TokenUsage:
 
 
 def assign_all(job: Job, images_dir: str) -> None:
+    skip = decoration(job, images_dir)
     for n, recipe in enumerate(job.recipes, 1):
         if len(job.recipes) > 1:
             job.progress_label = f"Placing photos into the steps ({n}/{len(job.recipes)}) …"
-        job.token_usage.add(assign(job, recipe, images_dir))
+        usage = assign(job, recipe, images_dir, skip)
+        job.token_usage.add(usage)
+        job.photo_usage.add(usage)
