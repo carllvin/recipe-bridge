@@ -343,23 +343,6 @@
         detects individual recipes with ingredients, times and images – then
         you choose what goes into Tandoor.
       </p>
-      <details id="import-options" class="import-options">
-        <summary><span data-i18n="importOptionsTitle">⚙️ Import options</span> <span id="import-options-summary" class="household-summary"></span></summary>
-        <div class="import-options-body">
-          <label><span data-i18n="importLanguage">Recipe language</span>
-            <select id="io-translate">
-              <option value="1" id="io-translate-yes"></option>
-              <option value="0" data-i18n="importLanguageKeep">Keep the original language</option>
-            </select></label>
-          <label><span data-i18n="importStepImages">Further photos of a recipe</span>
-            <select id="io-step-images">
-              <option value="off" data-i18n="stepImagesOff">Main photo only</option>
-              <option value="steps" data-i18n="stepImagesSteps">Each photo into its step</option>
-              <option value="first" data-i18n="stepImagesFirst">All photos into step 1</option>
-            </select></label>
-          <span id="io-status" class="settings-hint"></span>
-        </div>
-      </details>
       <label id="dropzone" class="dropzone">
         <span class="icon">📖</span>
         <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
@@ -390,9 +373,11 @@
       <!-- One field for everything that isn't a file: a link (one recipe, or
            scan the whole site) or a pasted recipe text - detected while typing. -->
       <form id="smart-form" class="smart-form">
-        <textarea id="smart-input" rows="1" data-i18n-placeholder="smartPlaceholder" placeholder="Paste a link or a recipe text …"></textarea>
-        <div class="smart-actions">
+        <div class="smart-row">
+          <textarea id="smart-input" rows="1" data-i18n-placeholder="smartPlaceholder" placeholder="Paste a link or a recipe text …"></textarea>
           <button id="smart-import" class="btn" type="submit" disabled data-i18n="smartImport">Import</button>
+        </div>
+        <div class="smart-actions">
           <button id="smart-scan" class="btn secondary hidden" type="button" data-i18n="smartScan">🌐 Scan the whole website</button>
           <label id="smart-depth-wrap" class="smart-depth hidden">
             <span data-i18n="scanDepth">Depth</span>
@@ -429,6 +414,23 @@
         <h3 data-i18n="recentImportsTitle">Recent imports</h3>
         <div id="recent-imports-list" class="new-recipes-open-jobs"></div>
       </div>
+      <details id="import-options" class="import-options more-ways">
+        <summary><span data-i18n="importOptionsTitle">⚙️ Import options</span> <span id="import-options-summary" class="household-summary"></span></summary>
+        <div class="import-options-body">
+          <label><span data-i18n="importLanguage">Recipe language</span>
+            <select id="io-translate">
+              <option value="1" id="io-translate-yes"></option>
+              <option value="0" data-i18n="importLanguageKeep">Keep the original language</option>
+            </select></label>
+          <label><span data-i18n="importStepImages">Further photos of a recipe</span>
+            <select id="io-step-images">
+              <option value="off" data-i18n="stepImagesOff">Main photo only</option>
+              <option value="steps" data-i18n="stepImagesSteps">Each photo into its step</option>
+              <option value="first" data-i18n="stepImagesFirst">All photos into step 1</option>
+            </select></label>
+          <span id="io-status" class="settings-hint"></span>
+        </div>
+      </details>
       <details class="more-ways">
         <summary data-i18n="moreWaysTitle">More ways to import</summary>
         <div class="more-way">

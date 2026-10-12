@@ -136,7 +136,7 @@ a { color: inherit; }
   width: min(560px, 90vw);
   border: 1.5px dashed #5a6157;
   border-radius: var(--radius);
-  padding: 48px 32px;
+  padding: 34px 32px;
   background: rgba(239, 233, 218, 0.03);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
@@ -1128,7 +1128,13 @@ a { color: inherit; }
 .smart-form textarea { width: 100%; box-sizing: border-box; resize: none; overflow-y: auto; min-height: 46px; line-height: 1.4;
   font: inherit; font-size: 0.95rem; padding: 11px 14px; border-radius: var(--radius); border: 1px solid #2a2f2a; background: rgba(239,233,218,0.05); color: var(--paper); }
 .smart-form textarea:focus { outline: none; border-color: var(--gold); }
+.smart-row { display: flex; gap: 8px; align-items: flex-start; }
+.smart-row textarea { flex: 1; }
+.smart-row .btn { flex-shrink: 0; min-height: 46px; }
+.smart-row .btn:disabled { opacity: 0.35; }
+@media (max-width: 560px) { .smart-row { flex-direction: column; align-items: stretch; } .smart-row .btn:disabled { display: none; } }
 .smart-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.smart-actions:not(:has(> :not(.hidden))) { display: none; }
 .smart-hint { margin: 0; min-height: 1.2em; font-size: 0.8rem; color: #8f9689; }
 .upload-screen .recent-imports { text-align: left; }
 
@@ -1213,8 +1219,8 @@ a { color: inherit; }
 @keyframes voice-pulse { 50% { opacity: 0.55; } }
 
 /* Household profile (Plan) */
-.import-options { margin: 0 0 14px; font-size: 0.86rem; }
-.import-options > summary { cursor: pointer; color: #8f9689; }
+.import-options + .more-ways { margin-top: 0; border-top: none; }
+.import-options .household-summary { color: #6f766b; font-size: 0.8rem; margin-left: 6px; }
 .import-options-body { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; margin-top: 10px; }
 .import-options-body label { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .import-options-body select { background: rgba(239,233,218,0.05); border: 1px solid #2a2f2a; border-radius: var(--radius); color: var(--paper); padding: 6px 8px; color-scheme: dark; }
