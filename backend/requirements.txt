@@ -14,4 +14,5 @@ Pillow==12.3.0
 pillow-heif==1.7.0
 EbookLib==0.20
 beautifulsoup4==4.15.0
+striprtf==0.0.29
 numpy==2.5.3

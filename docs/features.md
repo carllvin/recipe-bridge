@@ -28,7 +28,8 @@ recipe manager – "Tandoor" or "Mealie".
   reads the photos itself instead of the OCR (costs a little more).
 - **A `.txt` file** – either a **list of recipe links** (one per line, or any
   text containing links; up to 50) or **recipe text**; the app tells them
-  apart by the content. Markdown files (`.md`) are read as text.
+  apart by the content. Markdown files (`.md`) and RTF files
+  (`.rtf`, e.g. from TextEdit or WordPad) are read as text.
 - **Browser bookmarks** – the HTML export of Chrome, Firefox, Safari or Edge
   opens a pick list with the bookmark folders as a filter.
 

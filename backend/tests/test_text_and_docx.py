@@ -56,3 +56,19 @@ def test_docx_text_tables_and_pictures(tmp_path):
     result = docx_processor.process_docx(str(_docx(tmp_path)), str(tmp_path / "images"))
     assert result["pages"] == [{"page": 1, "text": "Kürbissuppe\n1 Kürbis | 500 ml Brühe\nAlles 20 Minuten köcheln."}]
     assert len(result["images"]) == 1 and next(iter(result["images"].values()))["page"] == 1
+
+
+RTF = (r"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0 Helvetica;}}\f0\fs24 "
+       r"{\b Apfelkuchen}\par 500 g Mehl\par 3 \'c4pfel, gesch\'e4lt\par "
+       r"\par Die \u196?pfel in Scheiben schneiden und auf den Teig legen. Bei 180 \'b0C backen.\par}")
+
+
+def test_rtf_is_read_as_text(tmp_path):
+    from app import main
+    from app.text_processor import rtf_to_text
+    path = tmp_path / "kuchen.rtf"
+    path.write_bytes(RTF.encode("latin-1"))
+    assert main._classify_upload(["kuchen.rtf"]) == ("rtf", "")
+    text = rtf_to_text(str(path))
+    assert "Apfelkuchen" in text and "3 Äpfel, geschält" in text and "Die Äpfel in Scheiben" in text
+    assert "180 °C" in text and "\\par" not in text and "fonttbl" not in text and "Helvetica" not in text

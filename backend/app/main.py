@@ -57,6 +57,7 @@ CLEANUP_INTERVAL_SECONDS = 3600        # how often the background cleanup task r
 PDF_EXTENSIONS = {".pdf"}
 TXT_EXTENSIONS = {".txt"}  # recipe links (one per line) or recipe text - decided by content
 TEXT_EXTENSIONS = {".md", ".markdown"}
+RTF_EXTENSIONS = {".rtf"}  # read as text (text_processor.rtf_to_text)
 AUDIO_EXTENSIONS = set(llm_provider.AUDIO_TYPES) - {".mp4"}  # voice notes (dictated recipes)
 DOCX_EXTENSIONS = {".docx"}
 MAX_SELECTED_LINKS = 200  # links picked from a site scan or bookmarks
@@ -179,6 +180,14 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 result = process_text(f.read())
+        elif doc_type == "rtf":
+            job.progress_label = "Reading the text …"
+            jobs.save_job(job)
+            from .text_processor import rtf_to_text
+            content = rtf_to_text(source_paths[0])
+            if len(content) < 20:
+                raise ValueError("The RTF file contains no readable text.")
+            result = process_text(content)
         elif doc_type == "audio":
             job.progress_label = "Listening to the voice note …"
             jobs.save_job(job)
@@ -356,11 +365,13 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
         return "txt", ""
     if len(filenames) == 1 and exts[0] in TEXT_EXTENSIONS:
         return "text", ""
+    if len(filenames) == 1 and exts[0] in RTF_EXTENSIONS:
+        return "rtf", ""
     if len(filenames) == 1 and exts[0] in DOCX_EXTENSIONS:
         return "docx", ""
     if len(filenames) == 1 and exts[0] in AUDIO_EXTENSIONS:
         return "audio", ""
-    single_only = (PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS
+    single_only = (PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | RTF_EXTENSIONS | DOCX_EXTENSIONS
                    | AUDIO_EXTENSIONS)
     if exts and all(e in SUPPORTED_IMAGE_EXTENSIONS for e in exts):
         return "images", ""

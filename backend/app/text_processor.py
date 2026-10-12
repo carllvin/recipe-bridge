@@ -46,6 +46,17 @@ def process_text(text: str) -> dict:
     return {"pages": pages, "images": {}, "page_count": len(pages), "metadata_title": "", "toc_pages": []}
 
 
+def rtf_to_text(path: str) -> str:
+    """The text of an RTF file (WordPad, TextEdit, older word processors) -
+    formatting and embedded pictures dropped."""
+    from striprtf.striprtf import rtf_to_text as strip
+    with open(path, "rb") as f:
+        raw = f.read().decode("latin-1")  # RTF is 7-bit; special characters come as \'xx or \uN escapes
+    text = strip(raw, errors="ignore")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def looks_like_link_list(text: str) -> bool:
     """True for a file that is mostly links (one per line, maybe with short
     labels), False for recipe text that merely mentions a link."""

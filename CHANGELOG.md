@@ -4,6 +4,7 @@
 
 **Import**
 - WebP photos (.webp) can be imported like JPEG, PNG and HEIC
+- RTF files (.rtf, e.g. from TextEdit or WordPad) are read as recipe text
 - Own photos can be added to a recipe in the review (the "+" tile)
 - Photos in the steps: in the review every photo can be the main photo,
   go into a step or stay unused; nothing is placed until you ask with
