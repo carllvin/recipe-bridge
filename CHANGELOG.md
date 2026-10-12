@@ -14,6 +14,9 @@
 - Sites with bot protection (403): the app asks like a browser and tries a
   second time; the bookmark button now hands over the page your browser
   already shows, so such sites import too (drag the button in again once)
+- A site that doesn't answer no longer keeps the import waiting: shorter
+  waits with a clear hint, and a recipe's photos stop once their server
+  hangs or refuses (at most 30 seconds for all of them)
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them

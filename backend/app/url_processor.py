@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from urllib.parse import urljoin, urlparse
 
@@ -50,6 +51,11 @@ BLOCKED_HINT = ("The site blocks automatic access (HTTP {status}). Open the reci
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_STEP_IMAGES = 15   # photos the page shows with its steps (image_steps.py)
+# Bot protection often lets a request hang instead of refusing it - so short
+# waits, and the photos of a recipe share one time budget.
+PAGE_TIMEOUT = httpx.Timeout(15, connect=8)
+IMAGE_TIMEOUT = httpx.Timeout(8, connect=5)
+PHOTOS_SECONDS = 30
 MAX_TEXT_CHARS = 30000
 
 
@@ -212,14 +218,24 @@ def _image_url(recipe: dict | None, soup: BeautifulSoup, base: str) -> str | Non
     return None
 
 
-def _save_image(client: httpx.Client, url: str, images_dir: str) -> dict | None:
+def _save_image(client: httpx.Client, url: str, images_dir: str, gate: dict | None = None) -> dict | None:
+    """gate: {"until": deadline, "blocked": hosts} shared by a recipe's
+    photos - past the deadline, or once a host timed out or refused, the
+    rest of them aren't tried."""
+    host = urlparse(url).netloc
+    if gate is not None and (time.monotonic() > gate["until"] or host in gate["blocked"]):
+        return None
     try:
-        resp = client.get(url)
+        resp = client.get(url, timeout=IMAGE_TIMEOUT)
+        if gate is not None and resp.status_code in BLOCKED_STATUS:
+            gate["blocked"].add(host)
         resp.raise_for_status()
         if len(resp.content) > MAX_IMAGE_BYTES:
             return None
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
     except Exception as exc:  # noqa: BLE001
+        if gate is not None and isinstance(exc, httpx.TimeoutException):
+            gate["blocked"].add(host)
         log.info("Recipe image %s not usable: %s", url, exc)
         return None
     image_id = uuid.uuid4().hex[:12]
@@ -230,7 +246,7 @@ def _save_image(client: httpx.Client, url: str, images_dir: str) -> dict | None:
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(headers=HEADERS, follow_redirects=True, timeout=20)
+    return httpx.Client(headers=HEADERS, follow_redirects=True, timeout=PAGE_TIMEOUT)
 
 
 def _process_video(url: str, images_dir: str) -> dict:
@@ -259,12 +275,15 @@ def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
     """(html, final url) - a second try with other headers when a site's bot
     protection refuses the first."""
     try:
-        resp = client.get(url)
+        resp = client.get(url, timeout=PAGE_TIMEOUT)
         if resp.status_code in BLOCKED_STATUS:
-            resp = client.get(url, headers=RETRY_HEADERS)
+            resp = client.get(url, headers=RETRY_HEADERS, timeout=PAGE_TIMEOUT)
         if resp.status_code in BLOCKED_STATUS:
             raise UrlImportError(BLOCKED_HINT.format(status=resp.status_code))
         resp.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise UrlImportError("The site doesn't answer (it may block automatic access). Use the 📥 bookmark "
+                             "button on the recipe page (under More ways) or paste the recipe text.") from exc
     except httpx.HTTPError as exc:
         raise UrlImportError(f"Could not load the page: {exc}") from exc
     if len(resp.content) > MAX_PAGE_BYTES:
@@ -307,15 +326,16 @@ def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
             raise UrlImportError("No recipe text found on that page.")
 
         images = {}
+        gate = {"until": time.monotonic() + PHOTOS_SECONDS, "blocked": set()}
         image_url = _image_url(recipe, soup, page_url)
         if image_url:
-            saved = _save_image(client, image_url, images_dir)
+            saved = _save_image(client, image_url, images_dir, gate)
             if saved:
                 images[saved.pop("id")] = saved
         if recipe:
             step_images, steps = _step_images(recipe.get("recipeInstructions"))
             for order, (position, step_url) in enumerate(step_images[:MAX_STEP_IMAGES]):
-                saved = _save_image(client, urljoin(page_url, step_url), images_dir)
+                saved = _save_image(client, urljoin(page_url, step_url), images_dir, gate)
                 if saved:
                     images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
 

@@ -65,3 +65,28 @@ def test_page_too_large_or_no_address(isolated):
     api = TestClient(main.app)
     assert api.post("/api/import-page", json={"url": URL, "html": "x" * (url_processor.MAX_PAGE_BYTES + 1)}).status_code == 413
     assert api.post("/api/import-page", json={"url": "not a link", "html": PAGE}).status_code == 400
+
+
+def test_a_hanging_site_fails_fast_with_a_hint(monkeypatch, tmp_path):
+    def hang(request):
+        raise httpx.ReadTimeout("no answer", request=request)
+    monkeypatch.setattr(url_processor, "_client", lambda: httpx.Client(transport=httpx.MockTransport(hang)))
+    with pytest.raises(url_processor.UrlImportError, match="doesn't answer"):
+        url_processor.process_url(URL, str(tmp_path))
+
+
+def test_photos_stop_once_their_host_hangs(monkeypatch, tmp_path):
+    recipe = {**RECIPE, "image": "https://img.example/main.jpg", "recipeInstructions": [
+        {"@type": "HowToStep", "text": f"Step {n} of the dough.", "image": f"https://img.example/{n}.jpg"}
+        for n in range(1, 6)]}
+    page = f'<script type="application/ld+json">{json.dumps(recipe)}</script>'
+    asked = []
+
+    def handler(request):
+        if request.url.host == "img.example":
+            asked.append(str(request.url))
+            raise httpx.ConnectTimeout("hangs", request=request)
+        return httpx.Response(200, text=page)
+    monkeypatch.setattr(url_processor, "_client", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    result = url_processor.process_url(URL, str(tmp_path))
+    assert result["images"] == {} and asked == ["https://img.example/main.jpg"]  # not 6 waits
