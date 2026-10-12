@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import app_settings, apply_queue, diagnostics, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
-from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
+from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
@@ -223,6 +223,8 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
+        if not _go_ahead(job, result["pages"], toc_pages, existing_tags):
+            return
         recipes: list[ExtractedRecipe]
         recipes, usage = extract_recipes_from_pages(
             result["pages"],
@@ -258,10 +260,58 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.status = "error"
         job.error = str(exc)
     finally:
-        if doc_type != "links":  # _run_link_list records its own usage
+        if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
             _record_usage(job)
             notify.import_finished(job)
         jobs.save_job(job)
+
+
+CONFIRM_WAIT_SECONDS = 3600
+
+
+def _go_ahead(job, pages: list[dict], toc_pages, existing_tags) -> bool:
+    """A large import (IMPORT_CONFIRM_TOKENS) started at the screen waits
+    here for the OK - POST /api/jobs/{id}/confirm - with the estimate shown.
+    Imports from the phone or the watched folder run on (no one to ask -
+    the monthly budget is their limit). False: cancelled (or no answer)."""
+    if job.source or not settings.import_confirm_tokens:
+        return True
+    estimate = estimate_tokens(pages, toc_pages=toc_pages, existing_tags=existing_tags)
+    log.info("Import %s estimated at %d tokens in %d chunk(s)", job.id, estimate["total"], estimate["chunks"])
+    if estimate["total"] < settings.import_confirm_tokens:
+        return True
+    budget = usage_log.budget_status()
+    estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None
+    job.estimate = estimate
+    job.status = "confirm"
+    job.progress_label = None
+    jobs.save_job(job)
+    until = time.monotonic() + CONFIRM_WAIT_SECONDS
+    while job.status == "confirm" and time.monotonic() < until:
+        time.sleep(0.5)
+    if job.status == "processing":
+        return True
+    if job.status == "confirm":
+        job.status = "cancelled"
+    return False
+
+
+@app.post("/api/jobs/{job_id}/confirm")
+async def confirm_import(job_id: str, body: dict = Body(...)):
+    """{"start": true | false} - the answer to a large import's estimate."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.status != "confirm":
+        raise HTTPException(409, "This import isn't waiting for an answer.")
+    if body.get("start"):
+        _check_budget()
+        job.status = "processing"
+        job.progress_label = "Reading the pages with the AI …"
+    else:
+        job.status = "cancelled"
+    jobs.save_job(job)
+    return {"status": job.status}
 
 
 def _record_usage(job) -> None:
@@ -725,7 +775,7 @@ async def list_import_jobs():
     """Recent imports (newest first) for the import page. Import jobs live in
     memory, so this covers the time since the last restart."""
     items = []
-    for job in sorted(jobs.list_jobs(), key=lambda j: -j.created_at)[:15]:
+    for job in sorted((j for j in jobs.list_jobs() if j.status != "cancelled"), key=lambda j: -j.created_at)[:15]:
         items.append({
             "id": job.id, "filename": job.filename, "status": job.status, "created_at": job.created_at,
             "recipes": len(job.recipes),

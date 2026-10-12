@@ -480,6 +480,25 @@ def _sliding_windows(start: int, end: int, size: int, overlap: int):
 ProgressCallback = Callable[[int, int, int, int], None]  # (chunk_idx, total_chunks, page_start, page_end)
 
 
+CHARS_PER_TOKEN = 4      # rough, for the estimate before a large import
+OUTPUT_SHARE = 0.6       # the recipes' JSON is about this share of the text it comes from
+MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
+
+
+def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
+                    existing_tags: Optional[list[str]] = None) -> dict:
+    """{"chunks", "input", "output", "total"} - roughly what the extraction
+    of these pages will use, without asking the AI: the chunks' text (with
+    the overlapping pages counted twice) plus the instructions per chunk,
+    and the answers as a share of the text."""
+    prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
+    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
+    texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
+    tokens_in = sum(texts) + prompt * len(chunks)
+    tokens_out = sum(min(MAX_OUTPUT_TOKENS, int(t * OUTPUT_SHARE)) for t in texts)
+    return {"chunks": len(chunks), "input": tokens_in, "output": tokens_out, "total": tokens_in + tokens_out}
+
+
 def extract_recipes_from_pages(
     pages: list[dict],
     on_progress: Optional[ProgressCallback] = None,

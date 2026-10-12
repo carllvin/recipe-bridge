@@ -3,6 +3,9 @@
 ## Unreleased
 
 **Import**
+- A large import (a whole cookbook) first shows its estimated tokens and
+  what is left of the monthly budget, and waits for **Start** or
+  **Cancel** (`IMPORT_CONFIRM_TOKENS`, default 50,000; 0 = never ask)
 - WebP photos (.webp) can be imported like JPEG, PNG and HEIC
 - RTF files (.rtf, e.g. from TextEdit or WordPad) are read as recipe text
 - Own photos can be added to a recipe in the review (the "+" tile)

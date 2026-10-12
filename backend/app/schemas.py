@@ -69,7 +69,7 @@ class ExtractedRecipe(BaseModel):
 class Job(BaseModel):
     id: str
     filename: str
-    status: str = "processing"  # processing | ready | error
+    status: str = "processing"  # processing | confirm (a large import waits for your OK) | ready | error | cancelled
     error: Optional[str] = None
     page_count: int = 0
     recipes: list[ExtractedRecipe] = Field(default_factory=list)
@@ -84,6 +84,7 @@ class Job(BaseModel):
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
+    estimate: Optional[dict] = None  # status "confirm": {"chunks", "input", "output", "total", "budget_left"} (ai_extractor.estimate_tokens)
 
 
 class ToolSuggestion(BaseModel):

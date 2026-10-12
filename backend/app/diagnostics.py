@@ -48,6 +48,7 @@ def info() -> list[dict]:
                             else ("on, but no key" if settings.image_gen_enabled else "off")),
          None if not settings.image_gen_enabled else image_gen.is_configured()),
         ("ai", "Monthly budget", _budget(), None),
+        ("ai", "IMPORT_CONFIRM_TOKENS", f"{settings.import_confirm_tokens:,}" if settings.import_confirm_tokens else "off", None),
         ("lang", "OUTPUT_LANGUAGE", f"{settings.output_language} (interface: {get_ui_language_code(settings.output_language)})", None),
         ("lang", "TRANSLATE_RECIPES", str(app_settings.translating()).lower(), None),
         ("lang", "STEP_PHOTOS_AI", str(settings.step_photos_ai).lower(), None),

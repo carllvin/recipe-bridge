@@ -205,6 +205,8 @@ a { color: inherit; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.confirm-box { max-width: 480px; text-align: center; }
+.confirm-box .settings-actions { justify-content: center; }
 .processing-screen .status-text { color: #b9c0b5; text-align: center; max-width: 480px; }
 
 .progress-track {
