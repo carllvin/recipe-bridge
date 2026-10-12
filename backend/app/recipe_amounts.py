@@ -57,6 +57,8 @@ Rules:
   otherwise leave it out
 - never write an amount or unit yourself, and change nothing else: keep
   the wording, times, temperatures, order and line breaks
+- never translate: the instruction stays in the language it is written in,
+  even when the ingredient texts (or the examples above) are in another one
 - a step without ingredients stays exactly as it is
 
 Respond with ONLY a JSON object (no explanation, no markdown fence):
@@ -265,7 +267,8 @@ rewrite "marked" so it does: put an ingredient where its fixed text fits
 (e.g. not "mit 3 Eier" but "3 Eier dazugeben und verrühren"), drop a
 doubled amount or article. Keep the markers (each at most once, only the
 given keys), never write an amount yourself, keep every number of
-"original".
+"original". Never translate: the text stays in the language of "original",
+even when the ingredient texts are in another one.
 
 Respond with ONLY a JSON object (no explanation, no markdown fence):
 {"steps": [{"ok": true} or {"ok": false, "marked": <corrected text>|null,

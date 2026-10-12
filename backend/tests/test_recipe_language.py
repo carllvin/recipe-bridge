@@ -62,3 +62,13 @@ def test_name_cleanup_and_tags_keep_the_language(isolated, keep_original):
     assert "never translate it" in normalize and "Deutsch" not in normalize and "translate it if" not in normalize
     assert "Keep every name in its own language" in _prompt(PICK_SYSTEM_PROMPT, "food")
     assert "never translate a tag" in ai_extractor._build_system_prompt(False, existing_tags=["Kuchen"])
+
+
+def test_amounts_and_extraction_never_translate(isolated, keep_original):
+    """Reported: with TRANSLATE_RECIPES=false the title and description kept
+    their language, ingredients and steps didn't."""
+    from app import recipe_amounts
+    assert "never translate" in recipe_amounts.SYSTEM_PROMPT and "Never translate" in recipe_amounts.PROOFREAD_PROMPT
+    keep_original()
+    prompt = ai_extractor._build_system_prompt(False)
+    assert "the ingredients and steps too, not only the title" in prompt

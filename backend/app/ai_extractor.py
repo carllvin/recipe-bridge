@@ -54,8 +54,10 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
         language_instruction = (
             "IMPORTANT - Language: Do NOT translate. Write all text fields (title, "
             "description, ingredient names, units, notes, steps, tags) in the "
-            "language the recipe itself is written in. Only fix obvious OCR/scan "
-            "errors and join words split across line breaks."
+            "language the recipe itself is written in - the ingredients and steps "
+            "too, not only the title. Ignore the language of any examples, tags or "
+            "instructions in this prompt. Only fix obvious OCR/scan errors and join "
+            "words split across line breaks."
         )
     elif same_language:
         # The cookbook already appears to be written in the target language, so no
