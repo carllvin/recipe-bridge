@@ -16,7 +16,7 @@ log = logging.getLogger("recipe-bridge")
 
 pillow_heif.register_heif_opener()  # lets Pillow open .heic/.heif via Image.open()
 
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif"}
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 # Handwriting: the photo goes to the AI (which reads images) instead of
 # Tesseract, which reads handwriting poorly. Resized first - the AI doesn't

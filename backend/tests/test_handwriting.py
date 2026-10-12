@@ -67,3 +67,14 @@ def test_notes_are_kept():
     assert "[Note:" in image_processor.HANDWRITING_PROMPT and "[Corrected:" in image_processor.HANDWRITING_PROMPT
     prompt = ai_extractor._build_system_prompt(False)
     assert "own notes are never dropped" in prompt and "ingredient's \"note\"" in prompt
+
+
+def test_webp_photos(tmp_path, monkeypatch):
+    from PIL import Image
+    from app import main
+    path = tmp_path / "seite.webp"
+    Image.new("RGB", (60, 40), "white").save(path, "WEBP")
+    assert main._classify_upload(["seite.webp", "seite2.WEBP"]) == ("images", "")
+    monkeypatch.setattr(image_processor, "ocr_image", lambda img: "OCR text")
+    result = image_processor.process_images([str(path)], str(tmp_path / "img"))
+    assert result["pages"][0]["text"] == "OCR text" and len(result["images"]) == 1

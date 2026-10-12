@@ -138,7 +138,7 @@ function updateUsageDisplay(usage) {
 const dropzone = el('dropzone');
 const fileInput = el('file-input');
 
-const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif'];
+const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
 const FALLBACK_PDF_EXTENSIONS = ['.pdf'];
 const FALLBACK_EPUB_EXTENSIONS = ['.epub'];
 const SINGLE_DOC_EXTENSIONS = ['.txt', '.md', '.markdown', '.docx'];  // links or recipe text, Word

@@ -3,6 +3,7 @@
 ## Unreleased
 
 **Import**
+- WebP photos (.webp) can be imported like JPEG, PNG and HEIC
 - Photos in the steps: in the review every photo can be the main photo,
   go into a step or stay unused; nothing is placed until you ask with
   **Place photos into the steps** (per recipe or for all): a recipe page's
