@@ -47,8 +47,7 @@ async function tryRestoreJobFromUrl() {
     el('processing-screen').classList.remove('hidden');
 
     if (job.status === 'error') {
-      el('processing-text').textContent = `${t('processingErrorPrefix')} ${job.error}`;
-      el('progress-track').classList.add('hidden');
+      showJobFailed(job);
       return;
     }
 
@@ -680,8 +679,7 @@ function pollJob() {
       }
       if (job.status === 'error') {
         notifyJobFinished(job);
-        el('processing-text').textContent = `${t('processingErrorPrefix')} ${job.error}`;
-        el('progress-track').classList.add('hidden');
+        showJobFailed(job);
         return;
       }
 
@@ -692,6 +690,17 @@ function pollJob() {
     }
   };
   tick();
+}
+
+// A failed import: back to the import page with the error (no spinner that keeps turning).
+function showJobFailed(job) {
+  clearTimeout(state.pollTimer);
+  state.jobId = null;
+  setJobUrl(null);
+  el('processing-screen').classList.add('hidden');
+  el('upload-screen').classList.remove('hidden');
+  showUploadError(`${t('processingErrorPrefix')} ${job.error || ''}`);
+  loadRecentImports();
 }
 
 function updateProgressUI(job) {

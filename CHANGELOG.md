@@ -17,6 +17,8 @@
 - A site that doesn't answer no longer keeps the import waiting: shorter
   waits with a clear hint, and a recipe's photos stop once their server
   hangs or refuses (at most 30 seconds for all of them)
+- A failed import goes back to the import page with the error instead of
+  leaving the loading screen turning
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them
