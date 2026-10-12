@@ -58,3 +58,12 @@ def test_upload_passes_the_option(monkeypatch):
     assert client.post("/api/upload", files=files, data={"handwriting": "true"}).status_code == 200
     assert client.post("/api/upload", files=files).status_code == 200
     assert [c[-1] for c in calls] == [True, False]
+
+
+def test_notes_are_kept():
+    """Reported: handwritten notes went missing - the transcription marks
+    them, the extraction must keep them (never apply them silently)."""
+    from app import ai_extractor
+    assert "[Note:" in image_processor.HANDWRITING_PROMPT and "[Corrected:" in image_processor.HANDWRITING_PROMPT
+    prompt = ai_extractor._build_system_prompt(False)
+    assert "own notes are never dropped" in prompt and "ingredient's \"note\"" in prompt

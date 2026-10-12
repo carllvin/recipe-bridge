@@ -8,6 +8,9 @@
   they show (recipe-page step photos, cookbook photos placed by the image
   AI) or all into step 1 – shown and movable per step in the review, with
   Tandoor as step files, with Mealie as recipe assets in the step text
+- Handwritten notes are kept: the transcription marks every note and
+  correction, the extraction puts them into the ingredient, the step or a
+  final "Note" step instead of dropping them
 
 ## 1.1.0
 

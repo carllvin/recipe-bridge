@@ -151,6 +151,16 @@ ahead tips, variations, allergy notes - add this as an ADDITIONAL, final step wi
 the title "Note" summarizing that information. If there is no such extra \
 information, do not add a note step.
 
+IMPORTANT - The cook's own notes are never dropped: handwritten or added notes \
+(marked [Note: ... | belongs to: ...] in a transcription, or remarks like "less \
+sugar!", "+ cinnamon", "bake 10 min longer", "very good", "from Aunt Erna") must \
+all appear in the recipe, in their own words (translated if needed). A note about \
+one ingredient goes into that ingredient's "note"; a note about one step is added \
+to that step's instruction in brackets, e.g. "(Note: 10 min longer)"; everything \
+else goes into the final "Note" step. Never apply a note silently by changing an \
+amount or time - write it down. A [Corrected: new (was old)] amount is the valid \
+one: use the new value.
+
 IMPORTANT - Length limits: "title" must be at most 128 characters and \
 "description" at most 512 characters (these are hard limits in the recipe \
 manager this will be imported into - anything longer gets cut off with no \
