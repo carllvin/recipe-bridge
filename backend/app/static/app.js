@@ -884,11 +884,12 @@ el('undo-all-btn').addEventListener('click', async () => {
   if (!confirm(t('confirmUndoAll'))) return;
 
   const btn = el('undo-all-btn');
+  const jobId = state.jobId;  // still the right job if the review is left meanwhile
   btn.disabled = true;
   btn.textContent = t('undoingAll');
 
   try {
-    const res = await fetch(`/api/jobs/${state.jobId}/undo-all-imports`, { method: 'POST' });
+    const res = await fetch(`/api/jobs/${jobId}/undo-all-imports`, { method: 'POST' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || t('undoAllFailed'));

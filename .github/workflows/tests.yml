@@ -20,3 +20,14 @@ jobs:
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+
+  # Frontend (plain browser scripts): catches a function defined twice, an
+  # undefined name ... - see eslint.config.mjs
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npx --yes eslint@10 --max-warnings 0 backend/app/static

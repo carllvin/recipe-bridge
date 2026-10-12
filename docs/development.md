@@ -83,7 +83,14 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-GitHub runs them on every pull request (`.github/workflows/tests.yml`).
+The frontend (plain scripts, no build step) is linted with ESLint – mainly
+for what tests can't catch, like a function defined twice:
+
+```bash
+npx eslint@10 backend/app/static
+```
+
+GitHub runs both on every pull request (`.github/workflows/tests.yml`).
 `.github/workflows/docker.yml` builds the image for amd64 and arm64 and
 publishes it to the GitHub Container Registry – `:latest` on every push to
 `main`, `:1.2.0` and `:1.2` for a tag `v1.2.0` – after the tests passed;

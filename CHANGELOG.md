@@ -36,6 +36,10 @@
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them
 
+**Also**
+- "Undo all imports" updates the review again (it stopped with an error)
+- The frontend is checked with ESLint on every pull request
+
 ## 1.1.0
 
 Docker image `ghcr.io/carllvin/recipe-bridge:1.1.0` (or `:1.1`). No changes
