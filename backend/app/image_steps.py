@@ -5,18 +5,19 @@ photo of a recipe gets a menu there (main photo / step n / not used).
 
 Which step a photo belongs to: a recipe page names the step itself (the
 schema.org HowToStep's "image" - mapped by the step's position, since the
-AI may have merged or split steps); for cookbook pages one image AI call
-per recipe looks at all its photos at once - a contact sheet of numbered
-thumbnails next to the step texts - and says which step each one shows and
-whether it is sure. Only sure answers are used: a photo the AI isn't sure
-about (or can't look at - e.g. a local model that doesn't read images)
-stays unassigned, i.e. not used unless picked in the review.
+AI may have merged or split steps) - placed right away, without AI. A
+cookbook's photos start out unassigned; the review's "place photos into
+the steps" button (one recipe or all of them) lets the image AI do it: one
+call per recipe looks at all its unplaced photos at once - a contact sheet
+of numbered thumbnails next to the step texts - and says which step each
+one shows and whether it is sure. Only sure answers are used; photos
+already placed by hand stay where they are. Kept cheap: the tools model,
+small thumbnails, the start of each step only. STEP_PHOTOS_AI=false hides
+the button (placing by hand only).
 
-Kept cheap: the tools model, small thumbnails, the start of each step
-only, and no AI call at all for a single further photo (that's the
-finished dish far more often than a step) or with STEP_PHOTOS_AI=false
-(then only by hand). Decoration never gets that far: an image repeated on
-several pages (a logo, a frame), a duplicate or a narrow banner.
+Decoration never gets that far: an image repeated on several pages (a
+logo, a frame), a duplicate or a narrow banner is marked when the import
+is read and left out.
 
 Photos of cookbook pages (the photo import) are the pages themselves, not
 pictures in them - they never go into the steps."""
@@ -30,7 +31,6 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 from . import json_answer, llm_provider
-from .config import settings
 from .schemas import Job, TokenUsage
 
 log = logging.getLogger("recipe-bridge")
@@ -39,7 +39,6 @@ MAX_PER_RECIPE = 12   # more is rarely a step-by-step series (a whole photo spre
 TILE = 220            # px, one thumbnail on the contact sheet - enough to tell the steps apart
 COLUMNS = 4
 STEP_CHARS = 160      # of each step's text - enough to recognise it
-MIN_FOR_AI = 2        # one further photo alone is usually the finished dish
 REPEATED_ON = 3       # the same image on this many pages is decoration
 MAX_ASPECT = 3        # wider (or taller) than 3:1 is a banner or a border
 
@@ -88,13 +87,13 @@ def decoration(job: Job, images_dir: str) -> set[str]:
     return out
 
 
-def extra_images(job: Job, recipe, skip: set[str] = frozenset()) -> list[str]:
+def extra_images(job: Job, recipe) -> list[str]:
     """The recipe's photos besides its main photo, in page order: those on
     its own pages (no neighbouring pages - they may belong to the next
     recipe), never photographed cookbook pages, AI images or decoration."""
     out = []
     for image_id, info in job.images.items():
-        if image_id == recipe.selected_image_id or info.get("kind") == "page" or info.get("ai") or image_id in skip:
+        if image_id == recipe.selected_image_id or info.get("kind") in ("page", "decoration") or info.get("ai"):
             continue
         if recipe.source_page_start <= (info.get("page") or 0) <= recipe.source_page_end:
             out.append(image_id)
@@ -161,33 +160,36 @@ def _by_position(job: Job, recipe, ids: list[str]) -> dict[str, int]:
     return out
 
 
-def assign(job: Job, recipe, images_dir: str, skip: set[str] = frozenset()) -> TokenUsage:
-    usage = TokenUsage()
+def assign(job: Job, recipe) -> None:
+    """While reading the import: only what needs no AI - a recipe page's own
+    step photos."""
     for step in recipe.steps:
         step.image_ids = []
-    ids = extra_images(job, recipe, skip)
-    if not ids or not recipe.steps:
-        return usage
-    hinted = [iid for iid in ids if job.images[iid].get("step") is not None]
-    placed = _by_position(job, recipe, hinted)
-    rest = [iid for iid in ids if iid not in placed]
-    if len(rest) >= MIN_FOR_AI and settings.step_photos_ai and llm_provider.is_configured():
-        try:
-            answer, usage = _ask_ai(recipe, [os.path.join(images_dir, job.images[iid]["filename"]) for iid in rest])
-            placed.update({rest[i]: step for i, step in answer.items()})
-        except Exception as exc:  # noqa: BLE001 - e.g. a local model that doesn't read images
-            log.info("Placing the photos of %r failed (%s) - they stay unassigned", recipe.title, exc)
-    for iid in ids:  # page order within a step
-        if iid in placed:
-            recipe.steps[placed[iid]].image_ids.append(iid)
-    return usage
+    if not recipe.steps:
+        return
+    ids = [iid for iid in extra_images(job, recipe) if job.images[iid].get("step") is not None]
+    for iid, step in _by_position(job, recipe, ids).items():
+        recipe.steps[step].image_ids.append(iid)
 
 
 def assign_all(job: Job, images_dir: str) -> None:
-    skip = decoration(job, images_dir)
-    for n, recipe in enumerate(job.recipes, 1):
-        if len(job.recipes) > 1:
-            job.progress_label = f"Placing photos into the steps ({n}/{len(job.recipes)}) …"
-        usage = assign(job, recipe, images_dir, skip)
-        job.token_usage.add(usage)
-        job.photo_usage.add(usage)
+    for image_id in decoration(job, images_dir):
+        job.images[image_id]["kind"] = "decoration"
+    for recipe in job.recipes:
+        assign(job, recipe)
+
+
+def place_with_ai(job: Job, recipe, images_dir: str) -> tuple[int, TokenUsage]:
+    """The review's button: the image AI places the recipe's photos that
+    aren't the main photo or in a step yet. Returns (photos placed, usage);
+    raises when the AI call fails (e.g. a model that doesn't read images)."""
+    if not recipe.steps:
+        return 0, TokenUsage()
+    in_steps = {iid for step in recipe.steps for iid in step.image_ids}
+    ids = [iid for iid in extra_images(job, recipe) if iid not in in_steps]
+    if not ids:
+        return 0, TokenUsage()
+    answer, usage = _ask_ai(recipe, [os.path.join(images_dir, job.images[iid]["filename"]) for iid in ids])
+    for i in sorted(answer):  # page order within a step
+        recipe.steps[answer[i]].image_ids.append(ids[i])
+    return len(answer), usage

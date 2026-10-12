@@ -3,13 +3,12 @@
 ## Unreleased
 
 **Import**
-- Photos in the steps: a recipe's further photos go into the step they
-  show (recipe-page step photos; cookbook photos placed by the image AI,
-  only when it is sure) – each photo can be made the main photo, moved to
-  another step or left out in the review; with Tandoor as step files, with
-  Mealie as recipe assets in the step text; cheap: tools model, only for
-  2+ further photos, decoration sorted out without AI, its own line in
-  *AI usage*, `STEP_PHOTOS_AI=false` for assigning by hand only
+- Photos in the steps: in the review every photo can be the main photo,
+  go into a step or stay unused; a recipe page's step photos are placed
+  right away, a cookbook's on request with **Place photos into the steps**
+  (image AI, tools model, only sure placements, hand-placed photos stay,
+  its own line in *AI usage*, `STEP_PHOTOS_AI=false` hides it); with
+  Tandoor as step files, with Mealie as recipe assets in the step text
 - `TRANSLATE_RECIPES=false` keeps recipes in the language they were
   written in
 - Handwritten notes are kept: the transcription marks every note and

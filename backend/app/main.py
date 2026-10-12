@@ -26,7 +26,7 @@ from .pdf_processor import process_pdf
 from .url_processor import UrlImportError, links_from_text, process_url, validate_url
 from .text_processor import looks_like_link_list, process_text, title_from_text
 from .docx_processor import process_docx
-from .schemas import ExtractedRecipe
+from .schemas import ExtractedRecipe, TokenUsage
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("recipe-bridge")
@@ -1129,6 +1129,43 @@ def _enhance_image(job, recipe, image_id: str) -> str:
     return done
 
 
+@app.post("/api/jobs/{job_id}/place-photos")
+async def place_photos(job_id: str, body: dict = Body(default={})):
+    """{"recipe_ids"?: [...]} (default: all) - the review's "place photos
+    into the steps" button: the image AI places each recipe's unplaced
+    photos (image_steps.place_with_ai)."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if not settings.step_photos_ai:
+        raise HTTPException(400, "Placing photos by AI is switched off (STEP_PHOTOS_AI=false).")
+    if not llm_provider.is_configured():
+        raise HTTPException(400, llm_provider.missing_key_hint())
+    _check_budget()
+    wanted = set(body.get("recipe_ids") or [r.id for r in job.recipes])
+    images_dir = os.path.join(_job_dir(job_id), "images")
+    placed, failed, usage = 0, [], TokenUsage()
+    for recipe in job.recipes:
+        if recipe.id not in wanted or recipe.import_status == "imported":
+            continue
+        try:
+            n, used = await asyncio.to_thread(image_steps.place_with_ai, job, recipe, images_dir)
+        except Exception as exc:  # noqa: BLE001 - e.g. a model that doesn't read images
+            log.warning("Placing the photos of %r failed: %s", recipe.title, exc)
+            failed.append(recipe.title)
+            continue
+        placed += n
+        usage.add(used)
+    job.token_usage.add(usage)
+    job.photo_usage.add(usage)
+    usage_log.record("step_photos", usage.input_tokens, usage.output_tokens)
+    jobs.save_job(job)
+    if failed and not placed and len(failed) == len(wanted):
+        raise HTTPException(502, "The AI couldn't place the photos - does your model read images?")
+    return {"placed": placed, "failed": failed, "token_usage": job.token_usage.model_dump(),
+            "recipes": [r.model_dump() for r in job.recipes if r.id in wanted]}
+
+
 @app.post("/api/jobs/{job_id}/recipes/{recipe_id}/enhance-image")
 async def enhance_recipe_image(job_id: str, recipe_id: str, body: dict = Body(default={})):
     """{"image_id"?} (default: the selected photo) - adds an AI-improved copy
@@ -1811,6 +1848,7 @@ async def get_config():
         # the tiles that work with Mealie (None = all of them, Tandoor)
         "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
         "translate_recipes": app_settings.translating(),
+        "step_photos_ai": settings.step_photos_ai,
         "available_tools": mealie_maintenance.TOOLS if target.is_mealie() else None,
     }
 

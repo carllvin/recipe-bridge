@@ -29,7 +29,7 @@ data volume, no restart needed.
 | `MEALIE_URL` / `MEALIE_TOKEN` | – | Your Mealie instance and API token |
 | `OUTPUT_LANGUAGE` | `English` | Language of the recipes **and** of the app's UI (full UI translations: Deutsch, English, Français, Italiano, Español) |
 | `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
-| `STEP_PHOTOS_AI` | `true` | The image AI places a cookbook's further photos into the steps; `false` = only by hand in the review |
+| `STEP_PHOTOS_AI` | `true` | The review's "place photos into the steps" button (image AI); `false` hides it – photos are placed by hand only |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |

@@ -1148,6 +1148,12 @@ function renderDetail(r) {
 
     <div class="section-title">${t('fieldImage')}</div>
     <div class="image-picker">${imageChoicesHtml}</div>
+    ${APP_CONFIG.step_photos_ai && r.steps.length && r.candidate_image_ids.length > 1 && r.import_status !== 'imported'
+    ? `<div class="place-photos">
+        <button type="button" class="btn secondary place-photos-btn" data-scope="one">🪄 ${t('placePhotosBtn')}</button>
+        ${state.job.recipes.length > 1 ? `<button type="button" class="btn secondary place-photos-btn" data-scope="all">${t('placePhotosAll')}</button>` : ''}
+        <span class="settings-hint place-photos-status">${escapeHtml(placeStatus[r.id] || '')}</span>
+      </div>` : ''}
 
     <div class="section-title">${t('fieldDetails')}</div>
     <div class="field-row">
@@ -1182,6 +1188,7 @@ function renderDetail(r) {
     renderDetail(r);
     renderRecipeList();
   };
+  detail.querySelectorAll('.place-photos-btn').forEach((btn) => btn.addEventListener('click', () => placePhotos(r, btn)));
   detail.querySelectorAll('.photo-role').forEach((sel) => sel.addEventListener('change', (e) => {
     e.stopPropagation();
     setPhotoRole(sel.dataset.imageId, sel.value);
@@ -1445,6 +1452,32 @@ function numOrNull(v) {
 }
 
 let patchTimer = null;
+// "Place photos into the steps": the image AI, on request (image_steps.place_with_ai).
+const placeStatus = {};
+async function placePhotos(r, btn) {
+  const all = btn.dataset.scope === 'all';
+  document.querySelectorAll('.place-photos-btn').forEach((b) => { b.disabled = true; });
+  btn.textContent = t('placePhotosRunning');
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/place-photos`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(all ? {} : { recipe_ids: [r.id] }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    data.recipes.forEach((updated) => {
+      const own = state.job.recipes.find((x) => x.id === updated.id);
+      if (own) Object.assign(own, updated);
+    });
+    state.job.token_usage = data.token_usage;
+    updateUsageDisplay(data.token_usage);
+    placeStatus[r.id] = data.placed ? tf('placePhotosDone', { n: data.placed }) : t('placePhotosNone');
+  } catch (err) {
+    placeStatus[r.id] = `⚠️ ${err.message}`;
+  }
+  renderDetail(r);
+}
+
 function patchRecipe(id, partial) {
   clearTimeout(patchTimer);
   const jobId = state.jobId;  // still the right job if the review is left meanwhile

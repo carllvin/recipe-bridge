@@ -1,10 +1,11 @@
-"""Photos in the steps: a recipe's further photos go into the step they show
-(recipe page: its HowToStep images; cookbook: one image AI call with a
-contact sheet - only what it's sure about), changed in the review, and are
-uploaded with it (Tandoor: file storage + the step's file, Mealie: assets in
-the step text)."""
+"""Photos in the steps: a recipe page's step photos are placed right away;
+a cookbook's photos only on the review's button (one image AI call per
+recipe with a contact sheet - only what it's sure about, never moving what
+was placed by hand); uploaded with the recipe (Tandoor: file storage + the
+step's file, Mealie: assets in the step text)."""
 import json
 import os
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,36 +43,49 @@ def test_extra_images_only_own_pages_without_main_or_scans(isolated):
     assert image_steps.extra_images(job, job.recipes[0]) == ["a", "b", "c"]
 
 
-def test_without_ai_nothing_is_assigned(isolated):
+def test_reading_the_import_uses_no_ai(isolated, monkeypatch):
+    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: pytest.fail("no AI while importing"))
     job, images_dir = recipe_job(pages=(1, 2))
     image_steps.assign_all(job, images_dir)
     assert placed(job.recipes[0]) == [[], [], []]
 
 
-def test_each_photo_into_its_step_by_the_ai(isolated, monkeypatch):
+def test_button_places_with_the_ai(isolated, monkeypatch):
     job, images_dir = recipe_job(pages=(1, 2))
+    job.recipes[0].steps[2].image_ids = ["c"]  # placed by hand - stays, not sent again
+    jobs.save_job(job)
     seen = []
 
     def look(jpeg, prompt, max_tokens=0, tools=False):
         assert tools  # the cheaper tools model
         seen.append(prompt)
         assert jpeg[:2] == b"\xff\xd8"  # one contact sheet
-        return json.dumps({"photos": [{"n": 1, "step": 2, "sure": True}, {"n": 2, "step": None, "sure": True},
-                                      {"n": 3, "step": 3, "sure": False}]}), None
+        return json.dumps({"photos": [{"n": 1, "step": 2, "sure": True}, {"n": 2, "step": 1, "sure": False}]}), \
+            types.SimpleNamespace(input_tokens=900, output_tokens=40)
     monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
     monkeypatch.setattr(llm_provider, "transcribe_image", look)
-    image_steps.assign_all(job, images_dir)
-    # b: the finished dish (null), c: not sure -> not assigned
-    assert placed(job.recipes[0]) == [[], ["a"], []]
-    assert "3 numbered photos" in seen[0] and "2. Formen." in seen[0]
+    data = TestClient(main.app).post(f"/api/jobs/{job.id}/place-photos", json={"recipe_ids": ["r1"]}).json()
+    # a -> step 2; b: not sure -> stays unassigned; c: by hand, untouched
+    assert data["placed"] == 1 and [s["image_ids"] for s in data["recipes"][0]["steps"]] == [[], ["a"], ["c"]]
+    assert "2 numbered photos" in seen[0] and "2. Formen." in seen[0]
+    assert data["token_usage"]["input_tokens"] == 900
+    from app import usage_log
+    assert usage_log.summary()["by_source"]["step_photos"]["input_tokens"] == 900
 
 
-def test_ai_fails_then_unassigned(isolated, monkeypatch):
-    job, images_dir = recipe_job(pages=(1, 2))
+def test_button_ai_fails_or_switched_off(isolated, monkeypatch):
+    from app.config import settings
+    job, _ = recipe_job(pages=(1, 2))
     monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
     monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("no vision")))
-    image_steps.assign_all(job, images_dir)
-    assert placed(job.recipes[0]) == [[], [], []]
+    api = TestClient(main.app)
+    res = api.post(f"/api/jobs/{job.id}/place-photos", json={})
+    assert res.status_code == 502 and "read images" in res.json()["detail"]
+    assert placed(jobs.get_job(job.id).recipes[0]) == [[], [], []]
+    monkeypatch.setattr(settings, "step_photos_ai", False)
+    assert api.post(f"/api/jobs/{job.id}/place-photos", json={}).status_code == 400
+    assert api.get("/api/config").json()["step_photos_ai"] is False
 
 
 def test_recipe_page_step_images_by_position(isolated):
@@ -136,20 +150,6 @@ def test_review_keeps_moved_photos(isolated):
     assert [s["image_ids"] for s in data["steps"]] == [[], ["a"], []]
 
 
-def test_cheap_no_ai_for_one_photo_or_when_switched_off(isolated, monkeypatch):
-    from app.config import settings
-    calls = []
-    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
-    monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: calls.append(1) or ("{}", None))
-    job, images_dir = recipe_job()  # page 1 only: one further photo ("a")
-    image_steps.assign_all(job, images_dir)
-    assert calls == [] and placed(job.recipes[0]) == [[], [], []]
-    monkeypatch.setattr(settings, "step_photos_ai", False)
-    job, images_dir = recipe_job(pages=(1, 2))  # three further photos, but the AI is off
-    image_steps.assign_all(job, images_dir)
-    assert calls == []
-
-
 def test_decoration_never_reaches_the_ai(isolated):
     job, images_dir = recipe_job(pages=(1, 3))
     logo = Image.new("RGB", (50, 50), "white")
@@ -158,9 +158,9 @@ def test_decoration_never_reaches_the_ai(isolated):
         job.images[f"logo{page}"] = {"page": page, "filename": f"logo{page}.jpg"}
     Image.new("RGB", (400, 40), "blue").save(os.path.join(images_dir, "banner.jpg"))
     job.images["banner"] = {"page": 2, "filename": "banner.jpg"}
-    skip = image_steps.decoration(job, images_dir)
-    assert skip == {"logo1", "logo2", "logo3", "banner"}
-    assert image_steps.extra_images(job, job.recipes[0], skip) == ["a", "b", "c", "next"]
+    assert image_steps.decoration(job, images_dir) == {"logo1", "logo2", "logo3", "banner"}
+    image_steps.assign_all(job, images_dir)  # marks them
+    assert image_steps.extra_images(job, job.recipes[0]) == ["a", "b", "c", "next"]
 
 
 def test_photo_tokens_counted_on_their_own(isolated, monkeypatch):

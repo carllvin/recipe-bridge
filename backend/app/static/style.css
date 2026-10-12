@@ -550,6 +550,8 @@ a { color: inherit; }
 .step-body { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .step-photos { display: flex; flex-wrap: wrap; gap: 6px; }
 .step-photo { width: 96px; height: 72px; border-radius: 6px; background: #1c201c center/cover no-repeat; position: relative; border: 1px solid #2a2f2a; }
+.place-photos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.place-photos .btn { font-size: 0.8rem; padding: 6px 12px; }
 .photo-pick { display: flex; flex-direction: column; gap: 4px; width: 88px; }
 .photo-pick.unused .image-choice { opacity: 0.45; }
 .photo-role { width: 100%; font-size: 0.72rem; padding: 2px 3px; background: rgba(239,233,218,0.05); color: var(--paper);
