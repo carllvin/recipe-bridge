@@ -1960,4 +1960,19 @@ async def on_startup() -> None:
 
 
 # Mount the static frontend last, so /api/* routes take precedence
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def index_page():
+    """index.html with the interface language already set, so the page
+    doesn't show its English default texts for a moment before i18n.js has
+    translated them (the page stays hidden until it has)."""
+    from fastapi.responses import HTMLResponse
+    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    code = get_ui_language_code(settings.output_language)
+    if code != "en":
+        html = html.replace('<html lang="en">', f'<html lang="{code}" class="i18n-pending">', 1)
+    return HTMLResponse(html)
+
+
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

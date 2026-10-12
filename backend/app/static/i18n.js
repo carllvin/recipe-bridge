@@ -2802,6 +2802,18 @@ function applyStaticTranslations() {
   });
 }
 
+// The server already put the interface language into <html lang> - translate
+// right away, before /api/config has answered, so no English shows first.
+(function translateEarly() {
+  const code = document.documentElement.lang;
+  if (code && code !== 'en' && TRANSLATIONS[code]) {
+    LANG_CODE = code;
+    T = TRANSLATIONS[code];
+    applyStaticTranslations();
+  }
+  document.documentElement.classList.remove('i18n-pending');
+})();
+
 async function initI18n() {
   try {
     const res = await fetch('/api/config');

@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="pageTitle">Recipe Bridge</title>
   <link rel="stylesheet" href="/style.css" />
+  <!-- Hidden until i18n.js has put in the interface language (see index_page in main.py) -
+       shown anyway after 3 s, should a script not load. -->
+  <style>.i18n-pending body { visibility: hidden; }</style>
+  <script>setTimeout(function () { document.documentElement.classList.remove('i18n-pending'); }, 3000);</script>
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#1c211d" />
   <link rel="icon" type="image/png" href="/icons/icon-192.png" />
