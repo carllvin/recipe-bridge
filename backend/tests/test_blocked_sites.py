@@ -127,3 +127,41 @@ def test_recipe_without_method_gets_the_page_text(tmp_path):
     partial = {"@type": "Recipe", "name": "Pasta", "recipeIngredient": ["400 g flour"]}
     text = from_browser(f'<script type="application/ld+json">{json.dumps(partial)}</script><body>{GUIDE}</body>', tmp_path)
     assert "- 400 g flour" in text and "Page text:" in text and "knead for 10 minutes" in text
+
+
+TESCO_RECIPE = {  # as on realfood.tesco.com: lower-case type, step photos, entities in the text
+    "@context": "http://schema.org/", "@type": "recipe", "name": "How to make fresh pasta",
+    "image": ["https://realfood.example/media/main-472x310.jpg"],
+    "recipeIngredient": ["350g 00 flour", "3 medium eggs, plus 3 egg yolks"],
+    "recipeInstructions": [
+        {"@type": "HowToStep", "name": "Mixing eggs and flour", "text": "Tip the flour onto a clean work surface.",
+         "image": "https://realfood.example/media/step-1.jpg"},
+        {"@type": "HowToStep", "name": "Kneading the dough",
+         "text": "Knead the dough for 10 mins. It&rsquo;ll become more pliable.",
+         "image": "https://realfood.example/media/step-2.jpg"}]}
+ASPNET = ('<body><form method="post" id="form"><header>Menu</header><section id="phMain">'
+          '<h1>How to make fresh pasta</h1><ol><li><h2>Mixing eggs and flour</h2><p>Tip the flour onto a clean '
+          'work surface and make a well in the centre.</p></li><li><h2>Kneading the dough</h2><p>Knead the dough '
+          'for 10 mins until smooth and elastic.</p></li></ol></section><footer>Tesco</footer></form></body>')
+
+
+def test_tesco_lower_case_recipe_with_step_photos(monkeypatch, tmp_path):
+    """Reported: only title and address arrived - "@type": "recipe" was not
+    recognised, and the page text was thrown away with its <form>."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), "orange").save(buf, "JPEG")
+    monkeypatch.setattr(url_processor, "_client", lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, content=buf.getvalue()))))
+    page = f'<script type="application/ld+json">{json.dumps(TESCO_RECIPE)}</script>{ASPNET}'
+    result = url_processor.process_url(URL, str(tmp_path), html=page)
+    text = result["pages"][0]["text"]
+    assert "- 350g 00 flour" in text and "2. Knead the dough for 10 mins. It’ll become" in text
+    steps = sorted(i["step"] for i in result["images"].values() if "step" in i)
+    assert steps == [0, 1] and len(result["images"]) == 3  # main photo + two step photos
+
+
+def test_page_text_inside_a_form_is_kept(tmp_path):
+    text = from_browser(ASPNET, tmp_path)
+    assert "make a well in the centre" in text and "Knead the dough for 10 mins" in text and "Menu" not in text

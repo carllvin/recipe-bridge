@@ -23,6 +23,9 @@
   no longer hides the recipe on the page, step-by-step guides (schema.org
   HowTo) are read like recipes, and the page text comes from its largest
   text block instead of the first article (often a teaser)
+- Recipe data written as "recipe" (lower case) or with a schema.org prefix
+  is recognised (e.g. Tesco Real Food), and pages that put everything into
+  one form (ASP.NET) keep their text
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them

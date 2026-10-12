@@ -87,8 +87,11 @@ def validate_url(url: str) -> str:
 
 
 def _types(node) -> set[str]:
+    """The node's schema.org types, lower case and without a prefix - pages
+    write "recipe" or "http://schema.org/Recipe" too."""
     t = node.get("@type") if isinstance(node, dict) else None
-    return {t} if isinstance(t, str) else set(t or [])
+    names = [t] if isinstance(t, str) else [x for x in (t or []) if isinstance(x, str)]
+    return {n.rsplit("/", 1)[-1].rsplit(":", 1)[-1].strip().lower() for n in names}
 
 
 def _find_recipe(data, kind: str = "Recipe"):
@@ -100,7 +103,7 @@ def _find_recipe(data, kind: str = "Recipe"):
             if found:
                 return found
     elif isinstance(data, dict):
-        if kind in _types(data):
+        if kind.lower() in _types(data):
             return data
         for key in ("@graph", "mainEntity", "itemListElement"):
             if key in data:
@@ -143,7 +146,7 @@ def _instructions(value) -> list[str]:
     for item in value or []:
         if isinstance(item, str):
             lines.append(_text(item))
-        elif isinstance(item, dict) and "HowToSection" in _types(item):
+        elif isinstance(item, dict) and "howtosection" in _types(item):
             if item.get("name"):
                 lines.append(f"## {_text(item['name'])}")
             lines.extend(_instructions(item.get("itemListElement")))
@@ -168,7 +171,7 @@ def _step_images(value) -> tuple[list[tuple[int, str]], int]:
     def walk(items):
         nonlocal count
         for item in items or []:
-            if isinstance(item, dict) and "HowToSection" in _types(item):
+            if isinstance(item, dict) and "howtosection" in _types(item):
                 walk(item.get("itemListElement"))
             elif isinstance(item, (dict, str)):
                 image = _image_of(item.get("image")) if isinstance(item, dict) else None
@@ -206,7 +209,9 @@ def _visible_text(soup: BeautifulSoup) -> str:
     """The page's main text: the article/main element with the most text -
     not just the first one (often a teaser card) - or the whole page when
     none of them holds most of it."""
-    for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "form", "svg"]):
+    # not <form>: some sites (ASP.NET) put the whole page into one
+    for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "svg",
+                     "input", "select", "button", "textarea"]):
         tag.decompose()
     body = soup.body or soup
 
