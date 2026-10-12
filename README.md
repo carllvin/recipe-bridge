@@ -53,7 +53,7 @@ duplicates flagged.
 
 No more scrolling back to the ingredient list while cooking. With Tandoor
 the steps get Tandoor's templates, so **the amounts follow when you change
-the servings**; with Mealie they're written out. The AI only marks where an
+the servings**; with Mealie this doesn't work. The AI only marks where an
 ingredient is mentioned – it never writes a number – and a second pass
 proofreads every step. New imports get it automatically; one click does
 your whole existing collection.
