@@ -217,6 +217,9 @@ function addPhotos(files) {
 function renderPhotos() {
   const list = photoState.files;
   el('photo-collector').classList.toggle('hidden', !list.length);
+  // "all photos show one recipe" only means something with two or more
+  el('photo-single-wrap').classList.toggle('hidden', list.length < 2);
+  if (list.length < 2) el('photo-single').checked = false;
   el('photo-thumbs').innerHTML = list.map((p, i) => `
     <div class="photo-thumb">
       <img src="${p.url}" alt="">
