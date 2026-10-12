@@ -22,6 +22,7 @@ class Step(BaseModel):
     instruction: str
     title: Optional[str] = None
     time_minutes: Optional[int] = None
+    image_ids: list[str] = Field(default_factory=list)  # further photos shown in this step (image_steps.py)
 
 
 class TokenUsage(BaseModel):
@@ -62,12 +63,13 @@ class ExtractedRecipe(BaseModel):
     duplicate_exact: bool = False            # True = (near-)exact title match, False = only similar
     source_url: Optional[str] = None         # web page the recipe was imported from (URL import) -> Tandoor's "source_url"
     cookbooks: list[str] = Field(default_factory=list)  # moved from the other manager: the cookbooks it was in there
+    step_file_ids: list[int] = Field(default_factory=list)  # Tandoor: the step photos' files, deleted again on undo
 
 
 class Job(BaseModel):
     id: str
     filename: str
-    status: str = "processing"  # processing | ready | error
+    status: str = "processing"  # processing | confirm (a large import waits for your OK) | ready | error | cancelled
     error: Optional[str] = None
     page_count: int = 0
     recipes: list[ExtractedRecipe] = Field(default_factory=list)
@@ -78,9 +80,11 @@ class Job(BaseModel):
     progress_total: int = 0
     progress_label: Optional[str] = None
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
+    photo_usage: TokenUsage = Field(default_factory=TokenUsage)  # the part of token_usage for photos in the steps
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
+    estimate: Optional[dict] = None  # status "confirm": {"chunks", "input", "output", "total", "budget_left"} (ai_extractor.estimate_tokens)
 
 
 class ToolSuggestion(BaseModel):

@@ -32,8 +32,15 @@ def _detect_source_language(pages: list[dict]) -> Optional[str]:
         return None
 
 
-def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]] = None) -> str:
-    language = settings.output_language.strip() or "English"
+def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]] = None,
+                         source_language: Optional[str] = None) -> str:
+    """source_language: the detected language's name ("English") - with
+    TRANSLATE_RECIPES=false the prompt names it, which holds far better than
+    "its own language"."""
+    from . import app_settings
+    translate = app_settings.translating()
+    language = ((settings.output_language.strip() or "English") if translate
+                else source_language or "the cookbook's own language")
 
     unit_instruction = (
         f"IMPORTANT - Units: Convert any US/UK-style units (cups, fluid ounces, oz, "
@@ -47,7 +54,19 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
         "Units: Keep the units used in the original text unchanged (no conversion)."
     )
 
-    if same_language:
+    if not translate:
+        # The user keeps every recipe in the language it was written in.
+        written_in = f"written in {source_language}" if source_language else "written in its own language"
+        target = source_language or "the language the recipe itself is written in"
+        language_instruction = (
+            f"IMPORTANT - Language: Do NOT translate. This text is {written_in}. Write "
+            f"ALL text fields (title, description, ingredient names, units, notes, "
+            f"steps, tags) in {target} - the ingredients, steps and description too, "
+            f"not only the title. Ignore the language of any examples, tags or "
+            f"instructions in this prompt. Only fix obvious OCR/scan errors and join "
+            f"words split across line breaks."
+        )
+    elif same_language:
         # The cookbook already appears to be written in the target language, so no
         # translation is needed. This saves the AI unnecessary "rewriting" work and
         # avoids phrasing being changed for no reason.
@@ -75,7 +94,9 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
             f"these tags: {tag_list}. Whenever one of them fits (even if the wording "
             f"differs slightly, e.g. singular/plural or a synonym), REUSE it exactly as "
             f"written above instead of inventing a near-duplicate. Only add a new tag "
-            f"when nothing existing fits.\n"
+            f"when nothing existing fits."
+            + ("" if translate else " Only reuse a tag that is in the recipe's own language - never translate a tag.")
+            + "\n"
         )
 
     # Diet / allergen tags right away, so an import through this app needs no
@@ -141,6 +162,16 @@ ahead tips, variations, allergy notes - add this as an ADDITIONAL, final step wi
 the title "Note" summarizing that information. If there is no such extra \
 information, do not add a note step.
 
+IMPORTANT - The cook's own notes are never dropped: handwritten or added notes \
+(marked [Note: ... | belongs to: ...] in a transcription, or remarks like "less \
+sugar!", "+ cinnamon", "bake 10 min longer", "very good", "from Aunt Erna") must \
+all appear in the recipe, in their own words (translated if needed). A note about \
+one ingredient goes into that ingredient's "note"; a note about one step is added \
+to that step's instruction in brackets, e.g. "(Note: 10 min longer)"; everything \
+else goes into the final "Note" step. Never apply a note silently by changing an \
+amount or time - write it down. A [Corrected: new (was old)] amount is the valid \
+one: use the new value.
+
 IMPORTANT - Length limits: "title" must be at most 128 characters and \
 "description" at most 512 characters (these are hard limits in the recipe \
 manager this will be imported into - anything longer gets cut off with no \
@@ -202,6 +233,16 @@ If this excerpt contains no recipe at all, respond with [].
 """
 
 
+def app_settings_translating() -> bool:
+    from . import app_settings
+    return app_settings.translating()
+
+
+def _title_language() -> str:
+    from . import app_settings
+    return (settings.output_language.strip() or "English") if app_settings.translating() else "the cookbook's own language"
+
+
 def guess_cookbook_title(pages: list[dict], filename: str, metadata_title: str = "") -> tuple[str, TokenUsage]:
     """Derives a cookbook-name suggestion, preferring (in order) the PDF's own
     title metadata, an AI guess from the first pages, and finally the filename."""
@@ -230,7 +271,7 @@ def guess_cookbook_title(pages: list[dict], filename: str, metadata_title: str =
                 f"These are the first pages of a scanned cookbook PDF "
                 f"(filename: \"{filename}\"):\n\n{intro_text}\n\n"
                 f"Respond with ONLY the likely title of this cookbook as plain text "
-                f"in {settings.output_language.strip() or 'English'} "
+                f"in {_title_language()} "
                 f"(no quotation marks, no explanation, no subtitle). "
                 f"If no title is recognizable, derive a short, sensible name from "
                 f"the filename instead."
@@ -439,6 +480,25 @@ def _sliding_windows(start: int, end: int, size: int, overlap: int):
 ProgressCallback = Callable[[int, int, int, int], None]  # (chunk_idx, total_chunks, page_start, page_end)
 
 
+CHARS_PER_TOKEN = 4      # rough, for the estimate before a large import
+OUTPUT_SHARE = 0.6       # the recipes' JSON is about this share of the text it comes from
+MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
+
+
+def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
+                    existing_tags: Optional[list[str]] = None) -> dict:
+    """{"chunks", "input", "output", "total"} - roughly what the extraction
+    of these pages will use, without asking the AI: the chunks' text (with
+    the overlapping pages counted twice) plus the instructions per chunk,
+    and the answers as a share of the text."""
+    prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
+    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
+    texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
+    tokens_in = sum(texts) + prompt * len(chunks)
+    tokens_out = sum(min(MAX_OUTPUT_TOKENS, int(t * OUTPUT_SHARE)) for t in texts)
+    return {"chunks": len(chunks), "input": tokens_in, "output": tokens_out, "total": tokens_in + tokens_out}
+
+
 def extract_recipes_from_pages(
     pages: list[dict],
     on_progress: Optional[ProgressCallback] = None,
@@ -453,7 +513,11 @@ def extract_recipes_from_pages(
     source_lang = _detect_source_language(pages)
     target_lang = get_language_code(settings.output_language)
     same_language = bool(source_lang and target_lang and source_lang == target_lang)
-    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags)
+    from .config import LANGUAGE_NAMES
+    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags,
+                                         source_language=LANGUAGE_NAMES.get(source_lang or ""))
+    log.info("Extraction language: translate=%s, detected=%s, instruction: %s", app_settings_translating(),
+             source_lang, next((line for line in system_prompt.splitlines() if "IMPORTANT - Language" in line), "-"))
 
     chunks = list(_chunk_pages(pages, toc_pages=toc_pages))
     total_chunks = len(chunks) or 1

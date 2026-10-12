@@ -3,20 +3,19 @@
 ingredient list while cooking.
 
 The AI never writes a number: it only puts a marker ([[i0]]) where an
-ingredient of that step is mentioned. The markers become
-- Tandoor: its template "{{ ingredients[n] }}" (n = the ingredient's place
-  in the step) - Tandoor shows the amount from the ingredient list, scaled
-  when the servings are changed;
-- Mealie (no templates): the amount written out ("250 g Mehl") - right for
-  the recipe's own servings.
+ingredient of that step is mentioned. The markers become Tandoor's template
+"{{ ingredients[n] }}" (n = the ingredient's place in the step) - Tandoor
+shows the amount from the ingredient list, scaled when the servings are
+changed. Tandoor only: Mealie has no templates, and amounts written into
+the text would be wrong as soon as the servings change.
 
 needs_amounts() decides locally (no AI): steps that mention hardly any of
 their ingredients' amounts. Recipes that still need the structure revision
 (all ingredients in step 1, one long block) wait for that first; Tandoor
 recipes already using templates are left alone.
 
-Used by the "Recipes: amounts into the steps" tile (Tandoor: run_scan /
-apply_suggestion below; Mealie: mealie_tools)."""
+Used by the "Recipes: amounts into the steps" tile (run_scan /
+apply_suggestion below)."""
 from __future__ import annotations
 
 import json
@@ -24,7 +23,7 @@ import logging
 import re
 import uuid
 
-from . import ignored, json_answer, llm_provider, recipe_restructure, recipe_scope, tandoor_client, tool_jobs
+from . import app_settings, ignored, json_answer, llm_provider, recipe_restructure, recipe_scope, tandoor_client, tool_jobs
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import format_cost_estimate, minimal_ref
@@ -57,6 +56,8 @@ Rules:
   otherwise leave it out
 - never write an amount or unit yourself, and change nothing else: keep
   the wording, times, temperatures, order and line breaks
+- never translate: the instruction stays in the language it is written in,
+  even when the ingredient texts (or the examples above) are in another one
 - a step without ingredients stays exactly as it is
 
 Respond with ONLY a JSON object (no explanation, no markdown fence):
@@ -174,7 +175,8 @@ def amounts_plan(job, recipe) -> dict:
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return out, usage
-    answer = json_answer.complete(ask, SYSTEM_PROMPT.replace("{language}", settings.output_language))[0]
+    answer = json_answer.complete(
+        ask, SYSTEM_PROMPT.replace("{language}", app_settings.recipe_language(app_settings.recipe_sample(recipe))))[0]
     texts = answer.get("steps") if isinstance(answer, dict) else None
     if not isinstance(texts, list) or len(texts) != len(steps) or not all(isinstance(t, str) for t in texts):
         raise ValueError("the answer doesn't have one text per step")
@@ -265,7 +267,8 @@ rewrite "marked" so it does: put an ingredient where its fixed text fits
 (e.g. not "mit 3 Eier" but "3 Eier dazugeben und verrühren"), drop a
 doubled amount or article. Keep the markers (each at most once, only the
 given keys), never write an amount yourself, keep every number of
-"original".
+"original". Never translate: the text stays in the language of "original",
+even when the ingredient texts are in another one.
 
 Respond with ONLY a JSON object (no explanation, no markdown fence):
 {"steps": [{"ok": true} or {"ok": false, "marked": <corrected text>|null,
@@ -292,7 +295,8 @@ def _proofread(job, changed) -> None:
             job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
             job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
             return out, usage
-        answer = json_answer.complete(ask, PROOFREAD_PROMPT.replace("{language}", settings.output_language))[0]
+        sample = " ".join(c["original"] for c in changed)
+        answer = json_answer.complete(ask, PROOFREAD_PROMPT.replace("{language}", app_settings.recipe_language(sample)))[0]
         answers = answer.get("steps") if isinstance(answer, dict) else []
     except Exception as exc:  # noqa: BLE001 - proofreading is a bonus, the local check still runs
         log.info("Proofreading the amounts failed: %s", exc)

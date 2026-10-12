@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="pageTitle">Recipe Bridge</title>
   <link rel="stylesheet" href="/style.css" />
+  <!-- Hidden until i18n.js has put in the interface language (see index_page in main.py) -
+       shown anyway after 3 s, should a script not load. -->
+  <style>.i18n-pending body { visibility: hidden; }</style>
+  <script>setTimeout(function () { document.documentElement.classList.remove('i18n-pending'); }, 3000);</script>
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#1c211d" />
   <link rel="icon" type="image/png" href="/icons/icon-192.png" />
@@ -308,6 +312,16 @@
             <span id="app-version" class="settings-hint app-version"></span>
           </div>
         </details>
+        <details id="diag-card" class="tool-card settings-card diag-card">
+          <summary><h3 data-i18n="diagTitle">🩺 Diagnosis</h3>
+            <span class="settings-summary" data-i18n="diagSummary">what the app is running with</span></summary>
+          <table id="diag-table" class="diag-table"></table>
+          <div class="settings-actions">
+            <button id="diag-ai-test" class="btn secondary" type="button" data-i18n="diagAiTest">Test the AI</button>
+            <button id="diag-copy" class="btn secondary" type="button" data-i18n="diagCopy">Copy</button>
+            <span id="diag-result" class="settings-hint"></span>
+          </div>
+        </details>
       </div>
 
       <div id="tools-run-view" class="tools-run-view hidden">
@@ -346,8 +360,8 @@
       <label id="dropzone" class="dropzone">
         <span class="icon">📖</span>
         <div><strong data-i18n="dropzoneTitle">Drop a PDF or photos here</strong> <span data-i18n="dropzoneSubtitle">or click to choose</span></div>
-        <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, HEIC)</div>
-        <input id="file-input" type="file" accept=".pdf,.epub,.docx,.md,.markdown,.txt,.html,.htm,.jpg,.jpeg,.png,.heic,.heif,audio/*,.m4a,.mp3,.ogg,.opus,.wav,.webm" multiple />
+        <div class="dropzone-hint" data-i18n="dropzoneHint">One PDF or EPUB, or several photos of pages (JPEG, PNG, WebP, HEIC)</div>
+        <input id="file-input" type="file" accept=".pdf,.epub,.docx,.rtf,.md,.markdown,.txt,.html,.htm,.jpg,.jpeg,.png,.webp,.heic,.heif,audio/*,.m4a,.mp3,.ogg,.opus,.wav,.webm" multiple />
       </label>
       <!-- Phones/tablets only: opens the camera directly (the drop area above
            already takes files and photos on every device). -->
@@ -363,7 +377,7 @@
         <h3 data-i18n="photoCollectorTitle">Photos for this import</h3>
         <p class="settings-hint" data-i18n="photoCollectorHint">Order = page order. Take or add more photos, then import them together.</p>
         <div id="photo-thumbs" class="photo-thumbs"></div>
-        <label class="settings-check"><input id="photo-single" type="checkbox" /> <span data-i18n="photoSingle">All photos show one single recipe (e.g. ingredients and method on different pages)</span></label>
+        <label id="photo-single-wrap" class="settings-check"><input id="photo-single" type="checkbox" /> <span data-i18n="photoSingle">All photos show one single recipe (e.g. ingredients and method on different pages)</span></label>
         <label class="settings-check"><input id="photo-handwriting" type="checkbox" /> <span data-i18n="photoHandwriting">Handwritten – the AI reads the photos (better for recipe cards, costs a little more)</span></label>
         <div class="photo-collector-actions">
           <button id="photo-clear" class="btn secondary" type="button" data-i18n="photoClear">Discard</button>
@@ -373,9 +387,11 @@
       <!-- One field for everything that isn't a file: a link (one recipe, or
            scan the whole site) or a pasted recipe text - detected while typing. -->
       <form id="smart-form" class="smart-form">
-        <textarea id="smart-input" rows="1" data-i18n-placeholder="smartPlaceholder" placeholder="Paste a link or a recipe text …"></textarea>
-        <div class="smart-actions">
+        <div class="smart-row">
+          <textarea id="smart-input" rows="1" data-i18n-placeholder="smartPlaceholder" placeholder="Paste a link or a recipe text …"></textarea>
           <button id="smart-import" class="btn" type="submit" disabled data-i18n="smartImport">Import</button>
+        </div>
+        <div class="smart-actions">
           <button id="smart-scan" class="btn secondary hidden" type="button" data-i18n="smartScan">🌐 Scan the whole website</button>
           <label id="smart-depth-wrap" class="smart-depth hidden">
             <span data-i18n="scanDepth">Depth</span>
@@ -447,6 +463,15 @@
       <div class="status-text" id="processing-text" data-i18n="processingDefault">Reading PDF …</div>
       <div class="progress-track hidden" id="progress-track">
         <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div id="confirm-box" class="confirm-box hidden">
+        <h3 data-i18n="confirmTitle">A large import</h3>
+        <p id="confirm-text"></p>
+        <p id="confirm-budget" class="settings-hint"></p>
+        <div class="settings-actions">
+          <button id="confirm-start" class="btn" type="button" data-i18n="confirmStart">Start</button>
+          <button id="confirm-cancel" class="btn secondary" type="button" data-i18n="confirmCancel">Cancel</button>
+        </div>
       </div>
     </div>
 

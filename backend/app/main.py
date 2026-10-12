@@ -17,16 +17,17 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
-from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
+from . import app_settings, apply_queue, diagnostics, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
 from .pdf_processor import process_pdf
-from .url_processor import UrlImportError, links_from_text, process_url, validate_url
+from .url_processor import (MAX_IMAGE_BYTES, MAX_PAGE_BYTES, UrlImportError, links_from_text, page_photo_urls,
+                            process_url, validate_url)
 from .text_processor import looks_like_link_list, process_text, title_from_text
 from .docx_processor import process_docx
-from .schemas import ExtractedRecipe
+from .schemas import ExtractedRecipe, TokenUsage
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("recipe-bridge")
@@ -57,6 +58,7 @@ CLEANUP_INTERVAL_SECONDS = 3600        # how often the background cleanup task r
 PDF_EXTENSIONS = {".pdf"}
 TXT_EXTENSIONS = {".txt"}  # recipe links (one per line) or recipe text - decided by content
 TEXT_EXTENSIONS = {".md", ".markdown"}
+RTF_EXTENSIONS = {".rtf"}  # read as text (text_processor.rtf_to_text)
 AUDIO_EXTENSIONS = set(llm_provider.AUDIO_TYPES) - {".mp4"}  # voice notes (dictated recipes)
 DOCX_EXTENSIONS = {".docx"}
 MAX_SELECTED_LINKS = 200  # links picked from a site scan or bookmarks
@@ -155,7 +157,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         elif doc_type == "url":
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
-            result = process_url(source_paths[0], images_dir)
+            page = os.path.join(_job_dir(job.id), "page.html")  # sent by the browser (bookmark button)
+            html = None
+            if os.path.exists(page):
+                with open(page, encoding="utf-8", errors="replace") as f:
+                    html = f.read()
+            result = process_url(source_paths[0], images_dir, html=html, given_photos=_given_photos(job.id))
         elif doc_type == "txt":
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -174,6 +181,14 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 result = process_text(f.read())
+        elif doc_type == "rtf":
+            job.progress_label = "Reading the text …"
+            jobs.save_job(job)
+            from .text_processor import rtf_to_text
+            content = rtf_to_text(source_paths[0])
+            if len(content) < 20:
+                raise ValueError("The RTF file contains no readable text.")
+            result = process_text(content)
         elif doc_type == "audio":
             job.progress_label = "Listening to the voice note …"
             jobs.save_job(job)
@@ -192,10 +207,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             raise ValueError(f"Unknown document type: {doc_type}")
 
         job.page_count = result["page_count"]
-        job.images = {
-            iid: {"page": info["page"], "filename": info["filename"]}
-            for iid, info in result["images"].items()
-        }
+        job.images = {iid: _image_entry(info, info["page"]) for iid, info in result["images"].items()}
         jobs.save_job(job)
 
         def progress_cb(idx: int, total: int, page_start: int, page_end: int) -> None:
@@ -211,6 +223,8 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
+        if not _go_ahead(job, result["pages"], toc_pages, existing_tags):
+            return
         recipes: list[ExtractedRecipe]
         recipes, usage = extract_recipes_from_pages(
             result["pages"],
@@ -246,14 +260,82 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.status = "error"
         job.error = str(exc)
     finally:
-        if doc_type != "links":  # _run_link_list records its own usage
-            usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
+            _record_usage(job)
             notify.import_finished(job)
         jobs.save_job(job)
 
 
-def _finish_extraction(job) -> None:
+CONFIRM_WAIT_SECONDS = 3600
+
+
+def _go_ahead(job, pages: list[dict], toc_pages, existing_tags) -> bool:
+    """A large import (IMPORT_CONFIRM_TOKENS) started at the screen waits
+    here for the OK - POST /api/jobs/{id}/confirm - with the estimate shown.
+    Imports from the phone or the watched folder run on (no one to ask -
+    the monthly budget is their limit). False: cancelled (or no answer)."""
+    if job.source or not settings.import_confirm_tokens:
+        return True
+    estimate = estimate_tokens(pages, toc_pages=toc_pages, existing_tags=existing_tags)
+    log.info("Import %s estimated at %d tokens in %d chunk(s)", job.id, estimate["total"], estimate["chunks"])
+    if estimate["total"] < settings.import_confirm_tokens:
+        return True
+    budget = usage_log.budget_status()
+    estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None
+    job.estimate = estimate
+    job.status = "confirm"
+    job.progress_label = None
+    jobs.save_job(job)
+    until = time.monotonic() + CONFIRM_WAIT_SECONDS
+    while job.status == "confirm" and time.monotonic() < until:
+        time.sleep(0.5)
+    if job.status == "processing":
+        return True
+    if job.status == "confirm":
+        job.status = "cancelled"
+    return False
+
+
+@app.post("/api/jobs/{job_id}/confirm")
+async def confirm_import(job_id: str, body: dict = Body(...)):
+    """{"start": true | false} - the answer to a large import's estimate."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.status != "confirm":
+        raise HTTPException(409, "This import isn't waiting for an answer.")
+    if body.get("start"):
+        _check_budget()
+        job.status = "processing"
+        job.progress_label = "Reading the pages with the AI …"
+    else:
+        job.status = "cancelled"
+    jobs.save_job(job)
+    return {"status": job.status}
+
+
+def _record_usage(job) -> None:
+    """An import's tokens - the photos in the steps as their own line."""
+    photos = job.photo_usage
+    usage_log.record("import", job.token_usage.input_tokens - photos.input_tokens,
+                     job.token_usage.output_tokens - photos.output_tokens)
+    usage_log.record("step_photos", photos.input_tokens, photos.output_tokens)
+
+
+def _image_entry(info: dict, page: int) -> dict:
+    """What the job keeps of an extracted image (the step hints of a recipe
+    page and the kind, see image_steps.py)."""
+    return {"page": page, "filename": info["filename"],
+            **{k: info[k] for k in ("kind", "step", "of", "order") if info.get(k) is not None}}
+
+
+def _finish_extraction(job, step_photos: bool = True) -> None:
     """The steps after extraction shared by every import type."""
+    if step_photos:
+        try:
+            image_steps.assign_all(job, os.path.join(_job_dir(job.id), "images"))
+        except Exception as exc:  # noqa: BLE001 - photos in the steps are a nice-to-have
+            log.warning("Placing photos into the steps failed: %s", exc)
     job.progress_label = "Checking for duplicates already in Tandoor …"
     jobs.save_job(job)
     _mark_duplicates(job)
@@ -285,7 +367,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             try:
                 result = process_url(url, images_dir)
                 for image_id, info in result["images"].items():
-                    job.images[image_id] = {"page": number, "filename": info["filename"]}
+                    job.images[image_id] = _image_entry(info, number)
                 page = {"page": number, "text": result["pages"][0]["text"]}
                 recipes, usage = extract_recipes_from_pages([page], existing_tags=existing_tags)
                 job.token_usage.add(usage)
@@ -313,7 +395,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.status = "error"
         job.error = str(exc)
     finally:
-        usage_log.record("import", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        _record_usage(job)
         notify.import_finished(job)
         jobs.save_job(job)
 
@@ -334,11 +416,13 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
         return "txt", ""
     if len(filenames) == 1 and exts[0] in TEXT_EXTENSIONS:
         return "text", ""
+    if len(filenames) == 1 and exts[0] in RTF_EXTENSIONS:
+        return "rtf", ""
     if len(filenames) == 1 and exts[0] in DOCX_EXTENSIONS:
         return "docx", ""
     if len(filenames) == 1 and exts[0] in AUDIO_EXTENSIONS:
         return "audio", ""
-    single_only = (PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS
+    single_only = (PDF_EXTENSIONS | SUPPORTED_EPUB_EXTENSIONS | TXT_EXTENSIONS | TEXT_EXTENSIONS | RTF_EXTENSIONS | DOCX_EXTENSIONS
                    | AUDIO_EXTENSIONS)
     if exts and all(e in SUPPORTED_IMAGE_EXTENSIONS for e in exts):
         return "images", ""
@@ -400,8 +484,11 @@ def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recip
                                                     handwriting and doc_type == "images"), daemon=True).start()
 
 
-def _start_url_job(url: str, source: str | None = None):
-    """Raises HTTPException(400) for an invalid address."""
+def _start_url_job(url: str, source: str | None = None, html: str | None = None,
+                   photos: dict[str, bytes] | None = None):
+    """Raises HTTPException(400) for an invalid address. html: the page as
+    the browser has it (bookmark button) - not loaded again then; photos:
+    its photos the browser already fetched ({address: bytes})."""
     try:
         url = validate_url(url)
     except UrlImportError as exc:
@@ -409,9 +496,40 @@ def _start_url_job(url: str, source: str | None = None):
     job = jobs.create_job(urlparse(url).netloc or url)
     job.source = source
     os.makedirs(_job_dir(job.id), exist_ok=True)
+    if html:
+        with open(os.path.join(_job_dir(job.id), "page.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+    if photos:
+        folder = os.path.join(_job_dir(job.id), "page-photos")
+        os.makedirs(folder, exist_ok=True)
+        index = {}
+        for n, (address, data) in enumerate(photos.items()):
+            with open(os.path.join(folder, f"{n}.bin"), "wb") as f:
+                f.write(data)
+            index[address] = f"{n}.bin"
+        with open(os.path.join(folder, "index.json"), "w", encoding="utf-8") as f:
+            json.dump(index, f)
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
     return job
+
+
+def _given_photos(job_id: str) -> dict[str, bytes]:
+    """The photos the bookmark button sent along (see _start_url_job)."""
+    folder = os.path.join(_job_dir(job_id), "page-photos")
+    try:
+        with open(os.path.join(folder, "index.json"), encoding="utf-8") as f:
+            index = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for address, name in index.items():
+        try:
+            with open(os.path.join(folder, os.path.basename(name)), "rb") as f:
+                out[address] = f.read()
+        except OSError:
+            continue
+    return out
 
 
 def _start_text_job(text: str, source: str | None = None):
@@ -455,7 +573,7 @@ def _run_migration(job_id: str, cookbook: str | None) -> None:
         # All recipes of one cookbook -> that cookbook; the whole collection
         # keeps each recipe's own cookbooks (recipe.cookbooks) instead.
         job.suggested_cookbook_name = job.cookbook_name = cookbook or None
-        _finish_extraction(job)
+        _finish_extraction(job, step_photos=False)
     except Exception as exc:  # noqa: BLE001
         log.exception("Moving recipes failed for job %s", job_id)
         job.status = "error"
@@ -499,6 +617,53 @@ async def import_url(body: dict = Body(...)):
     and import flow as an uploaded document (see url_processor)."""
     _check_budget()
     return {"job_id": _start_url_job(body.get("url", "")).id}
+
+
+MAX_PAGE_PHOTOS = 16  # the main photo and the step photos (url_processor.MAX_STEP_IMAGES)
+
+
+@app.post("/api/import-page")
+async def import_page(body: dict = Body(...)):
+    """{"url", "html", "photos"?} - a recipe page as the browser has it (the
+    bookmark button sends it), for sites that refuse to be loaded by the
+    app; photos: {address: data URL} of the photos the browser could fetch
+    (see /api/page-photos)."""
+    _check_budget()
+    html = str(body.get("html") or "")
+    if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+        raise HTTPException(413, "The page is too large.")
+    photos = _page_photos(body.get("photos"))
+    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos).id}
+
+
+@app.post("/api/page-photos")
+async def page_photos(body: dict = Body(...)):
+    """{"url", "html"} -> {"urls"}: the photos an import of the page would
+    load - the bookmark button lets the browser fetch them first."""
+    html = str(body.get("html") or "")
+    if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+        raise HTTPException(413, "The page is too large.")
+    return {"urls": page_photo_urls(str(body.get("url") or ""), html)[:MAX_PAGE_PHOTOS]}
+
+
+def _page_photos(photos) -> dict[str, bytes]:
+    """{address: data URL} from the browser -> {address: bytes} of the ones
+    that are pictures (anything else is left out and loaded as usual)."""
+    import base64
+    out = {}
+    for url, data_url in list((photos if isinstance(photos, dict) else {}).items())[:MAX_PAGE_PHOTOS]:
+        if not (isinstance(url, str) and isinstance(data_url, str) and data_url.startswith("data:image/")):
+            continue
+        try:
+            data = base64.b64decode(data_url.split(",", 1)[1], validate=False)
+            if len(data) > MAX_IMAGE_BYTES:
+                continue
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+        except Exception:  # noqa: BLE001 - not a picture Pillow reads
+            continue
+        out[url] = data
+    return out
 
 
 @app.post("/api/import-text")
@@ -610,7 +775,7 @@ async def list_import_jobs():
     """Recent imports (newest first) for the import page. Import jobs live in
     memory, so this covers the time since the last restart."""
     items = []
-    for job in sorted(jobs.list_jobs(), key=lambda j: -j.created_at)[:15]:
+    for job in sorted((j for j in jobs.list_jobs() if j.status != "cancelled"), key=lambda j: -j.created_at)[:15]:
         items.append({
             "id": job.id, "filename": job.filename, "status": job.status, "created_at": job.created_at,
             "recipes": len(job.recipes),
@@ -899,8 +1064,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 warnings: list[str] = []
                 if recipe.id in enhance_failed:
                     warnings.append("The photo could not be improved - the original was used.")
+                # further photos shown in the steps (image_steps.py) - not the main photo again
+                step_images = [[os.path.join(_job_dir(job_id), "images", job.images[iid]["filename"])
+                                for iid in step.image_ids
+                                if iid in job.images and iid != recipe.selected_image_id]
+                               for step in recipe.steps]
                 try:
-                    tandoor_id = api.create_recipe(client, recipe)
+                    tandoor_id = api.create_recipe(client, recipe, step_images=step_images, warnings=warnings)
                     recipe.tandoor_recipe_id = tandoor_id
 
                     if image_path and os.path.exists(image_path):
@@ -988,7 +1158,7 @@ async def undo_import(job_id: str, recipe_id: str):
 
     try:
         with target.client().get_client() as client:
-            target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+            _delete_imported(client, recipe)
     except tandoor_client.TandoorError as exc:
         raise HTTPException(502, f"Could not undo the import: {exc}")
 
@@ -998,6 +1168,15 @@ async def undo_import(job_id: str, recipe_id: str):
     jobs.save_job(job)
 
     return recipe.model_dump()
+
+
+def _delete_imported(client, recipe) -> None:
+    """Undo an import: the recipe - and with Tandoor its step photos, which
+    live in Tandoor's file storage on their own."""
+    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+    if recipe.step_file_ids and not target.is_mealie():
+        tandoor_client.delete_user_files(client, recipe.step_file_ids)
+        recipe.step_file_ids = []
 
 
 @app.post("/api/jobs/{job_id}/undo-all-imports")
@@ -1018,7 +1197,7 @@ async def undo_all_imports(job_id: str):
         with target.client().get_client() as client:
             for recipe in imported:
                 try:
-                    target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+                    _delete_imported(client, recipe)
                     recipe.import_status = "pending"
                     recipe.tandoor_recipe_id = None
                     recipe.import_error = None
@@ -1030,6 +1209,39 @@ async def undo_all_imports(job_id: str):
 
     jobs.save_job(job)
     return {"results": results}
+
+
+@app.post("/api/jobs/{job_id}/recipes/{recipe_id}/images")
+async def add_recipe_images(job_id: str, recipe_id: str, files: list[UploadFile] = File(...)):
+    """The review's "+" tile: own photos for a recipe (JPEG, PNG, WebP, HEIC
+    ...) - added to its photos; the first becomes the main photo if it has
+    none. They can then go into a step like the others."""
+    job = jobs.get_job(job_id)
+    recipe = next((r for r in job.recipes if r.id == recipe_id), None) if job else None
+    if recipe is None:
+        raise HTTPException(404, "Recipe not found.")
+    images_dir = os.path.join(_job_dir(job_id), "images")
+    os.makedirs(images_dir, exist_ok=True)
+    added = []
+    for upload in files:
+        data = await upload.read(settings.max_upload_mb * 1024 * 1024 + 1)
+        if len(data) > settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"Upload larger than {settings.max_upload_mb} MB.")
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        except Exception:  # noqa: BLE001
+            raise HTTPException(400, f"{upload.filename or 'The file'} is not a photo that can be read.")
+        img.thumbnail((2400, 2400))
+        image_id = uuid.uuid4().hex[:12]
+        img.save(os.path.join(images_dir, f"{image_id}.jpg"), "JPEG", quality=90)
+        job.images[image_id] = {"page": recipe.source_page_start, "filename": f"{image_id}.jpg", "kind": "added"}
+        added.append(image_id)
+    recipe.candidate_image_ids = list(recipe.candidate_image_ids) + added
+    if added and not recipe.selected_image_id:
+        recipe.selected_image_id = added[0]
+    jobs.save_job(job)
+    return {"image_ids": added, "images": {i: job.images[i] for i in added}, "recipe": recipe.model_dump()}
 
 
 @app.post("/api/jobs/{job_id}/recipes/{recipe_id}/generate-image")
@@ -1096,6 +1308,42 @@ def _enhance_image(job, recipe, image_id: str) -> str:
     recipe.candidate_image_ids = ids
     recipe.selected_image_id = done
     return done
+
+
+@app.post("/api/jobs/{job_id}/place-photos")
+async def place_photos(job_id: str, body: dict = Body(default={})):
+    """{"recipe_ids"?: [...]} (default: all) - the review's "place photos
+    into the steps" button: each recipe's unplaced photos - a recipe page's
+    step photos by position, the others by the image AI unless it's off
+    (image_steps.place)."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    use_ai = settings.step_photos_ai and llm_provider.is_configured()
+    if use_ai:
+        _check_budget()
+    wanted = set(body.get("recipe_ids") or [r.id for r in job.recipes])
+    images_dir = os.path.join(_job_dir(job_id), "images")
+    placed, failed, usage = 0, [], TokenUsage()
+    for recipe in job.recipes:
+        if recipe.id not in wanted or recipe.import_status == "imported":
+            continue
+        try:
+            n, used = await asyncio.to_thread(image_steps.place, job, recipe, images_dir, use_ai)
+        except Exception as exc:  # noqa: BLE001 - e.g. a model that doesn't read images
+            log.warning("Placing the photos of %r failed: %s", recipe.title, exc)
+            failed.append(recipe.title)
+            continue
+        placed += n
+        usage.add(used)
+    job.token_usage.add(usage)
+    job.photo_usage.add(usage)
+    usage_log.record("step_photos", usage.input_tokens, usage.output_tokens)
+    jobs.save_job(job)
+    if failed and not placed and len(failed) == len(wanted):
+        raise HTTPException(502, "The AI couldn't place the photos - does your model read images?")
+    return {"placed": placed, "failed": failed, "token_usage": job.token_usage.model_dump(),
+            "recipes": [r.model_dump() for r in job.recipes if r.id in wanted]}
 
 
 @app.post("/api/jobs/{job_id}/recipes/{recipe_id}/enhance-image")
@@ -1779,6 +2027,8 @@ async def get_config():
         "recipe_url_base": await asyncio.to_thread(target.recipe_url_base),
         # the tiles that work with Mealie (None = all of them, Tandoor)
         "health_metrics": mealie_maintenance.METRICS if target.is_mealie() else None,
+        "translate_recipes": app_settings.translating(),
+        "step_photos_ai": settings.step_photos_ai,
         "available_tools": mealie_maintenance.TOOLS if target.is_mealie() else None,
     }
 
@@ -1827,4 +2077,30 @@ async def on_startup() -> None:
 
 
 # Mount the static frontend last, so /api/* routes take precedence
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Maintain -> Diagnosis: what the running container uses (no secrets)."""
+    return {"rows": await asyncio.to_thread(diagnostics.info)}
+
+
+@app.post("/api/diagnostics/ai-test")
+async def diagnostics_ai_test():
+    return await asyncio.to_thread(diagnostics.ai_test)
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def index_page():
+    """index.html with the interface language already set, so the page
+    doesn't show its English default texts for a moment before i18n.js has
+    translated them (the page stays hidden until it has)."""
+    from fastapi.responses import HTMLResponse
+    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    code = get_ui_language_code(settings.output_language)
+    if code != "en":
+        html = html.replace('<html lang="en">', f'<html lang="{code}" class="i18n-pending">', 1)
+    return HTMLResponse(html)
+
+
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

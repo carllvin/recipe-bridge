@@ -55,3 +55,11 @@ def test_guessing_is_locked(client, monkeypatch):
 
 async def _no_sleep(_):
     return None
+
+
+def test_index_comes_with_the_interface_language(isolated):
+    """No English flash before i18n.js has translated the page."""
+    from fastapi.testclient import TestClient
+    from app import main
+    html = TestClient(main.app).get("/").text  # isolated: OUTPUT_LANGUAGE=Deutsch
+    assert '<html lang="de" class="i18n-pending">' in html and ".i18n-pending body" in html

@@ -175,14 +175,15 @@ def complete_tool_text(system_prompt: Optional[str], user_content: str, max_toke
     return complete_text(system_prompt, user_content, max_tokens, tools=True)
 
 
-def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000) -> tuple[str, TokenUsage]:
+def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000, tools: bool = False) -> tuple[str, TokenUsage]:
     """Sends one photo (JPEG bytes) with an instruction to the configured
-    provider's main model - all three read images. Used to transcribe
-    handwritten recipes, which Tesseract reads poorly."""
+    provider's main model (or, tools=True, the cheaper tools model) - all
+    three read images. Used to transcribe handwritten recipes, which
+    Tesseract reads poorly, and to place photos into steps."""
     import base64
 
     provider = _active_provider()
-    model = _model(provider, tools=False)
+    model = _model(provider, tools=tools)
     b64 = base64.b64encode(jpeg).decode("ascii")
     usage = TokenUsage()
     if provider in ("openai", "compatible"):

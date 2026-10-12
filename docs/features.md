@@ -28,7 +28,8 @@ recipe manager – "Tandoor" or "Mealie".
   reads the photos itself instead of the OCR (costs a little more).
 - **A `.txt` file** – either a **list of recipe links** (one per line, or any
   text containing links; up to 50) or **recipe text**; the app tells them
-  apart by the content. Markdown files (`.md`) are read as text.
+  apart by the content. Markdown files (`.md`) and RTF files
+  (`.rtf`, e.g. from TextEdit or WordPad) are read as text.
 - **Browser bookmarks** – the HTML export of Chrome, Firefox, Safari or Edge
   opens a pick list with the bookmark folders as a filter.
 
@@ -70,7 +71,11 @@ no recipe are skipped and listed in the review.
   *Install app* / *Add to home screen*; needs HTTPS). It then shows up in the
   share menu: links, text and photos land right in the import.
 - **🔖 Bookmark button** – drag it to your browser's bookmark bar; one click
-  on a recipe page sends it to the app.
+  on a recipe page sends it to the app – the page itself, as your browser
+  shows it, so it also works for sites that block the app (bot protection:
+  "403 Forbidden"), together with the recipe's photos as your browser
+  loads them. A button dragged in before version 1.2 only sends the
+  address, one from before the photos only the page – drag it in again once.
 - **📂 Watched folder** – files put into a folder (`WATCH_DIR`) are imported
   on their own and wait under ✅ Review → *New imports*.
 - **🚚 Move from Tandoor / Mealie** – when both are configured, all recipes
@@ -81,6 +86,33 @@ no recipe are skipped and listed in the review.
 
 Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
 **converted to metric** on the way.
+
+With `TRANSLATE_RECIPES=false` recipes **keep the language they were written
+in** instead – the tools that improve recipes (amounts in the steps,
+revisions, contradictions) then write in that language too, and the *not in
+your language* tile and the translation in *Process new recipes* are left
+out.
+
+**Photos in the steps** – besides its main photo, a recipe can show
+further photos in its steps. In the review every photo has a menu: *main
+photo*, *step 1 … n* or *not used*. All photos start out unused; the
+button **🪄 Place photos into the steps** (for the recipe or *for all
+recipes*) places the ones not placed yet: a recipe page's own step photos
+(schema.org `HowToStep`) go to the step at the same position, free and
+without AI; the others go to the image AI – one call per recipe looks at
+them at once (a contact sheet of numbered thumbnails next to the steps)
+and says which step each one shows and whether it is sure. Only sure
+answers are used, the finished dish or a picture of another recipe stays
+unused, and photos you placed yourself stay where they are. It uses the
+cheaper tools model and small thumbnails and shows as its own line in *AI
+usage*; decoration (an image repeated on several pages, duplicates, narrow
+banners) is sorted out without AI beforehand. Photographed cookbook pages
+are never step photos. `STEP_PHOTOS_AI=false` leaves out the AI – the
+button then only places a page's own step photos. With Tandoor the first
+photo of a step becomes the step's file and further ones appear in its
+text (stored in Tandoor's *Files*, removed again when an import is
+undone); with Mealie they become assets of the recipe shown in the step
+text.
 
 > **Recipes from other apps** (Paprika, Nextcloud Cookbook, RecipeSage, …):
 > Tandoor and Mealie import their export files themselves. Afterwards run
@@ -299,7 +331,8 @@ default).
 | Weekly plan, what can I cook today, how was it, household, shopping list to share | ✓ | ✓ (rating + "last made" instead of a cook log) |
 | Duplicates, unused entries, servings, photos | ✓ | ✓ |
 | Tags (clean up, season, more tags), translate & revise recipes, process new recipes | ✓ | ✓ |
-| Amounts into the steps | ✓ (templates – follow the servings) | ✓ (written out) |
+| Amounts into the steps | ✓ (templates – follow the servings) | – (no templates: written-out amounts would be wrong once the servings change) |
+| Photos in the steps | ✓ (step file + Files) | ✓ (recipe assets in the step text) |
 | Contradictions, weak photos, changes by chat | ✓ | ✓ (chat without supermarket categories) |
 | Moving recipes from the other one | ✓ | ✓ |
 | Automatic maintenance | ✓ | ✓ (for the tiles above) |
@@ -311,6 +344,13 @@ cookbooks are saved filters, e.g. on a category), and meal types are
 Mealie's fixed ones (breakfast, lunch, dinner, …).
 
 ## Known limitations
+
+- **Photos in the steps** with Tandoor need its file storage (a space with
+  a storage limit of 0 refuses them – the recipe is imported without them,
+  with a note). The first photo is set as the step's file, further ones as
+  Markdown images in the step text – if your Tandoor version shows neither,
+  please report it. Placing cookbook photos needs an AI model that reads
+  images.
 
 - **Undo** (Tandoor) restores the state from before the change; edits you
   made in Tandoor to the same recipes or ingredients since then are

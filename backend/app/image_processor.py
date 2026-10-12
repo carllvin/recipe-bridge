@@ -16,7 +16,7 @@ log = logging.getLogger("recipe-bridge")
 
 pillow_heif.register_heif_opener()  # lets Pillow open .heic/.heif via Image.open()
 
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif"}
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 # Handwriting: the photo goes to the AI (which reads images) instead of
 # Tesseract, which reads handwriting poorly. Resized first - the AI doesn't
@@ -25,9 +25,15 @@ HANDWRITING_MAX_SIDE = 2000
 HANDWRITING_PROMPT = (
     "This is a photo of a recipe - often handwritten (a recipe card, a notebook page, a note), maybe with "
     "printed parts. Transcribe ALL text on it exactly as written, line by line, in its original language. "
-    "Keep amounts, units and fractions exactly as written. Read crossed-out words as crossed out (leave them "
-    "out) and include notes in the margin. Mark a word you really cannot read as [?]. Answer with the "
-    "transcribed text only - no comments, no translation, no formatting."
+    "Keep amounts, units and fractions exactly as written. Mark a word you really cannot read as [?].\n"
+    "Notes are the most important part - never leave one out: everything written in the margin, between "
+    "the lines, next to an ingredient or step, on the back, added later in another pen or by another hand, "
+    "with an arrow, a star or underlined (e.g. \"less sugar!\", \"+ cinnamon\", \"Oma: bake 10 min longer\", "
+    "\"very good\"). Write each one on its own line as [Note: <the note> | belongs to: <the ingredient or "
+    "step it points to, or 'whole recipe'>].\n"
+    "A crossed-out word or amount with something new written next to it is a correction: write "
+    "[Corrected: <new> (was <old>)]. Something only crossed out, with nothing instead, is left out.\n"
+    "Answer with the transcribed text only - no other comments, no translation, no formatting."
 )
 
 
@@ -85,6 +91,7 @@ def process_images(image_paths: list[str], images_dir: str, handwriting: bool = 
 
         images[image_id] = {
             "page": index,
+            "kind": "page",  # the photographed page itself - never a step photo
             "path": out_path,
             "filename": filename,
             "width": img.width,

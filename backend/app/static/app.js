@@ -47,8 +47,7 @@ async function tryRestoreJobFromUrl() {
     el('processing-screen').classList.remove('hidden');
 
     if (job.status === 'error') {
-      el('processing-text').textContent = `${t('processingErrorPrefix')} ${job.error}`;
-      el('progress-track').classList.add('hidden');
+      showJobFailed(job);
       return;
     }
 
@@ -139,10 +138,10 @@ function updateUsageDisplay(usage) {
 const dropzone = el('dropzone');
 const fileInput = el('file-input');
 
-const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif'];
+const FALLBACK_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
 const FALLBACK_PDF_EXTENSIONS = ['.pdf'];
 const FALLBACK_EPUB_EXTENSIONS = ['.epub'];
-const SINGLE_DOC_EXTENSIONS = ['.txt', '.md', '.markdown', '.docx'];  // links or recipe text, Word
+const SINGLE_DOC_EXTENSIONS = ['.txt', '.md', '.markdown', '.docx', '.rtf'];  // links or recipe text, Word
 const BOOKMARK_EXTENSIONS = ['.html', '.htm'];  // browser bookmark exports
 
 function extOf(filename) {
@@ -218,6 +217,9 @@ function addPhotos(files) {
 function renderPhotos() {
   const list = photoState.files;
   el('photo-collector').classList.toggle('hidden', !list.length);
+  // "all photos show one recipe" only means something with two or more
+  el('photo-single-wrap').classList.toggle('hidden', list.length < 2);
+  if (list.length < 2) el('photo-single').checked = false;
   el('photo-thumbs').innerHTML = list.map((p, i) => `
     <div class="photo-thumb">
       <img src="${p.url}" alt="">
@@ -680,10 +682,11 @@ function pollJob() {
       }
       if (job.status === 'error') {
         notifyJobFinished(job);
-        el('processing-text').textContent = `${t('processingErrorPrefix')} ${job.error}`;
-        el('progress-track').classList.add('hidden');
+        showJobFailed(job);
         return;
       }
+      if (job.status === 'confirm') { showImportEstimate(job); return; }
+      if (job.status === 'cancelled') { leaveCancelledImport(); return; }
 
       updateProgressUI(job);
       state.pollTimer = setTimeout(tick, 2000);
@@ -692,6 +695,66 @@ function pollJob() {
     }
   };
   tick();
+}
+
+// A failed import: back to the import page with the error (no spinner that keeps turning).
+function showJobFailed(job) {
+  clearTimeout(state.pollTimer);
+  state.jobId = null;
+  setJobUrl(null);
+  el('processing-screen').classList.add('hidden');
+  el('upload-screen').classList.remove('hidden');
+  showUploadError(`${t('processingErrorPrefix')} ${job.error || ''}`);
+  loadRecentImports();
+}
+
+// A large import waits for the OK (IMPORT_CONFIRM_TOKENS): the estimate
+// instead of the spinner, Start or Cancel.
+function showImportEstimate(job) {
+  const est = job.estimate || {};
+  const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
+  el('processing-screen').querySelector('.spinner').classList.add('hidden');
+  el('processing-text').classList.add('hidden');
+  el('progress-track').classList.add('hidden');
+  el('confirm-text').textContent = tf('confirmText', { pages: fmt(job.page_count), chunks: fmt(est.chunks),
+    total: fmt(est.total), input: fmt(est.input), output: fmt(est.output) });
+  el('confirm-budget').textContent = est.budget_left == null ? t('confirmNoBudget')
+    : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
+  el('confirm-box').classList.remove('hidden');
+}
+
+function hideImportEstimate() {
+  el('confirm-box').classList.add('hidden');
+  el('processing-screen').querySelector('.spinner').classList.remove('hidden');
+  el('processing-text').classList.remove('hidden');
+}
+
+async function answerImportEstimate(start) {
+  const jobId = state.jobId;
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/confirm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  } catch (e) {
+    el('confirm-budget').textContent = `⚠️ ${e.message}`;
+    return;
+  }
+  hideImportEstimate();
+  if (start) pollJob();
+  else leaveCancelledImport();
+}
+el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
+el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
+
+function leaveCancelledImport() {
+  clearTimeout(state.pollTimer);
+  hideImportEstimate();
+  state.jobId = null;
+  setJobUrl(null);
+  el('processing-screen').classList.add('hidden');
+  el('upload-screen').classList.remove('hidden');
+  loadRecentImports();
 }
 
 function updateProgressUI(job) {
@@ -872,11 +935,12 @@ el('undo-all-btn').addEventListener('click', async () => {
   if (!confirm(t('confirmUndoAll'))) return;
 
   const btn = el('undo-all-btn');
+  const jobId = state.jobId;  // still the right job if the review is left meanwhile
   btn.disabled = true;
   btn.textContent = t('undoingAll');
 
   try {
-    const res = await fetch(`/api/jobs/${state.jobId}/undo-all-imports`, { method: 'POST' });
+    const res = await fetch(`/api/jobs/${jobId}/undo-all-imports`, { method: 'POST' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || t('undoAllFailed'));
@@ -1075,10 +1139,16 @@ function renderDetail(r) {
     ? `<div class="ing-match-summary">${escapeHtml(tf('matchSummary', matchCounts))}</div>`
     : '';
 
+  // The photos shown in a step (image_steps.py) - changed in the photo list above.
+  const stepPhotos = (s) => (s.image_ids || []).length ? `<div class="step-photos">${s.image_ids.map((iid) => `
+      <div class="step-photo" style="background-image:url('${imageUrl(iid)}')"></div>`).join('')}</div>` : '';
   const stepsHtml = r.steps.map((s, i) => `
     <div class="step-row" data-idx="${i}">
       <div class="step-num">${i + 1}</div>
-      <textarea class="step-instruction">${escapeHtml(s.instruction)}</textarea>
+      <div class="step-body">
+        <textarea class="step-instruction">${escapeHtml(s.instruction)}</textarea>
+        ${stepPhotos(s)}
+      </div>
     </div>
   `).join('') || `<p style="color:#8f9689;font-size:0.88rem;">${t('noSteps')}</p>`;
 
@@ -1091,15 +1161,24 @@ function renderDetail(r) {
        </div>`
     : '';
 
+  // Every photo: main photo, a step, or not used (the AI's placement preselected).
+  const photoRole = (iid) => (iid === r.selected_image_id ? 'main'
+    : String(r.steps.findIndex((s) => (s.image_ids || []).includes(iid))).replace('-1', 'none'));
+  const roleSelect = (iid) => `<select class="photo-role" data-image-id="${iid}" title="${escapeHtml(t('photoRoleTitle'))}">
+      ${[['main', t('photoRoleMain')], ...r.steps.map((_, si) => [String(si), tf('stepPhotoStep', { n: si + 1 })]),
+    ['none', t('photoRoleNone')]].map(([v, label]) => `<option value="${v}" ${photoRole(iid) === v ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+    </select>`;
   const imageChoicesHtml = r.candidate_image_ids.map((iid) => {
     const ai = ((state.job.images || {})[iid] || {}).ai;
     const badge = ai ? `<span class="image-ai-badge">${t(ai === 'enhanced' ? 'imageBadgeEnhanced' : 'imageBadgeGenerated')}</span>` : '';
     // The selected photo from the source can be improved by the image AI.
     const enhance = APP_CONFIG.image_gen_available && !ai && iid === r.selected_image_id
       ? `<button type="button" class="image-enhance-btn" data-enhance="${iid}" title="${escapeHtml(t('enhanceImageBtn'))}"><span>✨</span></button>` : '';
-    return `<div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
-         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>`;
-  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
+    return `<div class="photo-pick ${photoRole(iid) === 'none' ? 'unused' : ''}"><div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
+         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>${roleSelect(iid)}</div>`;
+  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml
+    + (r.import_status !== 'imported' ? `<label class="image-choice add-tile" title="${escapeHtml(t('addPhotosTitle'))}">
+        <span class="add-tile-icon">+</span><input type="file" class="add-photos" accept="image/*,.heic,.heif,.webp" multiple hidden /></label>` : '');
 
   const duplicateNotice = r.duplicate_match
     ? `<div class="error-banner duplicate-banner" style="margin-bottom:20px;">${escapeHtml(
@@ -1135,6 +1214,13 @@ function renderDetail(r) {
 
     <div class="section-title">${t('fieldImage')}</div>
     <div class="image-picker">${imageChoicesHtml}</div>
+    ${r.steps.length && r.candidate_image_ids.length > 1 && r.import_status !== 'imported'
+      && (APP_CONFIG.step_photos_ai || r.candidate_image_ids.some((iid) => ((state.job.images || {})[iid] || {}).step != null))
+    ? `<div class="place-photos">
+        <button type="button" class="btn secondary place-photos-btn" data-scope="one">🪄 ${t('placePhotosBtn')}</button>
+        ${state.job.recipes.length > 1 ? `<button type="button" class="btn secondary place-photos-btn" data-scope="all">${t('placePhotosAll')}</button>` : ''}
+        <span class="settings-hint place-photos-status">${escapeHtml(placeStatus[r.id] || '')}</span>
+      </div>` : ''}
 
     <div class="section-title">${t('fieldDetails')}</div>
     <div class="field-row">
@@ -1160,6 +1246,22 @@ function renderDetail(r) {
   }));
 
   // Image selection / AI generation tile
+  const setPhotoRole = (imageId, role) => {
+    r.steps.forEach((s) => { s.image_ids = (s.image_ids || []).filter((x) => x !== imageId); });
+    if (role === 'main') r.selected_image_id = imageId;
+    else if (r.selected_image_id === imageId) r.selected_image_id = null;
+    if (role !== 'main' && role !== 'none') r.steps[+role].image_ids.push(imageId);
+    patchRecipe(r.id, { selected_image_id: r.selected_image_id, steps: r.steps });
+    renderDetail(r);
+    renderRecipeList();
+  };
+  detail.querySelectorAll('.place-photos-btn').forEach((btn) => btn.addEventListener('click', () => placePhotos(r, btn)));
+  detail.querySelectorAll('.add-photos').forEach((input) => input.addEventListener('change', () => addRecipePhotos(r, input)));
+  detail.querySelectorAll('.photo-role').forEach((sel) => sel.addEventListener('change', (e) => {
+    e.stopPropagation();
+    setPhotoRole(sel.dataset.imageId, sel.value);
+  }));
+
   detail.querySelectorAll('.image-choice').forEach((elm) => {
     if (elm.dataset.generate) {
       elm.addEventListener('click', () => triggerImageGeneration(r, elm));
@@ -1167,8 +1269,9 @@ function renderDetail(r) {
     }
     elm.addEventListener('click', () => {
       const imageId = elm.dataset.imageId || null;
-      r.selected_image_id = imageId;
-      patchRecipe(r.id, { selected_image_id: imageId });
+      if (imageId) { setPhotoRole(imageId, 'main'); return; }
+      r.selected_image_id = null;
+      patchRecipe(r.id, { selected_image_id: null });
       renderDetail(r);
       renderRecipeList();
     });
@@ -1205,10 +1308,11 @@ function renderDetail(r) {
       };
     });
 
-    r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row) => ({
+    r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row, i) => ({
       instruction: row.querySelector('.step-instruction').value,
       title: null,
       time_minutes: null,
+      image_ids: (r.steps[i] || {}).image_ids || [],
     }));
 
     patchRecipe(r.id, {
@@ -1226,7 +1330,7 @@ function renderDetail(r) {
   detail.querySelectorAll('input, textarea').forEach((inp) => {
     inp.addEventListener('blur', save);
   });
-  detail.querySelectorAll('select').forEach((sel) => {
+  detail.querySelectorAll('select:not(.photo-role)').forEach((sel) => {
     sel.addEventListener('change', save);
   });
 
@@ -1416,6 +1520,52 @@ function numOrNull(v) {
 }
 
 let patchTimer = null;
+// The "+" tile: own photos for a recipe.
+async function addRecipePhotos(r, input) {
+  if (!input.files.length) return;
+  const tile = input.closest('.add-tile');
+  tile.classList.add('loading');
+  const form = new FormData();
+  [...input.files].forEach((f) => form.append('files', f));
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/images`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    Object.assign(state.job.images, data.images);
+    Object.assign(r, data.recipe);
+    renderRecipeList();
+  } catch (err) {
+    showUploadError(err.message);
+  }
+  renderDetail(r);
+}
+
+// "Place photos into the steps": the image AI, on request (image_steps.place).
+const placeStatus = {};
+async function placePhotos(r, btn) {
+  const all = btn.dataset.scope === 'all';
+  document.querySelectorAll('.place-photos-btn').forEach((b) => { b.disabled = true; });
+  btn.textContent = t('placePhotosRunning');
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/place-photos`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(all ? {} : { recipe_ids: [r.id] }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    data.recipes.forEach((updated) => {
+      const own = state.job.recipes.find((x) => x.id === updated.id);
+      if (own) Object.assign(own, updated);
+    });
+    state.job.token_usage = data.token_usage;
+    updateUsageDisplay(data.token_usage);
+    placeStatus[r.id] = data.placed ? tf('placePhotosDone', { n: data.placed }) : t('placePhotosNone');
+  } catch (err) {
+    placeStatus[r.id] = `⚠️ ${err.message}`;
+  }
+  renderDetail(r);
+}
+
 function patchRecipe(id, partial) {
   clearTimeout(patchTimer);
   const jobId = state.jobId;  // still the right job if the review is left meanwhile
@@ -1655,6 +1805,7 @@ function openAreaStart(area) {
 document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => openAreaStart(b.dataset.area)));
 
 const TOOL_TITLE_KEYS = {
+  step_photos: 'usageStepPhotos',
   tags_groups: 'toolTagGroupsTitle',
   unused_foods: 'toolUnusedFoodsTitle',
   unused_units: 'toolUnusedUnitsTitle',
@@ -1696,6 +1847,7 @@ async function loadRecentImports() {
     if (!items.length) { box.classList.add('hidden'); return; }
     el('recent-imports-list').innerHTML = items.map((j) => {
       const status = j.status === 'processing' ? t('recentImportRunning')
+        : j.status === 'confirm' ? t('recentImportConfirm')
         : j.status === 'error' ? t('recentImportError')
         : tf('recentImportLine', { recipes: j.recipes, imported: j.imported });
       return `<div class="new-recipes-open-job"><span><strong>${escapeHtml(j.filename)}</strong> · ${escapeHtml(status)} · ${escapeHtml(shortWhen(j.created_at))}</span>
@@ -2040,6 +2192,47 @@ async function loadUsage() {
   }
 }
 
+// ---------- Diagnosis (bottom of Maintain, collapsed) ----------
+const diagState = { rows: [] };
+const DIAG_GROUPS = { app: 'diagGroupApp', ai: 'diagGroupAi', lang: 'diagGroupLang', system: 'diagGroupSystem' };
+
+async function loadDiagnostics() {
+  el('diag-table').innerHTML = `<tr><td>${escapeHtml(t('diagLoading'))}</td></tr>`;
+  try {
+    diagState.rows = (await (await fetch('/api/diagnostics')).json()).rows;
+  } catch (err) {
+    el('diag-table').innerHTML = `<tr><td class="inbox-error">⚠️ ${escapeHtml(err.message)}</td></tr>`;
+    return;
+  }
+  let group = null;
+  el('diag-table').innerHTML = diagState.rows.map((r) => {
+    const head = r.group !== group ? `<tr><th colspan="2">${escapeHtml(t(DIAG_GROUPS[r.group] || r.group))}</th></tr>` : '';
+    group = r.group;
+    const mark = r.ok === false ? '⚠️ ' : (r.ok === true ? '✓ ' : '');
+    return `${head}<tr class="${r.ok === false ? 'diag-bad' : ''}"><td>${escapeHtml(r.label)}</td><td>${mark}${escapeHtml(r.value)}</td></tr>`;
+  }).join('');
+}
+
+el('diag-card').addEventListener('toggle', () => { if (el('diag-card').open) loadDiagnostics(); });
+el('diag-ai-test').addEventListener('click', async () => {
+  const btn = el('diag-ai-test');
+  btn.disabled = true;
+  el('diag-result').textContent = t('diagAiTesting');
+  try {
+    const data = await (await fetch('/api/diagnostics/ai-test', { method: 'POST' })).json();
+    el('diag-result').textContent = data.ok
+      ? `✓ ${tf('diagAiOk', { model: data.model, seconds: data.seconds })}`
+      : `⚠️ ${data.error}`;
+  } catch (err) {
+    el('diag-result').textContent = `⚠️ ${err.message}`;
+  }
+  btn.disabled = false;
+});
+el('diag-copy').addEventListener('click', async () => {
+  const text = diagState.rows.map((r) => `${r.label}: ${r.value}`).join('\n');
+  try { await navigator.clipboard.writeText(text); el('diag-result').textContent = `✓ ${t('planShoppingCopied')}`; } catch (e) { /* http */ }
+});
+
 // ---------- Automation & budget settings ----------
 
 function renderBudget(budget) {
@@ -2233,7 +2426,8 @@ function renderHealth(data) {
   };
   const available = APP_CONFIG.health_metrics;  // null = all (Tandoor)
   el('health-grid').innerHTML = HEALTH_GROUPS.map((g) => {
-    const metrics = g.metrics.filter((k) => !available || available.includes(k)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
+    const metrics = g.metrics.filter((k) => (!available || available.includes(k))
+      && (k !== 'recipes_not_translated' || APP_CONFIG.translate_recipes !== false)).map((k) => HEALTH_METRICS.find((m) => m.key === k));
     if (!metrics.length) return '';
     // Nothing to do (and no run going, not opened): just a name in the "all fine" line.
     const done = (m) => !(data.metrics[m.key] ?? 0) && !(data.pending || {})[m.tool] && healthState.open !== m.key;
@@ -3565,20 +3759,107 @@ async function runBulkAction(action) {
 // ---------- Init ----------
 
 // Bookmarklet: opens this app with ?import=<page address> in a new tab.
-el('bookmarklet').href = `javascript:(()=>{window.open(${JSON.stringify(location.origin + '/?import=')}+encodeURIComponent(location.href),'_blank')})()`;
+// The bookmark button opens the app with the page's address and then hands
+// over the page itself (postMessage) - the app doesn't have to load it, so
+// sites that block scripts work too. Then the app names the page's photos
+// (rbWant) and the button fetches them in the recipe's tab, where the site
+// lets the browser have them (rbPhotos: one Blob or null each). Without the
+// hand-over (an old button, a site that cuts the link between the tabs) the
+// address is loaded as before.
+el('bookmarklet').href = `javascript:(()=>{const o=${JSON.stringify(location.origin)},u=location.href,`
+  + `h=document.documentElement.outerHTML,w=window.open(o+'/?import='+encodeURIComponent(u)+'&page=1','_blank');`
+  + `addEventListener('message',e=>{const d=e.data;if(e.origin!==o||!w)return;`
+  + `if(d==='rb-ready')w.postMessage({rbPage:{url:u,html:h,v:2}},o);`
+  + `else if(d&&Array.isArray(d.rbWant))Promise.all(d.rbWant.map(x=>fetch(x).then(r=>r.ok?r.blob():null).catch(()=>null)))`
+  + `.then(b=>w.postMessage({rbPhotos:b},o))})})()`;
 el('bookmarklet').addEventListener('click', (e) => { e.preventDefault(); showUploadError(t('bookmarkletClick')); });
 
 // Imports handed over in the address: ?import=<url> (bookmarklet),
 // ?text=<recipe text>, ?error=<message> (a failed share from the phone).
+const PAGE_PHOTO_BYTES = 10 * 1024 * 1024;  // per photo (url_processor.MAX_IMAGE_BYTES)
+const PAGE_PHOTOS_TOTAL = 40 * 1024 * 1024;
+const PAGE_PHOTOS_WAIT = 10000;             // ms - then the import goes on without them
+
+// The bookmark button's page hand-over (see el('bookmarklet').href).
+function receivePage(pageUrl) {
+  let done = false;
+  const finish = (page) => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('message', onMessage);
+    if (!page) startImportRequest('/api/import-url', { url: pageUrl }, t('urlImportLoading'));
+    else if (page.v >= 2) withPagePhotos(pageUrl, page.html);
+    else startImportRequest('/api/import-page', { url: pageUrl, html: page.html }, t('urlImportLoading'));
+  };
+  const onMessage = (e) => {
+    const page = e.data && e.data.rbPage;
+    if (e.source === window.opener && page && page.url === pageUrl && typeof page.html === 'string') finish(page);
+  };
+  window.addEventListener('message', onMessage);
+  try { window.opener.postMessage('rb-ready', '*'); } catch (e) { finish(null); return; }
+  setTimeout(() => finish(null), 4000);
+}
+
+// Asks the recipe's tab for the page's photos, then starts the import - with
+// the ones the browser could fetch (the app loads the others itself).
+async function withPagePhotos(pageUrl, html) {
+  el('upload-screen').classList.add('hidden');
+  el('processing-screen').classList.remove('hidden');
+  el('progress-track').classList.add('hidden');
+  el('processing-text').textContent = t('urlImportLoading');
+  const photos = {};
+  try {
+    const res = await fetch('/api/page-photos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: pageUrl, html }),
+    });
+    const urls = res.ok ? (await res.json()).urls || [] : [];
+    const blobs = urls.length ? await askOpenerForPhotos(urls) : [];
+    let total = 0;
+    for (let i = 0; i < urls.length; i++) {
+      const blob = blobs[i];
+      if (!(blob instanceof Blob) || !blob.type.startsWith('image/') || blob.size > PAGE_PHOTO_BYTES) continue;
+      if (total + blob.size > PAGE_PHOTOS_TOTAL) break;
+      total += blob.size;
+      photos[urls[i]] = await blobToDataUrl(blob);
+    }
+  } catch (e) { /* without photos - the app loads them itself */ }
+  startImportRequest('/api/import-page', { url: pageUrl, html, photos }, t('urlImportLoading'));
+}
+
+function askOpenerForPhotos(urls) {
+  return new Promise((resolve) => {
+    const onMessage = (e) => {
+      if (e.source !== window.opener || !e.data || !Array.isArray(e.data.rbPhotos)) return;
+      window.removeEventListener('message', onMessage);
+      resolve(e.data.rbPhotos);
+    };
+    window.addEventListener('message', onMessage);
+    setTimeout(() => { window.removeEventListener('message', onMessage); resolve([]); }, PAGE_PHOTOS_WAIT);
+    try { window.opener.postMessage({ rbWant: urls }, '*'); } catch (e) { resolve([]); }
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 function handleIncomingParams() {
   const url = new URL(window.location);
   const importUrl = url.searchParams.get('import');
   const text = url.searchParams.get('text');
   const error = url.searchParams.get('error');
-  ['import', 'text', 'error'].forEach((k) => url.searchParams.delete(k));
+  const withPage = url.searchParams.get('page') === '1' && window.opener;
+  ['import', 'text', 'error', 'page'].forEach((k) => url.searchParams.delete(k));
   window.history.replaceState({}, '', url);
   if (error) showUploadError(error);
-  if (importUrl && /^https?:\/\//i.test(importUrl)) {
+  if (importUrl && /^https?:\/\//i.test(importUrl) && withPage) {
+    receivePage(importUrl);
+  } else if (importUrl && /^https?:\/\//i.test(importUrl)) {
     startImportRequest('/api/import-url', { url: importUrl }, t('urlImportLoading'));
   } else if (text && text.trim()) {
     startImportRequest('/api/import-text', { text }, t('textImportLoading'));

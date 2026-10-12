@@ -28,6 +28,9 @@ data volume, no restart needed.
 | `TANDOOR_URL` / `TANDOOR_TOKEN` | – | Your Tandoor instance and API token |
 | `MEALIE_URL` / `MEALIE_TOKEN` | – | Your Mealie instance and API token |
 | `OUTPUT_LANGUAGE` | `English` | Language of the recipes **and** of the app's UI (full UI translations: Deutsch, English, Français, Italiano, Español) |
+| `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
+| `STEP_PHOTOS_AI` | `true` | The review's "place photos into the steps" button may use the image AI; `false` = it only places a recipe page's own step photos (free), the rest by hand |
+| `IMPORT_CONFIRM_TOKENS` | `50000` | An import estimated above this many tokens shows the estimate (and what is left of the monthly budget) and waits for *Start*; `0` = never ask. Imports from the phone or the watched folder don't wait |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |
@@ -64,7 +67,11 @@ is fully translated into Deutsch, English, Français, Italiano and Español and
 falls back to English otherwise (add a language in
 `backend/app/static/i18n.js` and `SUPPORTED_UI_LANGUAGES` in `config.py`).
 If a cookbook is already in the target language, the translation step is
-skipped automatically.
+skipped automatically. To keep every recipe in the language it was written
+in, set `TRANSLATE_RECIPES=false` – `OUTPUT_LANGUAGE` then only sets the
+interface. After changing `.env`, re-create the container (`docker compose up -d`, in
+Dockge *Deploy*/*Update* – a plain restart keeps the old environment);
+`/api/config` shows `"translate_recipes": false` once it took effect.
 
 ## AI providers and costs
 

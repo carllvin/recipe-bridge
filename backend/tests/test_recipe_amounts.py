@@ -1,13 +1,11 @@
 """Amounts into the steps: the AI only marks where an ingredient is named;
-Tandoor gets its templates, Mealie the amounts written out."""
+Tandoor gets its templates (Mealie has none - no amounts in its steps)."""
 import json
 
 import pytest
 
-from app import llm_provider, mealie_client, recipe_amounts, tool_jobs
+from app import llm_provider, recipe_amounts, tool_jobs
 from app.config import settings
-from fake_mealie import FakeMealie
-from test_mealie_tools import apply_all, run
 
 
 def ingredient(rid, food, amount=None, unit=None, plural=""):
@@ -114,23 +112,17 @@ def test_tandoor_gets_templates(tandoor, monkeypatch):
     assert [i["food"]["name"] for i in steps[0]["ingredients"]] == ["Mehl", "Milch", "Ei"]
 
 
-def test_mealie_gets_the_amounts_written_out(monkeypatch):
-    fake = FakeMealie()
+def test_mealie_has_no_amounts_in_the_steps(monkeypatch):
+    """Mealie has no templates - written-out amounts would be wrong once the
+    servings change, so the tile and the tool aren't offered."""
+    from fastapi.testclient import TestClient
+    from app import main, mealie_maintenance
     monkeypatch.setattr(settings, "recipe_manager", "mealie")
     monkeypatch.setattr(settings, "mealie_url", "https://mealie.example")
     monkeypatch.setattr(settings, "mealie_token", "secret")
-    monkeypatch.setattr(mealie_client, "get_client", lambda: fake.client(settings.mealie_token))
-    mehl, milch = fake.add("food", "Mehl"), fake.add("food", "Milch")
-    g, ml = fake.add("unit", "g"), fake.add("unit", "ml")
-    r = fake.add_recipe("Teig", [(mehl, g), (milch, ml)], servings=2)
-    r["recipeIngredient"][0]["quantity"], r["recipeIngredient"][1]["quantity"] = 250, 0.5
-    r["recipeInstructions"] = [{"id": "s1", "title": "", "text": "Das Mehl mit der Milch verrühren.",
-                                "ingredientReferences": [{"referenceId": row["referenceId"]} for row in r["recipeIngredient"]]}]
-    AI(monkeypatch, {"steps": ["[[i0]] mit [[i1]] verrühren."]})
-    job = run("recipes_amounts")
-    assert len(job.suggestions) == 1
-    apply_all(job)
-    assert fake.recipes["teig"]["recipeInstructions"][0]["text"] == "250 g Mehl mit 0,5 ml Milch verrühren."
+    assert "recipes_amounts" not in mealie_maintenance.TOOLS
+    assert "recipes_amounts_missing" not in mealie_maintenance.METRICS
+    assert TestClient(main.app).post("/api/tools/recipes/amounts").status_code >= 400
 
 
 def test_comments_in_brackets(monkeypatch, tandoor):

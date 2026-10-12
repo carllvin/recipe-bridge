@@ -1,0 +1,203 @@
+"""Photos in the steps: a recipe page's step photos are placed right away;
+a cookbook's photos only on the review's button (one image AI call per
+recipe with a contact sheet - only what it's sure about, never moving what
+was placed by hand); uploaded with the recipe (Tandoor: file storage + the
+step's file, Mealie: assets in the step text)."""
+import json
+import os
+import types
+
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from app import image_steps, jobs, llm_provider, main, tools_new_recipes, url_processor
+from app.schemas import ExtractedRecipe, Ingredient, Step
+from test_mealie import mealie  # noqa: F401 - fixture
+
+
+def recipe_job(pages=(1, 1)):
+    job = jobs.create_job("Kochbuch.pdf")
+    job.status = "ready"
+    job.recipes = [ExtractedRecipe(
+        id="r1", title="Brot", source_page_start=pages[0], source_page_end=pages[1],
+        ingredients=[Ingredient(name="Mehl", unit="g", amount=500, step_index=0)],
+        steps=[Step(instruction="Teig kneten."), Step(instruction="Formen."), Step(instruction="Backen.")])]
+    images_dir = os.path.join(main._job_dir(job.id), "images")
+    os.makedirs(images_dir, exist_ok=True)
+    for n, (iid, page, kind) in enumerate([("main", 1, None), ("a", 1, None), ("b", 2, None), ("c", 2, None),
+                                           ("next", 3, None), ("scan", 1, "page")]):
+        Image.new("RGB", (60, 40), (40 * n, 90, 200 - 30 * n)).save(os.path.join(images_dir, f"{iid}.jpg"))
+        job.images[iid] = {"page": page, "filename": f"{iid}.jpg", **({"kind": kind} if kind else {})}
+    job.recipes[0].selected_image_id = "main"
+    jobs.save_job(job)
+    return job, images_dir
+
+
+def placed(recipe):
+    return [s.image_ids for s in recipe.steps]
+
+
+def test_extra_images_only_own_pages_without_main_or_scans(isolated):
+    job, _ = recipe_job(pages=(1, 2))
+    assert image_steps.extra_images(job, job.recipes[0]) == ["a", "b", "c"]
+
+
+def test_reading_the_import_uses_no_ai(isolated, monkeypatch):
+    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: pytest.fail("no AI while importing"))
+    job, images_dir = recipe_job(pages=(1, 2))
+    image_steps.assign_all(job, images_dir)
+    assert placed(job.recipes[0]) == [[], [], []]
+
+
+def test_button_places_with_the_ai(isolated, monkeypatch):
+    job, images_dir = recipe_job(pages=(1, 2))
+    job.recipes[0].steps[2].image_ids = ["c"]  # placed by hand - stays, not sent again
+    jobs.save_job(job)
+    seen = []
+
+    def look(jpeg, prompt, max_tokens=0, tools=False):
+        assert tools  # the cheaper tools model
+        seen.append(prompt)
+        assert jpeg[:2] == b"\xff\xd8"  # one contact sheet
+        return json.dumps({"photos": [{"n": 1, "step": 2, "sure": True}, {"n": 2, "step": 1, "sure": False}]}), \
+            types.SimpleNamespace(input_tokens=900, output_tokens=40)
+    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(llm_provider, "transcribe_image", look)
+    data = TestClient(main.app).post(f"/api/jobs/{job.id}/place-photos", json={"recipe_ids": ["r1"]}).json()
+    # a -> step 2; b: not sure -> stays unassigned; c: by hand, untouched
+    assert data["placed"] == 1 and [s["image_ids"] for s in data["recipes"][0]["steps"]] == [[], ["a"], ["c"]]
+    assert "2 numbered photos" in seen[0] and "2. Formen." in seen[0]
+    assert data["token_usage"]["input_tokens"] == 900
+    from app import usage_log
+    assert usage_log.summary()["by_source"]["step_photos"]["input_tokens"] == 900
+
+
+def test_button_ai_fails_or_switched_off(isolated, monkeypatch):
+    from app.config import settings
+    job, _ = recipe_job(pages=(1, 2))
+    monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("no vision")))
+    api = TestClient(main.app)
+    res = api.post(f"/api/jobs/{job.id}/place-photos", json={})
+    assert res.status_code == 502 and "read images" in res.json()["detail"]
+    assert placed(jobs.get_job(job.id).recipes[0]) == [[], [], []]
+    monkeypatch.setattr(settings, "step_photos_ai", False)  # no AI: nothing a page didn't place itself
+    data = api.post(f"/api/jobs/{job.id}/place-photos", json={}).json()
+    assert data["placed"] == 0 and placed(jobs.get_job(job.id).recipes[0]) == [[], [], []]
+    assert api.get("/api/config").json()["step_photos_ai"] is False
+
+
+def test_recipe_page_step_images_by_position(isolated):
+    job, images_dir = recipe_job()
+    # the page had 6 steps with photos at steps 1 and 5; the AI made 3 of them
+    job.images = {"main": job.images["main"],
+                  "s1": {"page": 1, "filename": "a.jpg", "step": 0, "of": 6},
+                  "s5": {"page": 1, "filename": "b.jpg", "step": 4, "of": 6}}
+    image_steps.assign_all(job, images_dir)
+    assert placed(job.recipes[0]) == [[], [], []]  # nothing until the button
+    jobs.save_job(job)
+    from app.config import settings
+    settings_ai = settings.step_photos_ai
+    try:
+        settings.step_photos_ai = False  # free: no AI needed for a page's own step photos
+        data = TestClient(main.app).post(f"/api/jobs/{job.id}/place-photos", json={"recipe_ids": ["r1"]}).json()
+    finally:
+        settings.step_photos_ai = settings_ai
+    assert data["placed"] == 2 and [s["image_ids"] for s in data["recipes"][0]["steps"]] == [["s1"], [], ["s5"]]
+    assert data["token_usage"]["input_tokens"] == 0
+
+
+def test_howto_step_images_are_read():
+    found, steps = url_processor._step_images([
+        {"@type": "HowToStep", "text": "Kneten", "image": "https://x/1.jpg"},
+        {"@type": "HowToSection", "name": "Backen", "itemListElement": [
+            {"@type": "HowToStep", "text": "Formen"},
+            {"@type": "HowToStep", "text": "Backen", "image": [{"@type": "ImageObject", "url": "https://x/3.jpg"}]}]}])
+    assert found == [(0, "https://x/1.jpg"), (2, "https://x/3.jpg")] and steps == 3
+
+
+def test_import_to_tandoor_with_step_photos(tandoor, monkeypatch):
+    monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: None)
+    job, _ = recipe_job(pages=(1, 2))
+    job.recipes[0].steps[0].image_ids = ["a", "b"]
+    job.recipes[0].steps[2].image_ids = ["c", "main"]  # the main photo isn't shown twice
+    jobs.save_job(job)
+    api = TestClient(main.app)
+    data = api.post(f"/api/jobs/{job.id}/import", json={}).json()
+    assert data["results"][0]["status"] == "imported", data
+    recipe = tandoor.db["recipe"][data["results"][0]["tandoor_recipe_id"]]
+    files = list(tandoor.db["user-file"].values())
+    assert [f["name"] for f in files] == ["Brot – 1.1", "Brot – 1.2", "Brot – 3.1"]
+    first, _, last = recipe["steps"]
+    assert first["file"]["id"] == files[0]["id"]
+    assert first["instruction"] == f"Teig kneten.\n\n![](/media/files/{files[1]['id']}.jpg)"
+    assert last["file"]["id"] == files[2]["id"] and last["instruction"] == "Backen."
+
+    # undo: the step photos go too
+    assert api.post(f"/api/jobs/{job.id}/recipes/r1/undo-import").status_code == 200
+    assert not tandoor.db["user-file"]
+
+
+def test_import_to_mealie_with_step_photos(mealie, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: None)
+    job, _ = recipe_job()
+    job.recipes[0].steps[1].image_ids = ["a"]
+    jobs.save_job(job)
+    data = TestClient(main.app).post(f"/api/jobs/{job.id}/import", json={}).json()
+    slug = data["results"][0]["tandoor_recipe_id"]
+    recipe = mealie.recipes[slug]
+    assert mealie.assets[slug] == ["step1.jpg"] and recipe["assets"][0]["fileName"] == "step1.jpg"
+    assert recipe["recipeInstructions"][1]["text"] == f"Formen.\n\n![](/api/media/recipes/{recipe['id']}/assets/step1.jpg)"
+    assert recipe["recipeInstructions"][0]["text"] == "Teig kneten."
+
+
+def test_review_keeps_moved_photos(isolated):
+    job, _ = recipe_job()
+    steps = [{"instruction": "Teig kneten.", "image_ids": []}, {"instruction": "Formen.", "image_ids": ["a"]},
+             {"instruction": "Backen."}]
+    data = TestClient(main.app).put(f"/api/jobs/{job.id}/recipes/r1", json={"steps": steps}).json()
+    assert [s["image_ids"] for s in data["steps"]] == [[], ["a"], []]
+
+
+def test_decoration_never_reaches_the_ai(isolated):
+    job, images_dir = recipe_job(pages=(1, 3))
+    logo = Image.new("RGB", (50, 50), "white")
+    for page in (1, 2, 3):  # the same image on every page
+        logo.save(os.path.join(images_dir, f"logo{page}.jpg"))
+        job.images[f"logo{page}"] = {"page": page, "filename": f"logo{page}.jpg"}
+    Image.new("RGB", (400, 40), "blue").save(os.path.join(images_dir, "banner.jpg"))
+    job.images["banner"] = {"page": 2, "filename": "banner.jpg"}
+    assert image_steps.decoration(job, images_dir) == {"logo1", "logo2", "logo3", "banner"}
+    image_steps.assign_all(job, images_dir)  # marks them
+    assert image_steps.extra_images(job, job.recipes[0]) == ["a", "b", "c", "next"]
+
+
+def test_photo_tokens_counted_on_their_own(isolated, monkeypatch):
+    from app import usage_log
+    job, _ = recipe_job()
+    job.token_usage.input_tokens, job.token_usage.output_tokens = 1000, 200
+    job.photo_usage.input_tokens, job.photo_usage.output_tokens = 300, 20
+    main._record_usage(job)
+    by_source = usage_log.summary()["by_source"]
+    assert by_source["import"] == {"input_tokens": 700, "output_tokens": 180}
+    assert by_source["step_photos"] == {"input_tokens": 300, "output_tokens": 20}
+
+
+def test_add_own_photos_in_the_review(isolated):
+    import io
+    job, _ = recipe_job()
+    job.recipes[0].selected_image_id = None
+    jobs.save_job(job)
+    buf = io.BytesIO()
+    Image.new("RGB", (80, 60), "green").save(buf, "WEBP")
+    res = TestClient(main.app).post(f"/api/jobs/{job.id}/recipes/r1/images",
+                                    files=[("files", ("eigenes.webp", buf.getvalue(), "image/webp"))])
+    assert res.status_code == 200, res.text
+    data = res.json()
+    new_id = data["image_ids"][0]
+    assert data["recipe"]["candidate_image_ids"][-1] == new_id and data["recipe"]["selected_image_id"] == new_id
+    assert data["images"][new_id]["kind"] == "added"
+    assert TestClient(main.app).post(f"/api/jobs/{job.id}/recipes/r1/images",
+                                     files=[("files", ("x.txt", b"no photo", "text/plain"))]).status_code == 400

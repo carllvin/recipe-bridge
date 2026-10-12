@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from urllib.parse import urljoin, urlparse
 
@@ -25,12 +26,36 @@ from . import video_processor
 
 log = logging.getLogger("recipe-bridge")
 
+# What a browser sends - some sites refuse requests that look like a script.
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "de,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
+# A second try when a site refuses the first one (bot protection).
+RETRY_HEADERS = {
+    **HEADERS,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Referer": "https://www.google.com/",
+    "Sec-Fetch-Site": "cross-site",
+}
+BLOCKED_STATUS = {401, 403, 429, 503}
+BLOCKED_HINT = ("The site blocks automatic access (HTTP {status}). Open the recipe in your browser and use the "
+                "📥 bookmark button there (under More ways) - it sends the page from your browser - or copy the "
+                "recipe text and paste it.")
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_STEP_IMAGES = 15   # photos the page shows with its steps (image_steps.py)
+# Bot protection often lets a request hang instead of refusing it - so short
+# waits, and the photos of a recipe share one time budget.
+PAGE_TIMEOUT = httpx.Timeout(15, connect=8)
+IMAGE_TIMEOUT = httpx.Timeout(8, connect=5)
+PHOTOS_SECONDS = 30
 MAX_TEXT_CHARS = 30000
 
 
@@ -62,27 +87,42 @@ def validate_url(url: str) -> str:
 
 
 def _types(node) -> set[str]:
+    """The node's schema.org types, lower case and without a prefix - pages
+    write "recipe" or "http://schema.org/Recipe" too."""
     t = node.get("@type") if isinstance(node, dict) else None
-    return {t} if isinstance(t, str) else set(t or [])
+    names = [t] if isinstance(t, str) else [x for x in (t or []) if isinstance(x, str)]
+    return {n.rsplit("/", 1)[-1].rsplit(":", 1)[-1].strip().lower() for n in names}
 
 
-def _find_recipe(data):
-    """Depth-first search for a schema.org Recipe object in JSON-LD
-    (top level, in lists, or inside an @graph)."""
+def _find_recipe(data, kind: str = "Recipe"):
+    """Depth-first search for a schema.org Recipe object (or another type)
+    in JSON-LD (top level, in lists, or inside an @graph)."""
     if isinstance(data, list):
         for item in data:
-            found = _find_recipe(item)
+            found = _find_recipe(item, kind)
             if found:
                 return found
     elif isinstance(data, dict):
-        if "Recipe" in _types(data):
+        if kind.lower() in _types(data):
             return data
         for key in ("@graph", "mainEntity", "itemListElement"):
             if key in data:
-                found = _find_recipe(data[key])
+                found = _find_recipe(data[key], kind)
                 if found:
                     return found
     return None
+
+
+def _howto_as_recipe(howto: dict) -> dict:
+    """A schema.org HowTo ("how to make fresh pasta" step-by-step guides) read
+    like a recipe: its supplies are the ingredients, its steps the method."""
+    supplies = [s.get("name") if isinstance(s, dict) else s for s in _as_list(howto.get("supply"))]
+    return {**howto, "recipeIngredient": [_text(s) for s in supplies if s],
+            "recipeInstructions": howto.get("step") or [], "recipeYield": howto.get("yield")}
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value] if value else []
 
 
 def _text(value) -> str:
@@ -106,13 +146,41 @@ def _instructions(value) -> list[str]:
     for item in value or []:
         if isinstance(item, str):
             lines.append(_text(item))
-        elif isinstance(item, dict) and "HowToSection" in _types(item):
+        elif isinstance(item, dict) and "howtosection" in _types(item):
             if item.get("name"):
                 lines.append(f"## {_text(item['name'])}")
             lines.extend(_instructions(item.get("itemListElement")))
         elif isinstance(item, dict):
             lines.append(_text(item.get("text") or item.get("name") or ""))
     return [line for line in lines if line]
+
+
+def _image_of(value) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, dict):
+        value = value.get("url") or value.get("contentUrl")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _step_images(value) -> tuple[list[tuple[int, str]], int]:
+    """([(step position 0.., image url)], number of steps) from the
+    HowToSteps of recipeInstructions - the photos the page shows with a step."""
+    found, count = [], 0
+
+    def walk(items):
+        nonlocal count
+        for item in items or []:
+            if isinstance(item, dict) and "howtosection" in _types(item):
+                walk(item.get("itemListElement"))
+            elif isinstance(item, (dict, str)):
+                image = _image_of(item.get("image")) if isinstance(item, dict) else None
+                if image:
+                    found.append((count, image))
+                count += 1
+    if isinstance(value, list):
+        walk(value)
+    return found, count
 
 
 def _recipe_to_text(recipe: dict, url: str) -> str:
@@ -138,11 +206,36 @@ def _recipe_to_text(recipe: dict, url: str) -> str:
 
 
 def _visible_text(soup: BeautifulSoup) -> str:
-    for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "form", "svg"]):
+    """The page's main text: the article/main element with the most text -
+    not just the first one (often a teaser card) - or the whole page when
+    none of them holds most of it."""
+    # not <form>: some sites (ASP.NET) put the whole page into one
+    for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "svg",
+                     "input", "select", "button", "textarea"]):
         tag.decompose()
-    main = soup.find("article") or soup.find("main") or soup.body or soup
-    lines = [line.strip() for line in main.get_text("\n").split("\n") if line.strip()]
-    return "\n".join(lines)[:MAX_TEXT_CHARS]
+    body = soup.body or soup
+
+    def lines(node):
+        return [line.strip() for line in node.get_text("\n").split("\n") if line.strip()]
+    whole = lines(body)
+    best = max((lines(n) for n in soup.find_all(["article", "main"]) + soup.select("[role=main]")),
+               key=lambda ls: sum(map(len, ls)), default=[])
+    chosen = best if sum(map(len, best)) >= 0.4 * sum(map(len, whole)) else whole
+    return "\n".join(chosen)[:MAX_TEXT_CHARS]
+
+
+def _article_body(soup: BeautifulSoup) -> str:
+    """articleBody of a schema.org Article in the page's JSON-LD, if any."""
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or script.get_text() or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for kind in ("Article", "NewsArticle", "BlogPosting"):
+            found = _find_recipe(data, kind)
+            if found and found.get("articleBody"):
+                return _text(found["articleBody"])
+    return ""
 
 
 def _image_url(recipe: dict | None, soup: BeautifulSoup, base: str) -> str | None:
@@ -165,14 +258,30 @@ def _image_url(recipe: dict | None, soup: BeautifulSoup, base: str) -> str | Non
     return None
 
 
-def _save_image(client: httpx.Client, url: str, images_dir: str) -> dict | None:
+def _save_image(client: httpx.Client, url: str, images_dir: str, gate: dict | None = None) -> dict | None:
+    """gate: {"until": deadline, "blocked": hosts, "given": {url: bytes}}
+    shared by a recipe's photos - a photo the browser already sent isn't
+    loaded; past the deadline, or once a host timed out or refused, the
+    rest of them aren't tried."""
+    host = urlparse(url).netloc
+    given = (gate or {}).get("given", {}).get(url)
+    if given is None and gate is not None and (time.monotonic() > gate["until"] or host in gate["blocked"]):
+        return None
     try:
-        resp = client.get(url)
-        resp.raise_for_status()
-        if len(resp.content) > MAX_IMAGE_BYTES:
+        if given is not None:
+            content = given
+        else:
+            resp = client.get(url, timeout=IMAGE_TIMEOUT)
+            if gate is not None and resp.status_code in BLOCKED_STATUS:
+                gate["blocked"].add(host)
+            resp.raise_for_status()
+            content = resp.content
+        if len(content) > MAX_IMAGE_BYTES:
             return None
-        img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+        img = Image.open(io.BytesIO(content)).convert("RGB")
     except Exception as exc:  # noqa: BLE001
+        if gate is not None and isinstance(exc, httpx.TimeoutException):
+            gate["blocked"].add(host)
         log.info("Recipe image %s not usable: %s", url, exc)
         return None
     image_id = uuid.uuid4().hex[:12]
@@ -183,7 +292,7 @@ def _save_image(client: httpx.Client, url: str, images_dir: str) -> dict | None:
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(headers=HEADERS, follow_redirects=True, timeout=20)
+    return httpx.Client(headers=HEADERS, follow_redirects=True, timeout=PAGE_TIMEOUT)
 
 
 def _process_video(url: str, images_dir: str) -> dict:
@@ -208,45 +317,113 @@ def _process_video(url: str, images_dir: str) -> dict:
             "metadata_title": info.get("title") or "", "toc_pages": []}
 
 
-def process_url(url: str, images_dir: str) -> dict:
+def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
+    """(html, final url) - a second try with other headers when a site's bot
+    protection refuses the first."""
+    try:
+        resp = client.get(url, timeout=PAGE_TIMEOUT)
+        if resp.status_code in BLOCKED_STATUS:
+            resp = client.get(url, headers=RETRY_HEADERS, timeout=PAGE_TIMEOUT)
+        if resp.status_code in BLOCKED_STATUS:
+            raise UrlImportError(BLOCKED_HINT.format(status=resp.status_code))
+        resp.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise UrlImportError("The site doesn't answer (it may block automatic access). Use the 📥 bookmark "
+                             "button on the recipe page (under More ways) or paste the recipe text.") from exc
+    except httpx.HTTPError as exc:
+        raise UrlImportError(f"Could not load the page: {exc}") from exc
+    if len(resp.content) > MAX_PAGE_BYTES:
+        raise UrlImportError("The page is too large.")
+    return resp.text, str(resp.url)
+
+
+def _page_recipe(soup: BeautifulSoup) -> tuple[dict | None, dict | None]:
+    """(the page's schema.org recipe with ingredients or method, a Recipe
+    entry with only name, image, address - its photo is still good)."""
+    recipe = None
+    scripts = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            scripts.append(json.loads(script.string or script.get_text() or ""))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    stub = None
+    for kind in ("Recipe", "HowTo"):  # a recipe first, else a step-by-step guide
+        found = next((r for r in (_find_recipe(d, kind) for d in scripts) if r), None)
+        if found and kind == "HowTo":
+            found = _howto_as_recipe(found)
+        if found and (found.get("recipeIngredient") or found.get("ingredients")
+                      or _instructions(found.get("recipeInstructions"))):
+            recipe = found
+            break
+        stub = stub or found
+    return recipe, stub
+
+
+def _photo_urls(recipe, stub, soup, page_url) -> tuple[str | None, list[tuple[int, str]], int]:
+    """(main photo, [(step position, step photo)], number of original steps)."""
+    step_images, steps = _step_images(recipe.get("recipeInstructions")) if recipe else ([], 0)
+    return (_image_url(recipe or stub, soup, page_url),
+            [(position, urljoin(page_url, u)) for position, u in step_images[:MAX_STEP_IMAGES]], steps)
+
+
+def page_photo_urls(url: str, html: str) -> list[str]:
+    """The photos an import of this page would load - the bookmark button
+    lets the browser fetch them (sites that refuse the app their photos)."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    recipe, stub = _page_recipe(soup)
+    main, steps, _ = _photo_urls(recipe, stub, soup, url)
+    return list(dict.fromkeys(([main] if main else []) + [u for _, u in steps]))
+
+
+def process_url(url: str, images_dir: str, html: str | None = None,
+                given_photos: dict[str, bytes] | None = None) -> dict:
+    """html: the page as the browser already has it (bookmark button) - then
+    it isn't loaded again (sites with bot protection refuse that); its
+    photos too, as far as the browser could fetch them (given_photos:
+    {address: bytes}) - the others are loaded as usual."""
     os.makedirs(images_dir, exist_ok=True)
-    if video_processor.platform(url):
+    if video_processor.platform(url) and html is None:
         return _process_video(url, images_dir)
     with _client() as client:
-        try:
-            resp = client.get(url)
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise UrlImportError(f"Could not load the page: {exc}") from exc
-        if len(resp.content) > MAX_PAGE_BYTES:
-            raise UrlImportError("The page is too large.")
-        soup = BeautifulSoup(resp.text, "html.parser")
+        if html is None:
+            html, page_url = _fetch_page(client, url)
+        else:
+            page_url = url
+            if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+                raise UrlImportError("The page is too large.")
+        soup = BeautifulSoup(html, "html.parser")
 
-        recipe = None
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                recipe = _find_recipe(json.loads(script.string or script.get_text() or ""))
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if recipe:
-                break
+        recipe, stub = _page_recipe(soup)
+
+        def page_text():
+            visible = _visible_text(BeautifulSoup(html, "html.parser"))
+            article = _article_body(soup)
+            return article if len(article) > len(visible) else visible
 
         if recipe:
             text = _recipe_to_text(recipe, url)
             title = _text(recipe.get("name"))
+            if not _instructions(recipe.get("recipeInstructions")):  # the method only on the page
+                text += "\n\nPage text:\n" + page_text()
         else:
-            log.info("No schema.org Recipe on %s - using the page text", url)
-            title = soup.title.get_text(strip=True) if soup.title else ""
-            text = f"Source: {url}\n\n" + _visible_text(BeautifulSoup(resp.text, "html.parser"))
+            log.info("No complete schema.org Recipe on %s - using the page text", url)
+            title = _text((stub or {}).get("name")) or (soup.title.get_text(strip=True) if soup.title else "")
+            text = f"Source: {url}\n\n" + page_text()
         if len(text.strip()) < 50:
             raise UrlImportError("No recipe text found on that page.")
 
         images = {}
-        image_url = _image_url(recipe, soup, str(resp.url))
+        gate = {"until": time.monotonic() + PHOTOS_SECONDS, "blocked": set(), "given": given_photos or {}}
+        image_url, step_images, steps = _photo_urls(recipe, stub, soup, page_url)
         if image_url:
-            saved = _save_image(client, image_url, images_dir)
+            saved = _save_image(client, image_url, images_dir, gate)
             if saved:
                 images[saved.pop("id")] = saved
+        for order, (position, step_url) in enumerate(step_images):
+            saved = _save_image(client, step_url, images_dir, gate)
+            if saved:
+                images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
 
     return {
         "pages": [{"page": 1, "text": text}],

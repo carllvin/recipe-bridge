@@ -43,10 +43,13 @@ class Settings(BaseSettings):
 
     # Output settings
     output_language: str = "English"   # target language for title/description/ingredients/steps AND the UI language
+    translate_recipes: bool = True     # true = translate recipes into output_language, false = keep each recipe in its own language
+    step_photos_ai: bool = True        # the image AI places a cookbook's photos into the steps; false = only by hand in the review
     convert_to_metric: bool = True     # convert US/UK units (cups, oz, lb, °F, inch) to metric
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them
     custom_instructions: str = ""      # extra instructions appended to the extraction prompt (see .env.example)
+    import_confirm_tokens: int = 50000  # an import estimated above this many tokens waits for your OK (cost shown); 0 = never ask
     toc_aware_chunking: bool = False   # align chunk boundaries to the PDF's bookmarks/TOC when present (EXPERIMENTAL - has caused some PDFs to yield 0 recipes, off by default until fixed; set true to opt in)
 
     # Housekeeping
@@ -112,6 +115,28 @@ LANGUAGE_NAME_TO_CODE = {
 # Languages that have a complete UI translation in the frontend.
 # Anything else falls back to English (still works, just not localized).
 SUPPORTED_UI_LANGUAGES = {"de", "en", "fr", "it", "es"}
+
+
+# Names for the languages a recipe can be detected in (langdetect codes) - so
+# a prompt can say "written in English" instead of "in its own language".
+LANGUAGE_NAMES = {"en": "English", "de": "German", "fr": "French", "it": "Italian", "es": "Spanish",
+                  "nl": "Dutch", "pt": "Portuguese", "pl": "Polish", "sv": "Swedish", "da": "Danish",
+                  "no": "Norwegian", "fi": "Finnish", "cs": "Czech", "hu": "Hungarian", "tr": "Turkish",
+                  "el": "Greek", "ru": "Russian", "uk": "Ukrainian", "ja": "Japanese", "ko": "Korean",
+                  "zh-cn": "Chinese", "zh-tw": "Chinese", "ro": "Romanian", "hr": "Croatian", "sk": "Slovak"}
+
+
+def detect_language(text: str) -> str | None:
+    """The language name of a text ("English"), without AI - None if unsure."""
+    sample = (text or "")[:3000].strip()
+    if len(sample) < 30:
+        return None
+    try:
+        from langdetect import DetectorFactory, LangDetectException, detect
+        DetectorFactory.seed = 0  # same answer every time
+        return LANGUAGE_NAMES.get(detect(sample))
+    except (ImportError, Exception):  # noqa: BLE001 - LangDetectException and too little text
+        return None
 
 
 def get_language_code(name: str) -> str | None:

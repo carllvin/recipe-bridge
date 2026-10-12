@@ -38,7 +38,7 @@ import threading
 import time
 import uuid
 
-from . import llm_provider, nutrition_properties, recipe_amounts, recipe_restructure, tandoor_client, target, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
+from . import app_settings, llm_provider, nutrition_properties, recipe_amounts, recipe_restructure, tandoor_client, target, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags, tools_units, undo, usage_log
 from .config import get_language_code, settings
 from .schemas import ToolSuggestion
 from .tandoor_helpers import find_recipes_by_filter, resolve_name_collisions
@@ -274,6 +274,13 @@ MAX_CANDIDATES = 5
 
 
 def _prompt(template, entity):
+    if not app_settings.translating():  # TRANSLATE_RECIPES=false: names keep their language
+        template = (template.replace("The target language is {language}.",
+                                     "Keep every name in its own language; a candidate in another language "
+                                     "is not a match.")
+                    .replace("the standard {language} name a {language} cookbook\nwould use ({style}) - translate it if it's in another language, e.g.\n{variants}.",
+                             "the standard name a cookbook in the name's own language\nwould use ({style}) - never translate it.")
+                    .replace("other common {language} names", "other common names in the same language"))
     for key, value in {**ENTITY_RULES[entity], "language": settings.output_language}.items():
         template = template.replace("{" + key + "}", value)
     return template
@@ -436,7 +443,7 @@ def run_scan(job_id: str) -> None:
             # 1. Translate - applied right away.
             expected_code = get_language_code(settings.output_language)
             for i, recipe in enumerate(list(recipes)):
-                if job.cancel_requested or from_import:
+                if job.cancel_requested or from_import or not app_settings.translating():
                     break
                 if tools_recipes.already_in_target_language(recipe, expected_code):
                     continue

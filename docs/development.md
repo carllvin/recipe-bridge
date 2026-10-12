@@ -30,6 +30,7 @@ backend/
     ai_extractor.py         Recipe extraction: prompt, chunking, dedup, language detection
     import_matching.py      Match ingredients, units and tags before the review
     image_gen.py            Optional AI images for recipes without a photo
+    image_steps.py          Further photos into the steps (step images of a page, contact sheet for the image AI)
     jobs.py, watcher.py     Import jobs; the watched folder
 
     # Review & maintenance
@@ -37,7 +38,7 @@ backend/
     apply_queue.py          Background queue that applies/skips/undoes suggestions
     undo.py                 Undo journals: replays recorded writes backwards (Tandoor)
     tools_*.py, recipe_restructure.py, nutrition_properties.py   The individual tools
-    recipe_amounts.py       Amounts into the steps (Tandoor templates / written out), proofreading
+    recipe_amounts.py       Amounts into the steps (Tandoor templates), proofreading
     recipe_doctor.py        Contradictions inside a recipe (found without AI, fixed with it)
     photo_quality.py        Weak photos, measured from the pixels
     prep_notes.py           "gemahlene Mandeln" -> "Mandeln" + note "gemahlen"
@@ -82,7 +83,14 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-GitHub runs them on every pull request (`.github/workflows/tests.yml`).
+The frontend (plain scripts, no build step) is linted with ESLint – mainly
+for what tests can't catch, like a function defined twice:
+
+```bash
+npx eslint@10 backend/app/static
+```
+
+GitHub runs both on every pull request (`.github/workflows/tests.yml`).
 `.github/workflows/docker.yml` builds the image for amd64 and arm64 and
 publishes it to the GitHub Container Registry – `:latest` on every push to
 `main`, `:1.2.0` and `:1.2` for a tag `v1.2.0` – after the tests passed;

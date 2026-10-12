@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 
 import httpx
 
 from .config import settings
 from .schemas import ExtractedRecipe
+
+
+log = logging.getLogger("recipe-bridge")
 
 
 class TandoorError(RuntimeError):
@@ -210,7 +214,8 @@ def add_recipe_to_cookbook(client: httpx.Client, cookbook_id: int, cookbook_endp
 
 # ---------- Creating a recipe ----------
 
-def _build_recipe_payload(recipe: ExtractedRecipe, client: httpx.Client) -> dict:
+def _build_recipe_payload(recipe: ExtractedRecipe, client: httpx.Client,
+                          step_files: dict[int, list[dict]] | None = None) -> dict:
     keyword_refs = []
     for tag in recipe.tags:
         try:
@@ -253,13 +258,16 @@ def _build_recipe_payload(recipe: ExtractedRecipe, client: httpx.Client) -> dict
             ing_payload["order"] = len(ingredients_payload)
             ingredients_payload.append(ing_payload)
 
+        files = (step_files or {}).get(order) or []
         steps_payload.append({
             "name": step.title or "",
-            "instruction": step.instruction,
+            # the first photo is the step's file, further ones are shown in its text
+            "instruction": step.instruction + "".join(f"\n\n![]({_file_url(f)})" for f in files[1:]),
             "ingredients": ingredients_payload,
             "time": step.time_minutes or 0,
             "order": order,
             "show_as_header": False,
+            **({"file": {"id": files[0]["id"], "name": files[0].get("name", "")}} if files else {}),
         })
 
     if not steps_payload and recipe.ingredients:
@@ -293,13 +301,58 @@ def _build_recipe_payload(recipe: ExtractedRecipe, client: httpx.Client) -> dict
     return payload
 
 
-def create_recipe(client: httpx.Client, recipe: ExtractedRecipe) -> int:
-    payload = _build_recipe_payload(recipe, client)
+def _file_url(info: dict) -> str:
+    """Where Tandoor serves an uploaded file (relative - shown inside Tandoor)."""
+    return info.get("preview") or info.get("file_download") or f"/api/download-file/{info['id']}/"
+
+
+def upload_user_file(client: httpx.Client, path: str, name: str) -> dict:
+    """A file in Tandoor's file storage (Files), e.g. a photo for a step."""
+    try:
+        with open(path, "rb") as f:
+            resp = client.post("/user-file/", files={"file": (os.path.basename(path), f, "application/octet-stream")},
+                               data={"name": name[:128]})
+    except httpx.HTTPError as exc:
+        raise TandoorError(f"Network error uploading a step photo: {exc}") from exc
+    if resp.status_code not in (200, 201):
+        raise TandoorError(f"Step photo upload failed ({resp.status_code}): {resp.text[:300]}")
+    return resp.json()
+
+
+def delete_user_files(client: httpx.Client, file_ids) -> None:
+    for file_id in file_ids or []:
+        try:
+            client.delete(f"/user-file/{file_id}/")
+        except httpx.HTTPError as exc:
+            log.info("Step photo %s not deleted: %s", file_id, exc)
+
+
+def _upload_step_photos(client, recipe: ExtractedRecipe, step_images, warnings) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+    for index, paths in enumerate(step_images or []):
+        for n, path in enumerate(paths, 1):
+            try:
+                info = upload_user_file(client, path, f"{recipe.title[:100]} – {index + 1}.{n}")
+            except TandoorError as exc:
+                warnings.append(str(exc))
+                return out  # e.g. the space's file storage is full or switched off
+            recipe.step_file_ids.append(info["id"])
+            out.setdefault(index, []).append(info)
+    return out
+
+
+def create_recipe(client: httpx.Client, recipe: ExtractedRecipe, step_images=None, warnings=None) -> int:
+    """step_images: per step the photo paths to show in it (image_steps.py)."""
+    recipe.step_file_ids = []
+    step_files = _upload_step_photos(client, recipe, step_images, warnings if warnings is not None else [])
+    payload = _build_recipe_payload(recipe, client, step_files)
     try:
         resp = client.post("/recipe/", json=payload)
     except httpx.HTTPError as exc:
+        delete_user_files(client, recipe.step_file_ids)
         raise TandoorError(f"Network error creating the recipe: {exc}") from exc
     if resp.status_code not in (200, 201):
+        delete_user_files(client, recipe.step_file_ids)
         raise TandoorError(
             f"Tandoor rejected the recipe ({resp.status_code}): {resp.text[:500]}"
         )

@@ -96,3 +96,28 @@ def update(changes: dict) -> dict:
             json.dump(current, f, indent=1)
         os.replace(tmp, _path())
         return current
+
+
+def translating() -> bool:
+    """Recipes are translated into OUTPUT_LANGUAGE (TRANSLATE_RECIPES) - else
+    each one keeps its own language."""
+    return bool(settings.translate_recipes)
+
+
+def recipe_language(sample: str = "") -> str:
+    """What the AI prompts say the recipe text is (or is to be) written in.
+    Keeping the language, a named one ("English") holds far better than "its
+    own language" - so it's detected from the recipe's text (no AI)."""
+    if translating():
+        return settings.output_language.strip() or "English"
+    from .config import detect_language
+    name = detect_language(sample)
+    return (f"{name} (the recipe's own language - keep it, never translate)" if name
+            else "the recipe's own language (keep it, never translate)")
+
+
+def recipe_sample(recipe: dict) -> str:
+    """The text a recipe's language is detected from (Tandoor/Mealie shape)."""
+    steps = " ".join((s.get("instruction") or "") for s in recipe.get("steps") or [])
+    return f"{recipe.get('name', '')}. {recipe.get('description') or ''} {steps}"
+

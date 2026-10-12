@@ -19,6 +19,7 @@ class FakeMealie:
         self.db = {"food": {}, "unit": {}, "tag": {}, "category": {}}
         self.recipes: dict[str, dict] = {}
         self.images: dict[str, tuple[str, bytes]] = {}
+        self.assets: dict[str, list[str]] = {}
         self.requests: list[tuple[str, str]] = []
         self.mealplans: list[dict] = []
         self.shopping_lists: list[dict] = []
@@ -115,6 +116,13 @@ class FakeMealie:
             if slug not in self.images:
                 return httpx.Response(404, json={})
             return httpx.Response(200, content=self.images[slug][1], headers={"content-type": "image/webp"})
+        asset = re.match(r"^/recipes/([^/]+)/assets$", path)
+        if asset and request.method == "POST":
+            slug = self._slug(asset.group(1))
+            ext = re.search(rb'name="extension"\r\n\r\n([^\r]+)', request.content).group(1).decode()
+            file_name = f"step{len(self.assets.setdefault(slug, [])) + 1}.{ext}"
+            self.assets[slug].append(file_name)
+            return httpx.Response(200, json={"name": "photo", "icon": "mdi-file-image", "fileName": file_name})
         m = re.match(r"^/recipes/([^/]+)(/image)?$", path)
         if m:
             slug = self._slug(m.group(1))
@@ -130,7 +138,7 @@ class FakeMealie:
                 return httpx.Response(200, json=copy.deepcopy(self.recipes[slug]))
             if request.method == "PATCH":
                 body = json.loads(request.content)
-                error = self._check_refs(body)
+                error = self._check_refs({**self.recipes[slug], **body})  # like Mealie: the stored ingredients count
                 if error:
                     return httpx.Response(422, json={"detail": error})
                 self.recipes[slug].update(body)
