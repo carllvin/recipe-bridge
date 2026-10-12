@@ -552,6 +552,11 @@ a { color: inherit; }
 .step-photo { width: 96px; height: 72px; border-radius: 6px; background: #1c201c center/cover no-repeat; position: relative; border: 1px solid #2a2f2a; }
 .place-photos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .place-photos .btn { font-size: 0.8rem; padding: 6px 12px; }
+.diag-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 10px 0; }
+.diag-table th { text-align: left; color: var(--gold); font-weight: 600; padding: 10px 0 4px; }
+.diag-table td { padding: 3px 8px 3px 0; vertical-align: top; color: #b9c0b5; word-break: break-word; }
+.diag-table td:first-child { color: #8f9689; white-space: nowrap; width: 40%; }
+.diag-table tr.diag-bad td { color: #e8a29a; }
 .photo-pick { display: flex; flex-direction: column; gap: 4px; width: 88px; }
 .photo-pick.unused .image-choice { opacity: 0.45; }
 .photo-role { width: 100%; font-size: 0.72rem; padding: 2px 3px; background: rgba(239,233,218,0.05); color: var(--paper);

@@ -2140,6 +2140,47 @@ async function loadUsage() {
   }
 }
 
+// ---------- Diagnosis (bottom of Maintain, collapsed) ----------
+const diagState = { rows: [] };
+const DIAG_GROUPS = { app: 'diagGroupApp', ai: 'diagGroupAi', lang: 'diagGroupLang', system: 'diagGroupSystem' };
+
+async function loadDiagnostics() {
+  el('diag-table').innerHTML = `<tr><td>${escapeHtml(t('diagLoading'))}</td></tr>`;
+  try {
+    diagState.rows = (await (await fetch('/api/diagnostics')).json()).rows;
+  } catch (err) {
+    el('diag-table').innerHTML = `<tr><td class="inbox-error">⚠️ ${escapeHtml(err.message)}</td></tr>`;
+    return;
+  }
+  let group = null;
+  el('diag-table').innerHTML = diagState.rows.map((r) => {
+    const head = r.group !== group ? `<tr><th colspan="2">${escapeHtml(t(DIAG_GROUPS[r.group] || r.group))}</th></tr>` : '';
+    group = r.group;
+    const mark = r.ok === false ? '⚠️ ' : (r.ok === true ? '✓ ' : '');
+    return `${head}<tr class="${r.ok === false ? 'diag-bad' : ''}"><td>${escapeHtml(r.label)}</td><td>${mark}${escapeHtml(r.value)}</td></tr>`;
+  }).join('');
+}
+
+el('diag-card').addEventListener('toggle', () => { if (el('diag-card').open) loadDiagnostics(); });
+el('diag-ai-test').addEventListener('click', async () => {
+  const btn = el('diag-ai-test');
+  btn.disabled = true;
+  el('diag-result').textContent = t('diagAiTesting');
+  try {
+    const data = await (await fetch('/api/diagnostics/ai-test', { method: 'POST' })).json();
+    el('diag-result').textContent = data.ok
+      ? `✓ ${tf('diagAiOk', { model: data.model, seconds: data.seconds })}`
+      : `⚠️ ${data.error}`;
+  } catch (err) {
+    el('diag-result').textContent = `⚠️ ${err.message}`;
+  }
+  btn.disabled = false;
+});
+el('diag-copy').addEventListener('click', async () => {
+  const text = diagState.rows.map((r) => `${r.label}: ${r.value}`).join('\n');
+  try { await navigator.clipboard.writeText(text); el('diag-result').textContent = `✓ ${t('planShoppingCopied')}`; } catch (e) { /* http */ }
+});
+
 // ---------- Automation & budget settings ----------
 
 function renderBudget(budget) {

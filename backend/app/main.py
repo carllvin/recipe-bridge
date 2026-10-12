@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, diagnostics, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -1960,6 +1960,17 @@ async def on_startup() -> None:
 
 
 # Mount the static frontend last, so /api/* routes take precedence
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Maintain -> Diagnosis: what the running container uses (no secrets)."""
+    return {"rows": await asyncio.to_thread(diagnostics.info)}
+
+
+@app.post("/api/diagnostics/ai-test")
+async def diagnostics_ai_test():
+    return await asyncio.to_thread(diagnostics.ai_test)
+
+
 @app.get("/", include_in_schema=False)
 @app.get("/index.html", include_in_schema=False)
 async def index_page():

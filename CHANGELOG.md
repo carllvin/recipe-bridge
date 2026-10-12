@@ -37,6 +37,10 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Maintain → **Diagnosis** (collapsed at the bottom): what the running
+  app actually uses – version, recipe manager reachable, AI provider and
+  models, budget, language settings, OCR, free space – with a quick AI
+  test and a copy button for bug reports; never shows a key
 - "Undo all imports" updates the review again (it stopped with an error)
 - The frontend is checked with ESLint on every pull request
 
