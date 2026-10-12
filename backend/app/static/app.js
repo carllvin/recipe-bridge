@@ -1201,7 +1201,7 @@ function renderDetail(r) {
     renderRecipeList();
   };
   detail.querySelectorAll('.place-photos-btn').forEach((btn) => btn.addEventListener('click', () => placePhotos(r, btn)));
-  detail.querySelectorAll('.add-photos').forEach((input) => input.addEventListener('change', () => addPhotos(r, input)));
+  detail.querySelectorAll('.add-photos').forEach((input) => input.addEventListener('change', () => addRecipePhotos(r, input)));
   detail.querySelectorAll('.photo-role').forEach((sel) => sel.addEventListener('change', (e) => {
     e.stopPropagation();
     setPhotoRole(sel.dataset.imageId, sel.value);
@@ -1466,7 +1466,7 @@ function numOrNull(v) {
 
 let patchTimer = null;
 // The "+" tile: own photos for a recipe.
-async function addPhotos(r, input) {
+async function addRecipePhotos(r, input) {
   if (!input.files.length) return;
   const tile = input.closest('.add-tile');
   tile.classList.add('loading');
