@@ -331,7 +331,7 @@ default).
 | Weekly plan, what can I cook today, how was it, household, shopping list to share | ✓ | ✓ (rating + "last made" instead of a cook log) |
 | Duplicates, unused entries, servings, photos | ✓ | ✓ |
 | Tags (clean up, season, more tags), translate & revise recipes, process new recipes | ✓ | ✓ |
-| Amounts into the steps | ✓ (templates – follow the servings) | ✓ (written out) |
+| Amounts into the steps | ✓ (templates – follow the servings) | – (no templates: written-out amounts would be wrong once the servings change) |
 | Photos in the steps | ✓ (step file + Files) | ✓ (recipe assets in the step text) |
 | Contradictions, weak photos, changes by chat | ✓ | ✓ (chat without supermarket categories) |
 | Moving recipes from the other one | ✓ | ✓ |

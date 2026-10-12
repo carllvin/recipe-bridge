@@ -38,7 +38,7 @@ backend/
     apply_queue.py          Background queue that applies/skips/undoes suggestions
     undo.py                 Undo journals: replays recorded writes backwards (Tandoor)
     tools_*.py, recipe_restructure.py, nutrition_properties.py   The individual tools
-    recipe_amounts.py       Amounts into the steps (Tandoor templates / written out), proofreading
+    recipe_amounts.py       Amounts into the steps (Tandoor templates), proofreading
     recipe_doctor.py        Contradictions inside a recipe (found without AI, fixed with it)
     photo_quality.py        Weak photos, measured from the pixels
     prep_notes.py           "gemahlene Mandeln" -> "Mandeln" + note "gemahlen"

@@ -3,20 +3,19 @@
 ingredient list while cooking.
 
 The AI never writes a number: it only puts a marker ([[i0]]) where an
-ingredient of that step is mentioned. The markers become
-- Tandoor: its template "{{ ingredients[n] }}" (n = the ingredient's place
-  in the step) - Tandoor shows the amount from the ingredient list, scaled
-  when the servings are changed;
-- Mealie (no templates): the amount written out ("250 g Mehl") - right for
-  the recipe's own servings.
+ingredient of that step is mentioned. The markers become Tandoor's template
+"{{ ingredients[n] }}" (n = the ingredient's place in the step) - Tandoor
+shows the amount from the ingredient list, scaled when the servings are
+changed. Tandoor only: Mealie has no templates, and amounts written into
+the text would be wrong as soon as the servings change.
 
 needs_amounts() decides locally (no AI): steps that mention hardly any of
 their ingredients' amounts. Recipes that still need the structure revision
 (all ingredients in step 1, one long block) wait for that first; Tandoor
 recipes already using templates are left alone.
 
-Used by the "Recipes: amounts into the steps" tile (Tandoor: run_scan /
-apply_suggestion below; Mealie: mealie_tools)."""
+Used by the "Recipes: amounts into the steps" tile (run_scan /
+apply_suggestion below)."""
 from __future__ import annotations
 
 import json

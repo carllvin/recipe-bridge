@@ -43,6 +43,9 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Mealie: no more *amounts into the steps* – Mealie has no templates,
+  and amounts written into the text were wrong as soon as the servings
+  changed (tile, tool and *Process new recipes*)
 - Maintain → **Diagnosis** (collapsed at the bottom): what the running
   app actually uses – version, recipe manager reachable, AI provider and
   models, budget, language settings, OCR, free space – with a quick AI
