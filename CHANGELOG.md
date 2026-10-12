@@ -4,6 +4,7 @@
 
 **Import**
 - WebP photos (.webp) can be imported like JPEG, PNG and HEIC
+- Own photos can be added to a recipe in the review (the "+" tile)
 - Photos in the steps: in the review every photo can be the main photo,
   go into a step or stay unused; nothing is placed until you ask with
   **Place photos into the steps** (per recipe or for all): a recipe page's
@@ -13,8 +14,8 @@
   files, with Mealie as recipe assets in the step text
 - `TRANSLATE_RECIPES=false` keeps recipes in the language they were
   written in – also the ingredient/unit/tag clean-up of *Process new
-  recipes* and the reuse of existing tags; the import page shows when it's
-  active
+  recipes*, the reuse of existing tags and the amounts in the steps; the
+  prompts name the recipe's language ("written in English")
 - Sites with bot protection (403): the app asks like a browser and tries a
   second time; the bookmark button now hands over the page your browser
   already shows, so such sites import too (drag the button in again once)

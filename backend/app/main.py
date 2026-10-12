@@ -1083,6 +1083,39 @@ async def undo_all_imports(job_id: str):
     return {"results": results}
 
 
+@app.post("/api/jobs/{job_id}/recipes/{recipe_id}/images")
+async def add_recipe_images(job_id: str, recipe_id: str, files: list[UploadFile] = File(...)):
+    """The review's "+" tile: own photos for a recipe (JPEG, PNG, WebP, HEIC
+    ...) - added to its photos; the first becomes the main photo if it has
+    none. They can then go into a step like the others."""
+    job = jobs.get_job(job_id)
+    recipe = next((r for r in job.recipes if r.id == recipe_id), None) if job else None
+    if recipe is None:
+        raise HTTPException(404, "Recipe not found.")
+    images_dir = os.path.join(_job_dir(job_id), "images")
+    os.makedirs(images_dir, exist_ok=True)
+    added = []
+    for upload in files:
+        data = await upload.read(settings.max_upload_mb * 1024 * 1024 + 1)
+        if len(data) > settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"Upload larger than {settings.max_upload_mb} MB.")
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        except Exception:  # noqa: BLE001
+            raise HTTPException(400, f"{upload.filename or 'The file'} is not a photo that can be read.")
+        img.thumbnail((2400, 2400))
+        image_id = uuid.uuid4().hex[:12]
+        img.save(os.path.join(images_dir, f"{image_id}.jpg"), "JPEG", quality=90)
+        job.images[image_id] = {"page": recipe.source_page_start, "filename": f"{image_id}.jpg", "kind": "added"}
+        added.append(image_id)
+    recipe.candidate_image_ids = list(recipe.candidate_image_ids) + added
+    if added and not recipe.selected_image_id:
+        recipe.selected_image_id = added[0]
+    jobs.save_job(job)
+    return {"image_ids": added, "images": {i: job.images[i] for i in added}, "recipe": recipe.model_dump()}
+
+
 @app.post("/api/jobs/{job_id}/recipes/{recipe_id}/generate-image")
 async def generate_recipe_image(job_id: str, recipe_id: str):
     """Generates an AI recipe photo (for recipes with no photo from the source

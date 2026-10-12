@@ -1121,7 +1121,9 @@ function renderDetail(r) {
       ? `<button type="button" class="image-enhance-btn" data-enhance="${iid}" title="${escapeHtml(t('enhanceImageBtn'))}"><span>✨</span></button>` : '';
     return `<div class="photo-pick ${photoRole(iid) === 'none' ? 'unused' : ''}"><div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
          style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>${roleSelect(iid)}</div>`;
-  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
+  }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml
+    + (r.import_status !== 'imported' ? `<label class="image-choice add-tile" title="${escapeHtml(t('addPhotosTitle'))}">
+        <span class="add-tile-icon">+</span><input type="file" class="add-photos" accept="image/*,.heic,.heif,.webp" multiple hidden /></label>` : '');
 
   const duplicateNotice = r.duplicate_match
     ? `<div class="error-banner duplicate-banner" style="margin-bottom:20px;">${escapeHtml(
@@ -1199,6 +1201,7 @@ function renderDetail(r) {
     renderRecipeList();
   };
   detail.querySelectorAll('.place-photos-btn').forEach((btn) => btn.addEventListener('click', () => placePhotos(r, btn)));
+  detail.querySelectorAll('.add-photos').forEach((input) => input.addEventListener('change', () => addPhotos(r, input)));
   detail.querySelectorAll('.photo-role').forEach((sel) => sel.addEventListener('change', (e) => {
     e.stopPropagation();
     setPhotoRole(sel.dataset.imageId, sel.value);
@@ -1462,7 +1465,27 @@ function numOrNull(v) {
 }
 
 let patchTimer = null;
-// "Place photos into the steps": the image AI, on request (image_steps.place_with_ai).
+// The "+" tile: own photos for a recipe.
+async function addPhotos(r, input) {
+  if (!input.files.length) return;
+  const tile = input.closest('.add-tile');
+  tile.classList.add('loading');
+  const form = new FormData();
+  [...input.files].forEach((f) => form.append('files', f));
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/images`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    Object.assign(state.job.images, data.images);
+    Object.assign(r, data.recipe);
+    renderRecipeList();
+  } catch (err) {
+    showUploadError(err.message);
+  }
+  renderDetail(r);
+}
+
+// "Place photos into the steps": the image AI, on request (image_steps.place).
 const placeStatus = {};
 async function placePhotos(r, btn) {
   const all = btn.dataset.scope === 'all';
@@ -3713,10 +3736,6 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
-  if (APP_CONFIG.translate_recipes === false) {  // TRANSLATE_RECIPES=false - so it's visible that it took effect
-    el('lang-note').textContent = `🌐 ${t('langNoteKeep')}`;
-    el('lang-note').classList.remove('hidden');
-  }
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

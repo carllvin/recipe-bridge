@@ -209,7 +209,8 @@ def doctor_plan(job, recipe, found) -> dict:
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return out, usage
-    answer = json_answer.complete(ask, PROMPT.replace("{language}", app_settings.recipe_language()))[0]
+    answer = json_answer.complete(
+        ask, PROMPT.replace("{language}", app_settings.recipe_language(app_settings.recipe_sample(recipe))))[0]
     answer = answer if isinstance(answer, dict) else {}
     fixes = []
     for fix in answer.get("fixes") or []:

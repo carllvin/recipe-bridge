@@ -68,10 +68,9 @@ falls back to English otherwise (add a language in
 If a cookbook is already in the target language, the translation step is
 skipped automatically. To keep every recipe in the language it was written
 in, set `TRANSLATE_RECIPES=false` – `OUTPUT_LANGUAGE` then only sets the
-interface. The import page then says so under its title – if it doesn't, the
-container still runs with the old settings: after changing `.env`,
-re-create it (`docker compose up -d`, in Dockge *Deploy*/*Update* – a plain
-restart keeps the old environment).
+interface. After changing `.env`, re-create the container (`docker compose up -d`, in
+Dockge *Deploy*/*Update* – a plain restart keeps the old environment);
+`/api/config` shows `"translate_recipes": false` once it took effect.
 
 ## AI providers and costs
 

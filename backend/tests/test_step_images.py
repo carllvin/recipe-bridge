@@ -183,3 +183,21 @@ def test_photo_tokens_counted_on_their_own(isolated, monkeypatch):
     by_source = usage_log.summary()["by_source"]
     assert by_source["import"] == {"input_tokens": 700, "output_tokens": 180}
     assert by_source["step_photos"] == {"input_tokens": 300, "output_tokens": 20}
+
+
+def test_add_own_photos_in_the_review(isolated):
+    import io
+    job, _ = recipe_job()
+    job.recipes[0].selected_image_id = None
+    jobs.save_job(job)
+    buf = io.BytesIO()
+    Image.new("RGB", (80, 60), "green").save(buf, "WEBP")
+    res = TestClient(main.app).post(f"/api/jobs/{job.id}/recipes/r1/images",
+                                    files=[("files", ("eigenes.webp", buf.getvalue(), "image/webp"))])
+    assert res.status_code == 200, res.text
+    data = res.json()
+    new_id = data["image_ids"][0]
+    assert data["recipe"]["candidate_image_ids"][-1] == new_id and data["recipe"]["selected_image_id"] == new_id
+    assert data["images"][new_id]["kind"] == "added"
+    assert TestClient(main.app).post(f"/api/jobs/{job.id}/recipes/r1/images",
+                                     files=[("files", ("x.txt", b"no photo", "text/plain"))]).status_code == 400

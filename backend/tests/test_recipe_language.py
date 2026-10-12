@@ -26,7 +26,7 @@ def test_extraction_prompt_keeps_the_language(isolated, keep_original):
     prompt = ai_extractor._build_system_prompt(False)
     assert "Do NOT translate" in prompt and "Translate naturally" not in prompt
     assert "the cookbook's own language" in prompt  # tags, season, "pcs"
-    assert "keep it, don't translate" in app_settings.recipe_language()
+    assert "never translate" in app_settings.recipe_language()
 
 
 def test_no_translation_tile_or_automation(isolated, keep_original):
@@ -71,4 +71,30 @@ def test_amounts_and_extraction_never_translate(isolated, keep_original):
     assert "never translate" in recipe_amounts.SYSTEM_PROMPT and "Never translate" in recipe_amounts.PROOFREAD_PROMPT
     keep_original()
     prompt = ai_extractor._build_system_prompt(False)
-    assert "the ingredients and steps too, not only the title" in prompt
+    assert "the ingredients, steps and description too, not only the title" in prompt
+
+
+def test_the_detected_language_is_named(isolated, keep_original):
+    """A named language ("English") holds better than "its own language" -
+    reported: everything but the title was still translated."""
+    keep_original()
+    prompt = ai_extractor._build_system_prompt(False, source_language="English")
+    assert "This text is written in English" in prompt and "in English - the ingredients" in prompt
+    recipe = {"name": "How to make fresh pasta", "description": "Fancy making your own pasta? No machine required.",
+              "steps": [{"instruction": "Tip the flour onto a clean work surface and make a well in the centre."}]}
+    from app import config
+    seen = []
+    monkeypatch_detect = lambda text: seen.append(text) or "English"  # noqa: E731
+    original, config.detect_language = config.detect_language, monkeypatch_detect
+    try:
+        assert app_settings.recipe_language(app_settings.recipe_sample(recipe)).startswith("English (")
+    finally:
+        config.detect_language = original
+    assert "Tip the flour" in seen[0]
+
+
+def test_language_detection_itself():
+    pytest.importorskip("langdetect")  # in the image and CI (requirements.txt)
+    from app.config import detect_language
+    assert detect_language("Tip the flour onto a clean work surface and make a well in the centre.") == "English"
+    assert detect_language("Das Mehl auf die Arbeitsfläche geben und in die Mitte eine Mulde drücken.") == "German"

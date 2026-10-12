@@ -32,10 +32,15 @@ def _detect_source_language(pages: list[dict]) -> Optional[str]:
         return None
 
 
-def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]] = None) -> str:
+def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]] = None,
+                         source_language: Optional[str] = None) -> str:
+    """source_language: the detected language's name ("English") - with
+    TRANSLATE_RECIPES=false the prompt names it, which holds far better than
+    "its own language"."""
     from . import app_settings
     translate = app_settings.translating()
-    language = (settings.output_language.strip() or "English") if translate else "the cookbook's own language"
+    language = ((settings.output_language.strip() or "English") if translate
+                else source_language or "the cookbook's own language")
 
     unit_instruction = (
         f"IMPORTANT - Units: Convert any US/UK-style units (cups, fluid ounces, oz, "
@@ -51,13 +56,15 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
 
     if not translate:
         # The user keeps every recipe in the language it was written in.
+        written_in = f"written in {source_language}" if source_language else "written in its own language"
+        target = source_language or "the language the recipe itself is written in"
         language_instruction = (
-            "IMPORTANT - Language: Do NOT translate. Write all text fields (title, "
-            "description, ingredient names, units, notes, steps, tags) in the "
-            "language the recipe itself is written in - the ingredients and steps "
-            "too, not only the title. Ignore the language of any examples, tags or "
-            "instructions in this prompt. Only fix obvious OCR/scan errors and join "
-            "words split across line breaks."
+            f"IMPORTANT - Language: Do NOT translate. This text is {written_in}. Write "
+            f"ALL text fields (title, description, ingredient names, units, notes, "
+            f"steps, tags) in {target} - the ingredients, steps and description too, "
+            f"not only the title. Ignore the language of any examples, tags or "
+            f"instructions in this prompt. Only fix obvious OCR/scan errors and join "
+            f"words split across line breaks."
         )
     elif same_language:
         # The cookbook already appears to be written in the target language, so no
@@ -224,6 +231,11 @@ element following this schema:
 
 If this excerpt contains no recipe at all, respond with [].
 """
+
+
+def app_settings_translating() -> bool:
+    from . import app_settings
+    return app_settings.translating()
 
 
 def _title_language() -> str:
@@ -482,7 +494,11 @@ def extract_recipes_from_pages(
     source_lang = _detect_source_language(pages)
     target_lang = get_language_code(settings.output_language)
     same_language = bool(source_lang and target_lang and source_lang == target_lang)
-    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags)
+    from .config import LANGUAGE_NAMES
+    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags,
+                                         source_language=LANGUAGE_NAMES.get(source_lang or ""))
+    log.info("Extraction language: translate=%s, detected=%s, instruction: %s", app_settings_translating(),
+             source_lang, next((line for line in system_prompt.splitlines() if "IMPORTANT - Language" in line), "-"))
 
     chunks = list(_chunk_pages(pages, toc_pages=toc_pages))
     total_chunks = len(chunks) or 1

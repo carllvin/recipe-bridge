@@ -116,6 +116,28 @@ LANGUAGE_NAME_TO_CODE = {
 SUPPORTED_UI_LANGUAGES = {"de", "en", "fr", "it", "es"}
 
 
+# Names for the languages a recipe can be detected in (langdetect codes) - so
+# a prompt can say "written in English" instead of "in its own language".
+LANGUAGE_NAMES = {"en": "English", "de": "German", "fr": "French", "it": "Italian", "es": "Spanish",
+                  "nl": "Dutch", "pt": "Portuguese", "pl": "Polish", "sv": "Swedish", "da": "Danish",
+                  "no": "Norwegian", "fi": "Finnish", "cs": "Czech", "hu": "Hungarian", "tr": "Turkish",
+                  "el": "Greek", "ru": "Russian", "uk": "Ukrainian", "ja": "Japanese", "ko": "Korean",
+                  "zh-cn": "Chinese", "zh-tw": "Chinese", "ro": "Romanian", "hr": "Croatian", "sk": "Slovak"}
+
+
+def detect_language(text: str) -> str | None:
+    """The language name of a text ("English"), without AI - None if unsure."""
+    sample = (text or "")[:3000].strip()
+    if len(sample) < 30:
+        return None
+    try:
+        from langdetect import DetectorFactory, LangDetectException, detect
+        DetectorFactory.seed = 0  # same answer every time
+        return LANGUAGE_NAMES.get(detect(sample))
+    except (ImportError, Exception):  # noqa: BLE001 - LangDetectException and too little text
+        return None
+
+
 def get_language_code(name: str) -> str | None:
     """Returns the ISO code for a language name, or None if unknown (no guessing)."""
     return LANGUAGE_NAME_TO_CODE.get((name or "").strip().lower())

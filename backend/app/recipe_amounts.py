@@ -176,7 +176,8 @@ def amounts_plan(job, recipe) -> dict:
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return out, usage
-    answer = json_answer.complete(ask, SYSTEM_PROMPT.replace("{language}", app_settings.recipe_language()))[0]
+    answer = json_answer.complete(
+        ask, SYSTEM_PROMPT.replace("{language}", app_settings.recipe_language(app_settings.recipe_sample(recipe))))[0]
     texts = answer.get("steps") if isinstance(answer, dict) else None
     if not isinstance(texts, list) or len(texts) != len(steps) or not all(isinstance(t, str) for t in texts):
         raise ValueError("the answer doesn't have one text per step")
@@ -295,7 +296,8 @@ def _proofread(job, changed) -> None:
             job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
             job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
             return out, usage
-        answer = json_answer.complete(ask, PROOFREAD_PROMPT.replace("{language}", app_settings.recipe_language()))[0]
+        sample = " ".join(c["original"] for c in changed)
+        answer = json_answer.complete(ask, PROOFREAD_PROMPT.replace("{language}", app_settings.recipe_language(sample)))[0]
         answers = answer.get("steps") if isinstance(answer, dict) else []
     except Exception as exc:  # noqa: BLE001 - proofreading is a bonus, the local check still runs
         log.info("Proofreading the amounts failed: %s", exc)

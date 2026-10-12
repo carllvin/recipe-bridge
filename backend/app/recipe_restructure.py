@@ -256,7 +256,7 @@ def apply_plan(job, suggestion) -> ToolSuggestion:
 def plan_suggestion(job, recipe) -> ToolSuggestion | None:
     """AI revision for one recipe as a suggestion (None if it failed)."""
     try:
-        plan, usage = restructure_plan(recipe, app_settings.recipe_language())
+        plan, usage = restructure_plan(recipe, app_settings.recipe_language(app_settings.recipe_sample(recipe)))
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
     except Exception as exc:  # noqa: BLE001
