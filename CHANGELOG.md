@@ -19,6 +19,10 @@
   hangs or refuses (at most 30 seconds for all of them)
 - A failed import goes back to the import page with the error instead of
   leaving the loading screen turning
+- Recipe pages read more reliably: a Recipe entry with only name and photo
+  no longer hides the recipe on the page, step-by-step guides (schema.org
+  HowTo) are read like recipes, and the page text comes from its largest
+  text block instead of the first article (often a teaser)
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them

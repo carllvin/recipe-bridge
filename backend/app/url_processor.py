@@ -91,23 +91,35 @@ def _types(node) -> set[str]:
     return {t} if isinstance(t, str) else set(t or [])
 
 
-def _find_recipe(data):
-    """Depth-first search for a schema.org Recipe object in JSON-LD
-    (top level, in lists, or inside an @graph)."""
+def _find_recipe(data, kind: str = "Recipe"):
+    """Depth-first search for a schema.org Recipe object (or another type)
+    in JSON-LD (top level, in lists, or inside an @graph)."""
     if isinstance(data, list):
         for item in data:
-            found = _find_recipe(item)
+            found = _find_recipe(item, kind)
             if found:
                 return found
     elif isinstance(data, dict):
-        if "Recipe" in _types(data):
+        if kind in _types(data):
             return data
         for key in ("@graph", "mainEntity", "itemListElement"):
             if key in data:
-                found = _find_recipe(data[key])
+                found = _find_recipe(data[key], kind)
                 if found:
                     return found
     return None
+
+
+def _howto_as_recipe(howto: dict) -> dict:
+    """A schema.org HowTo ("how to make fresh pasta" step-by-step guides) read
+    like a recipe: its supplies are the ingredients, its steps the method."""
+    supplies = [s.get("name") if isinstance(s, dict) else s for s in _as_list(howto.get("supply"))]
+    return {**howto, "recipeIngredient": [_text(s) for s in supplies if s],
+            "recipeInstructions": howto.get("step") or [], "recipeYield": howto.get("yield")}
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value] if value else []
 
 
 def _text(value) -> str:
@@ -191,11 +203,34 @@ def _recipe_to_text(recipe: dict, url: str) -> str:
 
 
 def _visible_text(soup: BeautifulSoup) -> str:
+    """The page's main text: the article/main element with the most text -
+    not just the first one (often a teaser card) - or the whole page when
+    none of them holds most of it."""
     for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "form", "svg"]):
         tag.decompose()
-    main = soup.find("article") or soup.find("main") or soup.body or soup
-    lines = [line.strip() for line in main.get_text("\n").split("\n") if line.strip()]
-    return "\n".join(lines)[:MAX_TEXT_CHARS]
+    body = soup.body or soup
+
+    def lines(node):
+        return [line.strip() for line in node.get_text("\n").split("\n") if line.strip()]
+    whole = lines(body)
+    best = max((lines(n) for n in soup.find_all(["article", "main"]) + soup.select("[role=main]")),
+               key=lambda ls: sum(map(len, ls)), default=[])
+    chosen = best if sum(map(len, best)) >= 0.4 * sum(map(len, whole)) else whole
+    return "\n".join(chosen)[:MAX_TEXT_CHARS]
+
+
+def _article_body(soup: BeautifulSoup) -> str:
+    """articleBody of a schema.org Article in the page's JSON-LD, if any."""
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or script.get_text() or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for kind in ("Article", "NewsArticle", "BlogPosting"):
+            found = _find_recipe(data, kind)
+            if found and found.get("articleBody"):
+                return _text(found["articleBody"])
+    return ""
 
 
 def _image_url(recipe: dict | None, soup: BeautifulSoup, base: str) -> str | None:
@@ -307,27 +342,43 @@ def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
         soup = BeautifulSoup(html, "html.parser")
 
         recipe = None
+        scripts = []
         for script in soup.find_all("script", type="application/ld+json"):
             try:
-                recipe = _find_recipe(json.loads(script.string or script.get_text() or ""))
+                scripts.append(json.loads(script.string or script.get_text() or ""))
             except (json.JSONDecodeError, TypeError):
                 continue
-            if recipe:
+        stub = None  # a Recipe entry with only name, image, address - its photo is still good
+        for kind in ("Recipe", "HowTo"):  # a recipe first, else a step-by-step guide
+            found = next((r for r in (_find_recipe(d, kind) for d in scripts) if r), None)
+            if found and kind == "HowTo":
+                found = _howto_as_recipe(found)
+            if found and (found.get("recipeIngredient") or found.get("ingredients")
+                          or _instructions(found.get("recipeInstructions"))):
+                recipe = found
                 break
+            stub = stub or found
+
+        def page_text():
+            visible = _visible_text(BeautifulSoup(html, "html.parser"))
+            article = _article_body(soup)
+            return article if len(article) > len(visible) else visible
 
         if recipe:
             text = _recipe_to_text(recipe, url)
             title = _text(recipe.get("name"))
+            if not _instructions(recipe.get("recipeInstructions")):  # the method only on the page
+                text += "\n\nPage text:\n" + page_text()
         else:
-            log.info("No schema.org Recipe on %s - using the page text", url)
-            title = soup.title.get_text(strip=True) if soup.title else ""
-            text = f"Source: {url}\n\n" + _visible_text(BeautifulSoup(html, "html.parser"))
+            log.info("No complete schema.org Recipe on %s - using the page text", url)
+            title = _text((stub or {}).get("name")) or (soup.title.get_text(strip=True) if soup.title else "")
+            text = f"Source: {url}\n\n" + page_text()
         if len(text.strip()) < 50:
             raise UrlImportError("No recipe text found on that page.")
 
         images = {}
         gate = {"until": time.monotonic() + PHOTOS_SECONDS, "blocked": set()}
-        image_url = _image_url(recipe, soup, page_url)
+        image_url = _image_url(recipe or stub, soup, page_url)
         if image_url:
             saved = _save_image(client, image_url, images_dir, gate)
             if saved:

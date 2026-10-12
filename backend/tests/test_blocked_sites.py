@@ -90,3 +90,40 @@ def test_photos_stop_once_their_host_hangs(monkeypatch, tmp_path):
     monkeypatch.setattr(url_processor, "_client", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
     result = url_processor.process_url(URL, str(tmp_path))
     assert result["images"] == {} and asked == ["https://img.example/main.jpg"]  # not 6 waits
+
+
+TEASER = '<article class="card"><h3>More pasta ideas</h3><p>Try our lasagne</p></article>'
+GUIDE = ("<div class='content'><h1>How to make fresh pasta</h1><h2>Ingredients</h2><ul><li>400 g 00 flour</li>"
+         "<li>4 large eggs</li></ul><h2>Method</h2><ol><li>Tip the flour onto a clean surface and make a well.</li>"
+         "<li>Crack in the eggs and mix with a fork, then knead for 10 minutes until smooth.</li></ol></div>")
+
+
+def from_browser(html, tmp_path):
+    return url_processor.process_url(URL, str(tmp_path), html=html)["pages"][0]["text"]
+
+
+def test_recipe_entry_without_ingredients_falls_back_to_the_page(tmp_path):
+    """Reported: only title and address came over - the page's Recipe entry
+    had nothing else; the method was only in the page."""
+    stub = {"@type": "Recipe", "name": "How to make fresh pasta", "image": "https://x/p.jpg", "url": URL}
+    text = from_browser(f'<script type="application/ld+json">{json.dumps(stub)}</script><body>{TEASER}{GUIDE}</body>', tmp_path)
+    assert "400 g 00 flour" in text and "knead for 10 minutes" in text
+
+
+def test_largest_text_block_not_the_first_article(tmp_path):
+    text = from_browser(f"<body>{TEASER}<main>{GUIDE}</main></body>", tmp_path)
+    assert "knead for 10 minutes" in text and "lasagne" not in text
+
+
+def test_howto_guide_read_like_a_recipe(tmp_path):
+    howto = {"@type": "HowTo", "name": "How to make fresh pasta", "supply": [{"@type": "HowToSupply", "name": "400 g flour"}],
+             "step": [{"@type": "HowToStep", "text": "Make a well in the flour."},
+                      {"@type": "HowToStep", "text": "Knead the dough for 10 minutes."}]}
+    text = from_browser(f'<script type="application/ld+json">{json.dumps(howto)}</script>', tmp_path)
+    assert "- 400 g flour" in text and "2. Knead the dough" in text
+
+
+def test_recipe_without_method_gets_the_page_text(tmp_path):
+    partial = {"@type": "Recipe", "name": "Pasta", "recipeIngredient": ["400 g flour"]}
+    text = from_browser(f'<script type="application/ld+json">{json.dumps(partial)}</script><body>{GUIDE}</body>', tmp_path)
+    assert "- 400 g flour" in text and "Page text:" in text and "knead for 10 minutes" in text
