@@ -82,26 +82,26 @@ no recipe are skipped and listed in the review.
 Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
 **converted to metric** on the way.
 
-**⚙️ Import options** (above the import area, stored in the app):
+With `TRANSLATE_RECIPES=false` recipes **keep the language they were written
+in** instead – the tools that improve recipes (amounts in the steps,
+revisions, contradictions) then write in that language too, and the *not in
+your language* tile and the translation in *Process new recipes* are left
+out.
 
-- **Recipe language** – *translate into your language* (default) or *keep
-  the original language*: recipes stay in the language they were written
-  in, and the tools that improve recipes (amounts in the steps, revisions,
-  contradictions) write in that language too. The *not in your language*
-  tile and the translation in *Process new recipes* are then left out.
-- **Further photos of a recipe** – *main photo only* (default), *each photo
-  into its step* or *all photos into step 1*. A recipe page's step photos
-  (schema.org `HowToStep`) go to the step at the same position; for the
-  photos in a cookbook one image AI call per recipe looks at all of them at
-  once (a contact sheet of numbered thumbnails next to the steps) and says
-  which step each shows – the finished dish or a picture of another recipe
-  is left out, and if the AI can't tell (e.g. a local model that doesn't
-  read images) they go into step 1. Photographed cookbook pages are never
-  step photos. In the review every step shows its photos with a menu to
-  move one to another step or leave it out. With Tandoor the first photo of
-  a step becomes the step's file and further ones appear in its text (all
-  stored in Tandoor's *Files*, removed again when an import is undone);
-  with Mealie they become assets of the recipe shown in the step text.
+**Photos in the steps** – besides its main photo, a recipe's further photos
+go into the step they show: a recipe page's step photos (schema.org
+`HowToStep`) to the step at the same position; for the photos in a cookbook
+one image AI call per recipe looks at all of them at once (a contact sheet
+of numbered thumbnails next to the steps) and says which step each one
+shows and whether it is sure. Only sure answers are used – the finished
+dish, a picture of another recipe or a photo the AI isn't sure about (or
+can't look at, e.g. with a local model that doesn't read images) stays
+unused. Photographed cookbook pages are never step photos. In the review
+every photo has a menu: *main photo*, *step 1 … n* or *not used*. With
+Tandoor the first photo of a step becomes the step's file and further ones
+appear in its text (stored in Tandoor's *Files*, removed again when an
+import is undone); with Mealie they become assets of the recipe shown in
+the step text.
 
 > **Recipes from other apps** (Paprika, Nextcloud Cookbook, RecipeSage, …):
 > Tandoor and Mealie import their export files themselves. Afterwards run

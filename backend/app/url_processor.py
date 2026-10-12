@@ -21,7 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from . import app_settings, video_processor
+from . import video_processor
 
 log = logging.getLogger("recipe-bridge")
 
@@ -276,7 +276,7 @@ def process_url(url: str, images_dir: str) -> dict:
             saved = _save_image(client, image_url, images_dir)
             if saved:
                 images[saved.pop("id")] = saved
-        if recipe and app_settings.step_images() != "off":
+        if recipe:
             step_images, steps = _step_images(recipe.get("recipeInstructions"))
             for order, (position, step_url) in enumerate(step_images[:MAX_STEP_IMAGES]):
                 saved = _save_image(client, urljoin(str(resp.url), step_url), images_dir)

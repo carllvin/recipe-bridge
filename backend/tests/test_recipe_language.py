@@ -1,23 +1,26 @@
-"""Import option "recipe language": translate into OUTPUT_LANGUAGE (default)
-or keep every recipe in the language it was written in."""
+"""TRANSLATE_RECIPES: translate into OUTPUT_LANGUAGE (default) or keep every
+recipe in the language it was written in."""
 from fastapi.testclient import TestClient
+
+import pytest
 
 from app import (ai_extractor, app_settings, llm_provider, main, maintenance, recipe_restructure, tool_jobs,
                  tools_new_recipes, tools_recipes)
+from app.config import settings
 
 
-def keep_original():
-    app_settings.update({"import": {"translate": False}})
+@pytest.fixture
+def keep_original(monkeypatch):
+    return lambda: monkeypatch.setattr(settings, "translate_recipes", False)
 
 
-def test_default_translates_and_the_setting_is_stored(isolated):
-    assert app_settings.get()["import"] == {"translate": True, "step_images": "off"}
-    data = TestClient(main.app).put("/api/settings", json={"import": {"translate": False, "step_images": "nonsense"}}).json()
-    assert data["import"] == {"translate": False, "step_images": "off"}
+def test_the_setting_reaches_the_page(isolated, keep_original):
+    assert TestClient(main.app).get("/api/config").json()["translate_recipes"] is True
+    keep_original()
     assert TestClient(main.app).get("/api/config").json()["translate_recipes"] is False
 
 
-def test_extraction_prompt_keeps_the_language(isolated):
+def test_extraction_prompt_keeps_the_language(isolated, keep_original):
     assert "Translate naturally" in ai_extractor._build_system_prompt(False)
     keep_original()
     prompt = ai_extractor._build_system_prompt(False)
@@ -26,13 +29,13 @@ def test_extraction_prompt_keeps_the_language(isolated):
     assert "keep it, don't translate" in app_settings.recipe_language()
 
 
-def test_no_translation_tile_or_automation(isolated):
+def test_no_translation_tile_or_automation(isolated, keep_original):
     assert "recipes_not_translated" in maintenance.available_metrics()
     keep_original()
     assert "recipes_not_translated" not in maintenance.available_metrics()
 
 
-def test_new_recipes_are_not_translated(tandoor, monkeypatch):
+def test_new_recipes_are_not_translated(tandoor, monkeypatch, keep_original):
     tandoor.add("recipe", {"id": 7, "name": "Pancakes", "description": "", "keywords": [],
                            "steps": [{"name": "", "instruction": "Mix everything and fry.", "ingredients": []}]})
     calls = []

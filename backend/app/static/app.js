@@ -1075,20 +1075,15 @@ function renderDetail(r) {
     ? `<div class="ing-match-summary">${escapeHtml(tf('matchSummary', matchCounts))}</div>`
     : '';
 
-  // Further photos in the steps (import option, image_steps.py): move to another step or leave out.
-  const stepPhotos = (s, i) => (s.image_ids || []).length ? `<div class="step-photos">${s.image_ids.map((iid) => `
-      <div class="step-photo" style="background-image:url('${imageUrl(iid)}')">
-        <select class="step-photo-move" data-image-id="${iid}" data-from="${i}" title="${escapeHtml(t('stepPhotoMove'))}">
-          ${r.steps.map((_, si) => `<option value="${si}" ${si === i ? 'selected' : ''}>${tf('stepPhotoStep', { n: si + 1 })}</option>`).join('')}
-          <option value="-1">✕ ${t('stepPhotoRemove')}</option>
-        </select>
-      </div>`).join('')}</div>` : '';
+  // The photos shown in a step (image_steps.py) - changed in the photo list above.
+  const stepPhotos = (s) => (s.image_ids || []).length ? `<div class="step-photos">${s.image_ids.map((iid) => `
+      <div class="step-photo" style="background-image:url('${imageUrl(iid)}')"></div>`).join('')}</div>` : '';
   const stepsHtml = r.steps.map((s, i) => `
     <div class="step-row" data-idx="${i}">
       <div class="step-num">${i + 1}</div>
       <div class="step-body">
         <textarea class="step-instruction">${escapeHtml(s.instruction)}</textarea>
-        ${stepPhotos(s, i)}
+        ${stepPhotos(s)}
       </div>
     </div>
   `).join('') || `<p style="color:#8f9689;font-size:0.88rem;">${t('noSteps')}</p>`;
@@ -1102,14 +1097,21 @@ function renderDetail(r) {
        </div>`
     : '';
 
+  // Every photo: main photo, a step, or not used (the AI's placement preselected).
+  const photoRole = (iid) => (iid === r.selected_image_id ? 'main'
+    : String(r.steps.findIndex((s) => (s.image_ids || []).includes(iid))).replace('-1', 'none'));
+  const roleSelect = (iid) => `<select class="photo-role" data-image-id="${iid}" title="${escapeHtml(t('photoRoleTitle'))}">
+      ${[['main', t('photoRoleMain')], ...r.steps.map((_, si) => [String(si), tf('stepPhotoStep', { n: si + 1 })]),
+    ['none', t('photoRoleNone')]].map(([v, label]) => `<option value="${v}" ${photoRole(iid) === v ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+    </select>`;
   const imageChoicesHtml = r.candidate_image_ids.map((iid) => {
     const ai = ((state.job.images || {})[iid] || {}).ai;
     const badge = ai ? `<span class="image-ai-badge">${t(ai === 'enhanced' ? 'imageBadgeEnhanced' : 'imageBadgeGenerated')}</span>` : '';
     // The selected photo from the source can be improved by the image AI.
     const enhance = APP_CONFIG.image_gen_available && !ai && iid === r.selected_image_id
       ? `<button type="button" class="image-enhance-btn" data-enhance="${iid}" title="${escapeHtml(t('enhanceImageBtn'))}"><span>✨</span></button>` : '';
-    return `<div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
-         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>`;
+    return `<div class="photo-pick ${photoRole(iid) === 'none' ? 'unused' : ''}"><div class="image-choice ${iid === r.selected_image_id ? 'selected' : ''}" data-image-id="${iid}"
+         style="background-image:url('${imageUrl(iid)}')">${badge}${enhance}</div>${roleSelect(iid)}</div>`;
   }).join('') + `<div class="image-choice none ${!r.selected_image_id ? 'selected' : ''}" data-image-id="">${t('noImage')}</div>` + generateTileHtml;
 
   const duplicateNotice = r.duplicate_match
@@ -1171,14 +1173,18 @@ function renderDetail(r) {
   }));
 
   // Image selection / AI generation tile
-  detail.querySelectorAll('.step-photo-move').forEach((sel) => sel.addEventListener('change', (e) => {
-    e.stopPropagation();
-    const { imageId, from } = sel.dataset;
-    const to = +sel.value;
-    r.steps[+from].image_ids = r.steps[+from].image_ids.filter((x) => x !== imageId);
-    if (to >= 0) r.steps[to].image_ids = [...(r.steps[to].image_ids || []), imageId];
-    patchRecipe(r.id, { steps: r.steps });
+  const setPhotoRole = (imageId, role) => {
+    r.steps.forEach((s) => { s.image_ids = (s.image_ids || []).filter((x) => x !== imageId); });
+    if (role === 'main') r.selected_image_id = imageId;
+    else if (r.selected_image_id === imageId) r.selected_image_id = null;
+    if (role !== 'main' && role !== 'none') r.steps[+role].image_ids.push(imageId);
+    patchRecipe(r.id, { selected_image_id: r.selected_image_id, steps: r.steps });
     renderDetail(r);
+    renderRecipeList();
+  };
+  detail.querySelectorAll('.photo-role').forEach((sel) => sel.addEventListener('change', (e) => {
+    e.stopPropagation();
+    setPhotoRole(sel.dataset.imageId, sel.value);
   }));
 
   detail.querySelectorAll('.image-choice').forEach((elm) => {
@@ -1188,8 +1194,9 @@ function renderDetail(r) {
     }
     elm.addEventListener('click', () => {
       const imageId = elm.dataset.imageId || null;
-      r.selected_image_id = imageId;
-      patchRecipe(r.id, { selected_image_id: imageId });
+      if (imageId) { setPhotoRole(imageId, 'main'); return; }
+      r.selected_image_id = null;
+      patchRecipe(r.id, { selected_image_id: null });
       renderDetail(r);
       renderRecipeList();
     });
@@ -1248,7 +1255,7 @@ function renderDetail(r) {
   detail.querySelectorAll('input, textarea').forEach((inp) => {
     inp.addEventListener('blur', save);
   });
-  detail.querySelectorAll('select').forEach((sel) => {
+  detail.querySelectorAll('select:not(.photo-role)').forEach((sel) => {
     sel.addEventListener('change', save);
   });
 
@@ -2643,35 +2650,6 @@ function fillHousehold(h) {
   el('household-summary').textContent = householdSummary(h);
 }
 
-// ---------- Import options (recipe language, photos in the steps) ----------
-function fillImportOptions(opts) {
-  el('io-translate').value = opts.translate ? '1' : '0';
-  el('io-step-images').value = opts.step_images || 'off';
-  APP_CONFIG.translate_recipes = !!opts.translate;
-  el('import-options-summary').textContent = [
-    opts.translate ? tf('importLanguageTranslate', { language: APP_CONFIG.output_language || 'English' }) : t('importLanguageKeep'),
-    t({ off: 'stepImagesOff', steps: 'stepImagesSteps', first: 'stepImagesFirst' }[opts.step_images] || 'stepImagesOff'),
-  ].join(' · ');
-}
-
-async function initImportOptions() {
-  el('io-translate-yes').textContent = tf('importLanguageTranslate', { language: APP_CONFIG.output_language || 'English' });
-  try {
-    fillImportOptions((await (await fetch('/api/settings')).json()).import || {});
-  } catch (err) { /* stays at the defaults */ }
-  ['io-translate', 'io-step-images'].forEach((id) => el(id).addEventListener('change', async () => {
-    const body = { import: { translate: el('io-translate').value === '1', step_images: el('io-step-images').value } };
-    try {
-      const res = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
-      fillImportOptions((await res.json()).import);
-      el('io-status').textContent = `✓ ${t('householdSaved')}`;
-    } catch (err) {
-      el('io-status').textContent = `${t('householdSaveFailed')}: ${err.message}`;
-    }
-  }));
-}
-
 async function loadHousehold() {
   try {
     fillHousehold((await (await fetch('/api/settings')).json()).household || {});
@@ -3663,7 +3641,6 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
-  initImportOptions();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

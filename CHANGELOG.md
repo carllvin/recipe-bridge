@@ -3,11 +3,13 @@
 ## Unreleased
 
 **Import**
-- Import options on the import page: translate recipes into your language
-  or keep the original language; further photos of a recipe into the step
-  they show (recipe-page step photos, cookbook photos placed by the image
-  AI) or all into step 1 – shown and movable per step in the review, with
-  Tandoor as step files, with Mealie as recipe assets in the step text
+- Photos in the steps: a recipe's further photos go into the step they
+  show (recipe-page step photos; cookbook photos placed by the image AI,
+  only when it is sure) – each photo can be made the main photo, moved to
+  another step or left out in the review; with Tandoor as step files, with
+  Mealie as recipe assets in the step text
+- `TRANSLATE_RECIPES=false` keeps recipes in the language they were
+  written in
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them

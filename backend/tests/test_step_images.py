@@ -1,7 +1,8 @@
-"""Import option "photos in the steps": a recipe's further photos go into
-the step they show (recipe page: its HowToStep images; cookbook: one image AI
-call with a contact sheet) or all into step 1 - and are uploaded with it
-(Tandoor: file storage + the step's file, Mealie: assets in the step text)."""
+"""Photos in the steps: a recipe's further photos go into the step they show
+(recipe page: its HowToStep images; cookbook: one image AI call with a
+contact sheet - only what it's sure about), changed in the review, and are
+uploaded with it (Tandoor: file storage + the step's file, Mealie: assets in
+the step text)."""
 import json
 import os
 
@@ -9,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import app_settings, image_steps, jobs, llm_provider, main, tools_new_recipes, url_processor
+from app import image_steps, jobs, llm_provider, main, tools_new_recipes, url_processor
 from app.schemas import ExtractedRecipe, Ingredient, Step
 from test_mealie import mealie  # noqa: F401 - fixture
 
@@ -32,10 +33,6 @@ def recipe_job(pages=(1, 1)):
     return job, images_dir
 
 
-def mode(name):
-    app_settings.update({"import": {"step_images": name}})
-
-
 def placed(recipe):
     return [s.image_ids for s in recipe.steps]
 
@@ -45,13 +42,10 @@ def test_extra_images_only_own_pages_without_main_or_scans(isolated):
     assert image_steps.extra_images(job, job.recipes[0]) == ["a", "b", "c"]
 
 
-def test_off_and_all_into_step_one(isolated):
+def test_without_ai_nothing_is_assigned(isolated):
     job, images_dir = recipe_job(pages=(1, 2))
     image_steps.assign_all(job, images_dir)
     assert placed(job.recipes[0]) == [[], [], []]
-    mode("first")
-    image_steps.assign_all(job, images_dir)
-    assert placed(job.recipes[0]) == [["a", "b", "c"], [], []]
 
 
 def test_each_photo_into_its_step_by_the_ai(isolated, monkeypatch):
@@ -61,23 +55,22 @@ def test_each_photo_into_its_step_by_the_ai(isolated, monkeypatch):
     def look(jpeg, prompt, max_tokens=0):
         seen.append(prompt)
         assert jpeg[:2] == b"\xff\xd8"  # one contact sheet
-        return json.dumps({"photos": [{"n": 1, "step": 2}, {"n": 2, "step": None}, {"n": 3, "step": 9}]}), None
+        return json.dumps({"photos": [{"n": 1, "step": 2, "sure": True}, {"n": 2, "step": None, "sure": True},
+                                      {"n": 3, "step": 3, "sure": False}]}), None
     monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
     monkeypatch.setattr(llm_provider, "transcribe_image", look)
-    mode("steps")
     image_steps.assign_all(job, images_dir)
-    # b: the finished dish (null), c: a step that doesn't exist -> left out
+    # b: the finished dish (null), c: not sure -> not assigned
     assert placed(job.recipes[0]) == [[], ["a"], []]
     assert "3 numbered photos" in seen[0] and "2. Formen." in seen[0]
 
 
-def test_ai_fails_then_step_one(isolated, monkeypatch):
+def test_ai_fails_then_unassigned(isolated, monkeypatch):
     job, images_dir = recipe_job(pages=(1, 2))
     monkeypatch.setattr(llm_provider, "is_configured", lambda: True)
     monkeypatch.setattr(llm_provider, "transcribe_image", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("no vision")))
-    mode("steps")
     image_steps.assign_all(job, images_dir)
-    assert placed(job.recipes[0]) == [["a", "b", "c"], [], []]
+    assert placed(job.recipes[0]) == [[], [], []]
 
 
 def test_recipe_page_step_images_by_position(isolated):
@@ -86,7 +79,6 @@ def test_recipe_page_step_images_by_position(isolated):
     job.images = {"main": job.images["main"],
                   "s1": {"page": 1, "filename": "a.jpg", "step": 0, "of": 6},
                   "s5": {"page": 1, "filename": "b.jpg", "step": 4, "of": 6}}
-    mode("steps")
     image_steps.assign_all(job, images_dir)
     assert placed(job.recipes[0]) == [["s1"], [], ["s5"]]
 

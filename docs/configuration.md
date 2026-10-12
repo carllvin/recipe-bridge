@@ -8,9 +8,8 @@
 ## In the app
 
 *Automatic maintenance* and the *monthly AI budget* are set on the 🔧
-Maintain page, the *household profile* on the 📅 Plan page, the *import
-options* (recipe language, photos in the steps) above the import area –
-stored in the data volume, no restart needed.
+Maintain page, the *household profile* on the 📅 Plan page – stored in the
+data volume, no restart needed.
 
 ## `.env`
 
@@ -29,8 +28,7 @@ stored in the data volume, no restart needed.
 | `TANDOOR_URL` / `TANDOOR_TOKEN` | – | Your Tandoor instance and API token |
 | `MEALIE_URL` / `MEALIE_TOKEN` | – | Your Mealie instance and API token |
 | `OUTPUT_LANGUAGE` | `English` | Language of the recipes **and** of the app's UI (full UI translations: Deutsch, English, Français, Italiano, Español) |
-| `TRANSLATE_RECIPES` | `true` | Default for the import option *recipe language*: `false` keeps recipes in their own language |
-| `STEP_IMAGES` | `off` | Default for the import option *further photos*: `off`, `steps` (each into its step) or `first` (all into step 1) |
+| `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |
@@ -68,8 +66,8 @@ falls back to English otherwise (add a language in
 `backend/app/static/i18n.js` and `SUPPORTED_UI_LANGUAGES` in `config.py`).
 If a cookbook is already in the target language, the translation step is
 skipped automatically. To keep every recipe in the language it was written
-in, choose *Keep the original language* under ⚙️ Import options (or set
-`TRANSLATE_RECIPES=false`) – `OUTPUT_LANGUAGE` then only sets the interface.
+in, set `TRANSLATE_RECIPES=false` – `OUTPUT_LANGUAGE` then only sets the
+interface.
 
 ## AI providers and costs
 
