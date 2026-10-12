@@ -25,10 +25,28 @@ from . import video_processor
 
 log = logging.getLogger("recipe-bridge")
 
+# What a browser sends - some sites refuse requests that look like a script.
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "de,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
+# A second try when a site refuses the first one (bot protection).
+RETRY_HEADERS = {
+    **HEADERS,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Referer": "https://www.google.com/",
+    "Sec-Fetch-Site": "cross-site",
+}
+BLOCKED_STATUS = {401, 403, 429, 503}
+BLOCKED_HINT = ("The site blocks automatic access (HTTP {status}). Open the recipe in your browser and use the "
+                "📥 bookmark button there (under More ways) - it sends the page from your browser - or copy the "
+                "recipe text and paste it.")
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_STEP_IMAGES = 15   # photos the page shows with its steps (image_steps.py)
@@ -237,19 +255,37 @@ def _process_video(url: str, images_dir: str) -> dict:
             "metadata_title": info.get("title") or "", "toc_pages": []}
 
 
-def process_url(url: str, images_dir: str) -> dict:
+def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
+    """(html, final url) - a second try with other headers when a site's bot
+    protection refuses the first."""
+    try:
+        resp = client.get(url)
+        if resp.status_code in BLOCKED_STATUS:
+            resp = client.get(url, headers=RETRY_HEADERS)
+        if resp.status_code in BLOCKED_STATUS:
+            raise UrlImportError(BLOCKED_HINT.format(status=resp.status_code))
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise UrlImportError(f"Could not load the page: {exc}") from exc
+    if len(resp.content) > MAX_PAGE_BYTES:
+        raise UrlImportError("The page is too large.")
+    return resp.text, str(resp.url)
+
+
+def process_url(url: str, images_dir: str, html: str | None = None) -> dict:
+    """html: the page as the browser already has it (bookmark button) - then
+    it isn't loaded again (sites with bot protection refuse that)."""
     os.makedirs(images_dir, exist_ok=True)
-    if video_processor.platform(url):
+    if video_processor.platform(url) and html is None:
         return _process_video(url, images_dir)
     with _client() as client:
-        try:
-            resp = client.get(url)
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise UrlImportError(f"Could not load the page: {exc}") from exc
-        if len(resp.content) > MAX_PAGE_BYTES:
-            raise UrlImportError("The page is too large.")
-        soup = BeautifulSoup(resp.text, "html.parser")
+        if html is None:
+            html, page_url = _fetch_page(client, url)
+        else:
+            page_url = url
+            if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+                raise UrlImportError("The page is too large.")
+        soup = BeautifulSoup(html, "html.parser")
 
         recipe = None
         for script in soup.find_all("script", type="application/ld+json"):
@@ -266,12 +302,12 @@ def process_url(url: str, images_dir: str) -> dict:
         else:
             log.info("No schema.org Recipe on %s - using the page text", url)
             title = soup.title.get_text(strip=True) if soup.title else ""
-            text = f"Source: {url}\n\n" + _visible_text(BeautifulSoup(resp.text, "html.parser"))
+            text = f"Source: {url}\n\n" + _visible_text(BeautifulSoup(html, "html.parser"))
         if len(text.strip()) < 50:
             raise UrlImportError("No recipe text found on that page.")
 
         images = {}
-        image_url = _image_url(recipe, soup, str(resp.url))
+        image_url = _image_url(recipe, soup, page_url)
         if image_url:
             saved = _save_image(client, image_url, images_dir)
             if saved:
@@ -279,7 +315,7 @@ def process_url(url: str, images_dir: str) -> dict:
         if recipe:
             step_images, steps = _step_images(recipe.get("recipeInstructions"))
             for order, (position, step_url) in enumerate(step_images[:MAX_STEP_IMAGES]):
-                saved = _save_image(client, urljoin(str(resp.url), step_url), images_dir)
+                saved = _save_image(client, urljoin(page_url, step_url), images_dir)
                 if saved:
                     images[saved.pop("id")] = {**saved, "step": position, "of": steps, "order": order}
 

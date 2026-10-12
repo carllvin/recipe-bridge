@@ -70,7 +70,10 @@ no recipe are skipped and listed in the review.
   *Install app* / *Add to home screen*; needs HTTPS). It then shows up in the
   share menu: links, text and photos land right in the import.
 - **🔖 Bookmark button** – drag it to your browser's bookmark bar; one click
-  on a recipe page sends it to the app.
+  on a recipe page sends it to the app – the page itself, as your browser
+  shows it, so it also works for sites that block the app (bot protection:
+  "403 Forbidden"). A button dragged in before version 1.2 only sends the
+  address – drag it in again once.
 - **📂 Watched folder** – files put into a folder (`WATCH_DIR`) are imported
   on their own and wait under ✅ Review → *New imports*.
 - **🚚 Move from Tandoor / Mealie** – when both are configured, all recipes

@@ -3629,20 +3629,48 @@ async function runBulkAction(action) {
 // ---------- Init ----------
 
 // Bookmarklet: opens this app with ?import=<page address> in a new tab.
-el('bookmarklet').href = `javascript:(()=>{window.open(${JSON.stringify(location.origin + '/?import=')}+encodeURIComponent(location.href),'_blank')})()`;
+// The bookmark button opens the app with the page's address and then hands
+// over the page itself (postMessage) - the app doesn't have to load it, so
+// sites that block scripts work too. Without the hand-over (an old button, a
+// site that cuts the link between the tabs) the address is loaded as before.
+el('bookmarklet').href = `javascript:(()=>{const o=${JSON.stringify(location.origin)},u=location.href,`
+  + `h=document.documentElement.outerHTML,w=window.open(o+'/?import='+encodeURIComponent(u)+'&page=1','_blank');`
+  + `addEventListener('message',e=>{if(e.origin===o&&e.data==='rb-ready'&&w)w.postMessage({rbPage:{url:u,html:h}},o)})})()`;
 el('bookmarklet').addEventListener('click', (e) => { e.preventDefault(); showUploadError(t('bookmarkletClick')); });
 
 // Imports handed over in the address: ?import=<url> (bookmarklet),
 // ?text=<recipe text>, ?error=<message> (a failed share from the phone).
+// The bookmark button's page hand-over (see el('bookmarklet').href).
+function receivePage(pageUrl) {
+  let done = false;
+  const finish = (html) => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('message', onMessage);
+    if (html) startImportRequest('/api/import-page', { url: pageUrl, html }, t('urlImportLoading'));
+    else startImportRequest('/api/import-url', { url: pageUrl }, t('urlImportLoading'));
+  };
+  const onMessage = (e) => {
+    const page = e.data && e.data.rbPage;
+    if (e.source === window.opener && page && page.url === pageUrl && typeof page.html === 'string') finish(page.html);
+  };
+  window.addEventListener('message', onMessage);
+  try { window.opener.postMessage('rb-ready', '*'); } catch (e) { finish(null); return; }
+  setTimeout(() => finish(null), 4000);
+}
+
 function handleIncomingParams() {
   const url = new URL(window.location);
   const importUrl = url.searchParams.get('import');
   const text = url.searchParams.get('text');
   const error = url.searchParams.get('error');
-  ['import', 'text', 'error'].forEach((k) => url.searchParams.delete(k));
+  const withPage = url.searchParams.get('page') === '1' && window.opener;
+  ['import', 'text', 'error', 'page'].forEach((k) => url.searchParams.delete(k));
   window.history.replaceState({}, '', url);
   if (error) showUploadError(error);
-  if (importUrl && /^https?:\/\//i.test(importUrl)) {
+  if (importUrl && /^https?:\/\//i.test(importUrl) && withPage) {
+    receivePage(importUrl);
+  } else if (importUrl && /^https?:\/\//i.test(importUrl)) {
     startImportRequest('/api/import-url', { url: importUrl }, t('urlImportLoading'));
   } else if (text && text.trim()) {
     startImportRequest('/api/import-text', { text }, t('textImportLoading'));

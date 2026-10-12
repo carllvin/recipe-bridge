@@ -11,6 +11,9 @@
   Tandoor as step files, with Mealie as recipe assets in the step text
 - `TRANSLATE_RECIPES=false` keeps recipes in the language they were
   written in
+- Sites with bot protection (403): the app asks like a browser and tries a
+  second time; the bookmark button now hands over the page your browser
+  already shows, so such sites import too (drag the button in again once)
 - Handwritten notes are kept: the transcription marks every note and
   correction, the extraction puts them into the ingredient, the step or a
   final "Note" step instead of dropping them

@@ -23,7 +23,7 @@ from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
 from .pdf_processor import process_pdf
-from .url_processor import UrlImportError, links_from_text, process_url, validate_url
+from .url_processor import MAX_PAGE_BYTES, UrlImportError, links_from_text, process_url, validate_url
 from .text_processor import looks_like_link_list, process_text, title_from_text
 from .docx_processor import process_docx
 from .schemas import ExtractedRecipe, TokenUsage
@@ -155,7 +155,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         elif doc_type == "url":
             job.progress_label = "Loading the recipe page …"
             jobs.save_job(job)
-            result = process_url(source_paths[0], images_dir)
+            page = os.path.join(_job_dir(job.id), "page.html")  # sent by the browser (bookmark button)
+            html = None
+            if os.path.exists(page):
+                with open(page, encoding="utf-8", errors="replace") as f:
+                    html = f.read()
+            result = process_url(source_paths[0], images_dir, html=html)
         elif doc_type == "txt":
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -417,8 +422,9 @@ def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recip
                                                     handwriting and doc_type == "images"), daemon=True).start()
 
 
-def _start_url_job(url: str, source: str | None = None):
-    """Raises HTTPException(400) for an invalid address."""
+def _start_url_job(url: str, source: str | None = None, html: str | None = None):
+    """Raises HTTPException(400) for an invalid address. html: the page as
+    the browser has it (bookmark button) - not loaded again then."""
     try:
         url = validate_url(url)
     except UrlImportError as exc:
@@ -426,6 +432,9 @@ def _start_url_job(url: str, source: str | None = None):
     job = jobs.create_job(urlparse(url).netloc or url)
     job.source = source
     os.makedirs(_job_dir(job.id), exist_ok=True)
+    if html:
+        with open(os.path.join(_job_dir(job.id), "page.html"), "w", encoding="utf-8") as f:
+            f.write(html)
     jobs.save_job(job)
     threading.Thread(target=_run_extraction, args=(job.id, [url], "url"), daemon=True).start()
     return job
@@ -516,6 +525,17 @@ async def import_url(body: dict = Body(...)):
     and import flow as an uploaded document (see url_processor)."""
     _check_budget()
     return {"job_id": _start_url_job(body.get("url", "")).id}
+
+
+@app.post("/api/import-page")
+async def import_page(body: dict = Body(...)):
+    """{"url", "html"} - a recipe page as the browser has it (the bookmark
+    button sends it), for sites that refuse to be loaded by the app."""
+    _check_budget()
+    html = str(body.get("html") or "")
+    if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
+        raise HTTPException(413, "The page is too large.")
+    return {"job_id": _start_url_job(body.get("url") or "", html=html or None).id}
 
 
 @app.post("/api/import-text")
