@@ -31,6 +31,7 @@ METRIC_TOOLS = {
     "recipes_amounts_missing": ("recipes_amounts", {}),
     "recipes_inconsistent": ("recipes_doctor", {}),
     "recipes_without_season": ("tags_season", {}),
+    "recipes_without_source": ("recipes_source", {}),
     "recipes_few_tags": ("tags_suggest_more", {}),
     "recipes_without_servings": ("recipes_servings", {}),
     "recipes_without_image": ("recipes_images", {}),

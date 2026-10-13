@@ -1903,6 +1903,7 @@ const TOOL_TITLE_KEYS = {
   tags_simplify: 'toolTagsCleanupTitle',
   tags_translate: 'toolTagsCleanupTitle',
   tags_season: 'toolTagsSeasonTitle',
+  recipes_source: 'toolRecipesSourceTitle',
   tags_suggest_more: 'toolTagsSuggestMoreTitle',
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
@@ -1961,7 +1962,7 @@ const INBOX_GROUPS = [
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
   { key: 'recipes', icon: '🧩', match: (i) => ['restructure_recipe', 'translate_recipe', 'amounts_in_steps', 'doctor_fix'].includes(i.kind) },
-  { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' },
+  { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' || i.kind === 'source_tag' },
   { key: 'other', icon: '•', match: () => true },
 ];
 const inboxState = { items: [], selected: new Set(), collapsed: new Set(), busyGroup: null, results: {} };
@@ -2444,6 +2445,7 @@ const HEALTH_METRICS = [
   { key: 'recipes_amounts_missing', tool: 'recipes_amounts', endpoint: '/api/tools/recipes/amounts' },
   { key: 'recipes_inconsistent', tool: 'recipes_doctor', endpoint: '/api/tools/recipes/doctor' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
+  { key: 'recipes_without_source', tool: 'recipes_source', endpoint: '/api/tools/recipes/source' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
   { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
@@ -2463,7 +2465,7 @@ const HEALTH_GROUPS = [
   { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
-    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_inconsistent', 'recipes_without_season', 'recipes_few_tags',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_inconsistent', 'recipes_without_season', 'recipes_without_source', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image', 'recipes_weak_image'] },
   { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },

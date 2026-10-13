@@ -6,6 +6,9 @@
 - A tag with the source on every imported recipe: the website
   (`nytcooking`), the video channel or the cookbook's author (`ottolenghi`)
   – `SOURCE_TAG=false` turns it off
+- Maintain: tile **Recipes without source tag** for existing recipes – by
+  their address (the site's name, looked up once) or their cookbook (its
+  author, one small AI call per book); one suggestion per source
 - Review: **Preview | Edit** – a recipe opens in the preview, as Tandoor
   (every step with its ingredients) or Mealie will, with the step photos
 - A large import (a whole cookbook) first shows its estimated tokens and

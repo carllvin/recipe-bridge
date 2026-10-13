@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, photo_quality, mealie_client, mealie_maintenance, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, migration, photo_quality, mealie_client, mealie_maintenance, source_tag, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -153,6 +153,7 @@ def _compute() -> None:
             units = tools_conversions._fetch_all(client, "unit")
             keywords = tools_conversions._fetch_all(client, "keyword")
             unit_conversions = tools_conversions._fetch_all(client, "unit-conversion")
+            books = migration._tandoor_books(client)  # recipe id -> its cookbooks, for the source tag
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
             weak_photos = photo_quality.problems_of(
                 {str(r["id"]): r["image"] for r in recipes if r.get("image")}, photo_quality.fetcher(client))
@@ -193,6 +194,10 @@ def _compute() -> None:
             "recipes_inconsistent": recipe_items(
                 lambda r, v=[f["name"] for f in foods.values()]: bool(recipe_doctor.findings(r, v))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),
+            "recipes_without_source": recipe_items(
+                lambda r, store=source_tag.known(): source_tag.missing(
+                    r.get("source_url") or "", books.get(r["id"], []),
+                    [k["name"] for k in r.get("keywords") or []], store) is not None),
             "recipes_without_servings": recipe_items(tools_recipe_details.lacks_servings),
             "recipes_without_image": recipe_items(tools_recipe_details.lacks_image),
             "recipes_weak_image": [{**i, "name": f"{i['name']} ({photo_quality.describe(weak_photos[i['key']])})"}

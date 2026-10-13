@@ -257,6 +257,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
                 tag, tag_usage = source_tag.guess_author(result["pages"])
                 job.token_usage.add(tag_usage)
             source_tag.add(recipes, tag)
+            job.source_tag = tag or None
+            if tag and doc_type == "url":
+                source_tag.remember("hosts", source_tag.host_of(source_paths[0]), tag)
         job.recipes = recipes
         job.token_usage.add(usage)
         jobs.match_images_to_recipes(job)
@@ -403,8 +406,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             for recipe in recipes:
                 recipe.source_url = url
                 recipe.source_page_start = recipe.source_page_end = number
-            if source_tag.enabled():
-                source_tag.add(recipes, result.get("source_tag") or "")
+            if source_tag.enabled() and result.get("source_tag"):
+                source_tag.add(recipes, result["source_tag"])
+                source_tag.remember("hosts", source_tag.host_of(url), result["source_tag"])
             job.recipes.extend(recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")
@@ -1048,6 +1052,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     if cookbook_name:
         job.cookbook_name = cookbook_name
         jobs.save_job(job)
+        if job.source_tag:  # the cookbook's tag is known (the tile "without source" skips its recipes)
+            source_tag.remember("books", cookbook_name, job.source_tag)
 
     results = []
     cookbook_warning = None
@@ -1404,6 +1410,7 @@ _TOOL_SCANS = {
     "tags_simplify": tools_tags.run_simplify_scan,
     "tags_translate": tools_tags.run_translate_scan,
     "tags_season": tools_tags.run_season_scan,
+    "recipes_source": source_tag.run_scan,
     "tags_suggest_more": tools_tags.run_suggest_more_scan,
     "units_review": tools_units.run_scan,
     "recipes_translate": tools_recipes.run_scan,
@@ -1430,6 +1437,7 @@ _TOOL_APPLY = {
     "tags_simplify": tools_tags.apply_suggestion,
     "tags_translate": tools_tags.apply_suggestion,
     "tags_season": tools_tags.apply_suggestion,
+    "recipes_source": source_tag.apply_suggestion,
     "tags_suggest_more": tools_tags.apply_suggestion,
     "units_review": tools_units.apply_suggestion,
     "recipes_translate": tools_recipes.apply_suggestion,
@@ -1506,6 +1514,11 @@ async def start_tags_translate():
 @app.post("/api/tools/tags/season")
 async def start_tags_season():
     return _start_tool_job("tags_season")
+
+
+@app.post("/api/tools/recipes/source")
+async def start_recipes_source():
+    return _start_tool_job("recipes_source")
 
 
 @app.post("/api/tools/tags/suggest-more")

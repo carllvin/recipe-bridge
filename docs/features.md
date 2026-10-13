@@ -160,7 +160,7 @@ grouped by kind:
   details** (plural, nutrition, supermarket category), **gram conversions**,
   **recipe revisions** (one block of text split into steps, ingredients
   assigned to steps – with a before/after preview), **translations**,
-  **tags & season**, **servings**, **photos**, **amounts in the steps**,
+  **tags & season**, **source tag** (site or cookbook author), **servings**, **photos**, **amounts in the steps**,
   **contradictions** and **unused entries**. (The weekly plan is reviewed
   and added on the 📅 Plan page itself.)
 - When an ingredient like *gemahlene Mandeln* is renamed to or merged into

@@ -84,6 +84,7 @@ class Job(BaseModel):
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
+    source_tag: Optional[str] = None  # the import's source tag (source_tag.py) - remembered for its cookbook on import
     estimate: Optional[dict] = None  # status "confirm": {"chunks", "input", "output", "total", "budget_left"} (ai_extractor.estimate_tokens)
 
 
