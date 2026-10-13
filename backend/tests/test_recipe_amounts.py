@@ -273,3 +273,18 @@ def test_old_templates_reading_0_pepper_are_repaired(monkeypatch):
     assert fixed == "{{ ingredients[0] }} und Salz in die Pfanne geben."
     r["steps"][1]["instruction"] = fixed
     assert not recipe_amounts.needs_amounts(r)
+
+
+def test_after_an_import_all_ingredients_in_step_one_still_get_amounts():
+    """Reported: no amounts after an import. With every ingredient in step 1
+    the recipe waited for a structure revision - which never comes after an
+    import (the review was it)."""
+    r = recipe()
+    r["steps"][0]["ingredients"] += r["steps"][1]["ingredients"]
+    r["steps"][1]["ingredients"] = []
+    assert recipe_amounts.skip_reason(r) == "the structure revision comes first"
+    assert recipe_amounts.needs_amounts(r, after_import=True)
+    done = recipe()
+    done["steps"][0]["instruction"] = "250 g Mehl mit 500 ml Milch und 3 Eiern verrühren."
+    done["steps"][1]["instruction"] = "1 EL Butter erhitzen."
+    assert recipe_amounts.skip_reason(done, after_import=True) == "the steps name the amounts already"

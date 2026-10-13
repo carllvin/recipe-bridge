@@ -129,21 +129,28 @@ def _zero_templates(step) -> list[int]:
             if n < len(ingredients) and _without_amount(ingredients[n])]
 
 
-def needs_amounts(recipe) -> bool:
+def needs_amounts(recipe, after_import: bool = False) -> bool:
+    return skip_reason(recipe, after_import) is None
+
+
+def skip_reason(recipe, after_import: bool = False) -> str | None:
+    """Why the recipe gets no amounts in its steps - None if it needs them.
+    after_import: just reviewed and imported - no structure revision comes
+    (the review was it), so it isn't waited for."""
     steps = recipe.get("steps") or []
     if steps and any("{{" in (s.get("instruction") or "") for s in steps):
         # templates already: only the comments and the "0 Pfeffer" ones
-        return any(_notes_missing(s) or _zero_templates(s) for s in steps)
+        return None if any(_notes_missing(s) or _zero_templates(s) for s in steps) else "templates already"
     if not steps:
-        return False
-    if recipe_restructure.needs_restructure(recipe):
-        return False  # the structure revision comes first
+        return "no steps"
+    if not after_import and recipe_restructure.needs_restructure(recipe):
+        return "the structure revision comes first"
     rows = [(ing, s.get("instruction") or "") for s in steps for ing in s.get("ingredients") or []
             if _has_amount(ing) and (s.get("instruction") or "").strip()]
     if not rows:
-        return False
+        return "no ingredient with an amount in a step"
     mentioned = sum(1 for ing, text in rows if _mentions_amount(ing, text))
-    return mentioned * 2 < len(rows)
+    return None if mentioned * 2 < len(rows) else "the steps name the amounts already"
 
 
 # ---------- the AI's plan ----------
