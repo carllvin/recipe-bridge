@@ -473,7 +473,7 @@ function updateSmartForm() {
   const video = mode === 'url' && isVideoLink(smartMode().value);
   el('smart-scan').classList.toggle('hidden', mode !== 'url' || video);
   el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url' || video);
-  el('smart-hint').textContent = video ? t('smartHintVideo') : mode === 'links' ? t('smartHintLinks')
+  el('smart-hint').textContent = video ? t('smartHintVideo')
     : mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
