@@ -188,9 +188,9 @@ grouped by kind:
   away, then suggests revising their structure, matching their
   ingredients/units/tags to existing ones, filling in ingredient details and
   conversions (Tandoor) and adding tags. Recipes imported through this app
-  were already covered by the review – they only get the *amounts into the
-  steps* (see below), applied right away like the ingredient details;
-  only ones marked ⚠️ wait for review.
+  were already covered by the review and got their amounts in the steps
+  while being read; only ones without them get the *amounts into the steps*
+  (see below) afterwards, applied right away unless marked ⚠️.
 - **State of your collection** counts what's left to do – without AI – in
   groups:
   - *Ingredients*: possible duplicates, without nutrition or supermarket
@@ -206,15 +206,16 @@ grouped by kind:
   them; single entries can be **ignored** (e.g. *Water* without nutrition)
   and are never suggested again. Each group also has a tool for the whole
   collection (all ingredients, all units, tag translate & simplify). Tiles
-  show when a fix is running or waiting for review, and the overview
-  recounts on its own after you applied something.
+  show when a fix is running or waiting for review; an applied suggestion
+  takes its entries off the tiles without a new scan.
 - **Steps without amounts** – "Das Mehl mit der Milch verrühren" becomes
   "250 g Mehl mit 500 ml Milch verrühren", with an ingredient's comment in
   brackets. The AI only marks where an ingredient is mentioned – it never
-  writes a number: with Tandoor the step gets Tandoor's templates
+  writes a number: the step gets Tandoor's templates
   (`{{ ingredients[0] }}`), so the amounts follow when you change the
-  servings; with Mealie they are written out. A second AI pass proofreads
-  each step as it will read; doubtful ones are marked ⚠️.
+  servings. A second AI pass proofreads each step as it will read; doubtful
+  ones are marked ⚠️. Tandoor only – Mealie has no templates, and
+  written-out amounts would be wrong once the servings change.
 - **Contradictions** (recipe doctor) – found without AI: an ingredient no
   step mentions, a step naming an ingredient that isn't in the list, an
   amount that can't be right (400 g salt for 4 servings), a time that

@@ -20,18 +20,10 @@ Pi or a Synology), so there's nothing to build.
    curl -o .env https://raw.githubusercontent.com/carllvin/recipe-bridge/main/.env.example
    ```
 
-2. **Fill in `.env`** – at least:
-   - `AI_PROVIDER` – `anthropic` (Claude), `openai` (ChatGPT), `gemini`
-     (Google) or `compatible` (a local model, see [Local AI](configuration.md#local-ai-ollama--co))
-   - the matching API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or
-     `GEMINI_API_KEY`), or `COMPATIBLE_BASE_URL` and `COMPATIBLE_MODEL`
-   - **Tandoor:** `TANDOOR_URL` (**without** a trailing slash) and
-     `TANDOOR_TOKEN` (in Tandoor: *user menu → Settings → API → create new
-     token*)
-   - **or Mealie:** `RECIPE_MANAGER=mealie`, `MEALIE_URL` and `MEALIE_TOKEN`
-     (in Mealie: *user profile → API tokens*)
-   - `OUTPUT_LANGUAGE` – e.g. `Deutsch` (recipes **and** the app's UI)
-   - `TZ` – e.g. `Europe/Berlin`, so automatic runs happen at your local time
+2. **Fill in `.env`** – the *Required* part at the top: AI provider and
+   its key, Tandoor (or Mealie) address and token, the language. Setting
+   `TZ` (e.g. `Europe/Berlin`) is worth it too. All other settings are
+   optional: [Configuration](configuration.md#env).
 
 3. **Start it**
 
@@ -45,7 +37,7 @@ Pi or a Synology), so there's nothing to build.
 
 With Portainer, Unraid, Synology Container Manager & co., paste
 `docker-compose.yml` as a new stack and put the settings from `.env.example`
-into its environment / `.env`.
+into its `.env`.
 
 `:latest` follows the main branch; for a fixed version use e.g.
 `image: ghcr.io/carllvin/recipe-bridge:1.2` (see the
