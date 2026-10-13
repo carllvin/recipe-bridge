@@ -52,6 +52,7 @@ def info() -> list[dict]:
         ("lang", "OUTPUT_LANGUAGE", f"{settings.output_language} (interface: {get_ui_language_code(settings.output_language)})", None),
         ("lang", "TRANSLATE_RECIPES", str(app_settings.translating()).lower(), None),
         ("lang", "STEP_PHOTOS_AI", str(settings.step_photos_ai).lower(), None),
+        ("lang", "SOURCE_TAG", str(settings.source_tag).lower(), None),
         ("lang", "CONVERT_TO_METRIC", str(settings.convert_to_metric).lower(), None),
         ("lang", "CUSTOM_INSTRUCTIONS", f"set ({len(settings.custom_instructions.strip())} characters)"
          if settings.custom_instructions.strip() else "none", None),

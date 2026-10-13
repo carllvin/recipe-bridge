@@ -30,6 +30,7 @@ data volume, no restart needed.
 | `OUTPUT_LANGUAGE` | `English` | Language of the recipes **and** of the app's UI (full UI translations: Deutsch, English, Français, Italiano, Español) |
 | `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
 | `STEP_PHOTOS_AI` | `true` | The review's "place photos into the steps" button may use the image AI; `false` = it only places a recipe page's own step photos (free), the rest by hand |
+| `SOURCE_TAG` | `true` | A tag with the recipe's source: the website's name (`nytcooking`), the video channel, the cookbook's author (`ottolenghi` – from the book's metadata, else one small AI call); `false` = no such tag |
 | `IMPORT_CONFIRM_TOKENS` | `50000` | An import estimated above this many tokens shows the estimate (and what is left of the monthly budget) and waits for *Start*; `0` = never ask. Imports from the phone or the watched folder don't wait |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, diagnostics, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, diagnostics, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -249,6 +249,14 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         if doc_type == "url":
             for recipe in recipes:
                 recipe.source_url = source_paths[0]
+        if source_tag.enabled():
+            tag = result.get("source_tag") or source_tag.from_author(result.get("metadata_author") or "")
+            if not tag and doc_type in ("pdf", "epub") and recipes:
+                job.progress_label = "Looking for the cookbook's author …"
+                jobs.save_job(job)
+                tag, tag_usage = source_tag.guess_author(result["pages"])
+                job.token_usage.add(tag_usage)
+            source_tag.add(recipes, tag)
         job.recipes = recipes
         job.token_usage.add(usage)
         jobs.match_images_to_recipes(job)
@@ -395,6 +403,8 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
             for recipe in recipes:
                 recipe.source_url = url
                 recipe.source_page_start = recipe.source_page_end = number
+            if source_tag.enabled():
+                source_tag.add(recipes, result.get("source_tag") or "")
             job.recipes.extend(recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")

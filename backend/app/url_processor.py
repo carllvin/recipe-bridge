@@ -22,7 +22,7 @@ import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from . import video_processor
+from . import source_tag, video_processor
 
 log = logging.getLogger("recipe-bridge")
 
@@ -314,7 +314,8 @@ def _process_video(url: str, images_dir: str) -> dict:
             if saved:
                 images[saved.pop("id")] = saved
     return {"pages": [{"page": 1, "text": info["text"]}], "images": images, "page_count": 1,
-            "metadata_title": info.get("title") or "", "toc_pages": []}
+            "metadata_title": info.get("title") or "", "toc_pages": [],
+            "source_tag": source_tag.slug(info.get("author") or "")}  # the channel
 
 
 def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
@@ -431,4 +432,5 @@ def process_url(url: str, images_dir: str, html: str | None = None,
         "page_count": 1,
         "metadata_title": title,
         "toc_pages": [],
+        "source_tag": source_tag.from_page(soup, page_url, recipe or stub),
     }
