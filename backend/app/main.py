@@ -256,7 +256,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             on_progress=progress_cb,
             toc_pages=toc_pages,
             existing_tags=existing_tags,
-            batch=settings.watch_batch and job.source == "folder",
+            batch=_as_batch(job, doc_type),
             on_wait=batch_wait,
         )
         if doc_type == "url":
@@ -304,6 +304,16 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         jobs.save_job(job)
 
 
+def _as_batch(job, doc_type: str) -> bool:
+    """An AI batch (half price, up to 24 h): asked for at the estimate, or
+    WATCH_BATCH for the watched folder, UPLOAD_BATCH for uploaded files."""
+    if job.batch:
+        return True
+    if job.source == "folder":
+        return settings.watch_batch
+    return settings.upload_batch and not job.source and doc_type not in ("url", "text", "links", "audio")
+
+
 CONFIRM_WAIT_SECONDS = 3600
 
 
@@ -344,6 +354,7 @@ async def confirm_import(job_id: str, body: dict = Body(...)):
         raise HTTPException(409, "This import isn't waiting for an answer.")
     if body.get("start"):
         _check_budget()
+        job.batch = bool(body.get("batch")) and llm_provider.batch_supported()
         job.status = "processing"
         job.progress_label = "Reading the pages with the AI …"
     else:
@@ -2069,6 +2080,7 @@ async def get_config():
         "voice_available": llm_provider.audio_provider() is not None,
         "migration_source": migration.source_name(),
         "image_gen_available": image_gen.is_configured(),
+        "batch_available": llm_provider.batch_supported(),  # the estimate offers "half price, up to 24 h"
         "version": settings.app_version,
         "auth_enabled": auth.enabled(),
         "notify_channels": notify.channels(),

@@ -3,6 +3,9 @@
 ## Unreleased
 
 **Import**
+- Uploaded cookbooks as an AI batch too: `UPLOAD_BATCH=true`, or the
+  button **Half price (ready within 24 h)** at a large import's estimate
+- A shorter message after the import
 - `WATCH_BATCH=true`: files from the watched folder go to the AI as one
   batch – half price, ready within up to 24 hours (Claude, OpenAI)
 - A page imported before is flagged as a duplicate by its address, even
@@ -68,6 +71,8 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Review: a click into an ingredient field places the cursor again in
+  Safari and Firefox (only the ⠿ handle starts a drag now)
 - Maintain is faster again: recipes are read several at a time, and the
   overview reads only recipes changed since its last read (everything
   fresh once a day and after changes to ingredients, units or tags); a

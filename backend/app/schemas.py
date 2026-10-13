@@ -86,6 +86,7 @@ class Job(BaseModel):
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
     source_tag: Optional[str] = None  # the import's source tag (source_tag.py) - remembered for its cookbook on import
+    batch: bool = False  # the AI reads it as one batch (half price, up to 24 h) - WATCH_BATCH / UPLOAD_BATCH / the estimate's button
     estimate: Optional[dict] = None  # status "confirm": {"chunks", "input", "output", "total", "budget_left"} (ai_extractor.estimate_tokens)
 
 

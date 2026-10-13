@@ -107,3 +107,38 @@ def test_openai_batch(monkeypatch):
     out = llm_provider.complete_batch("sys", ["a", "b"], max_tokens=100)
     assert [t for t, _u in out] == [RECIPE, RECIPE] and out[0][1].input_tokens == 400
     assert state["lines"][0]["body"]["messages"][0] == {"role": "system", "content": "sys"}
+
+
+def test_which_imports_go_as_batch(monkeypatch):
+    from app import jobs, main
+    job = jobs.create_job("buch.pdf")
+    assert not main._as_batch(job, "pdf")
+    monkeypatch.setattr(settings, "upload_batch", True)
+    assert main._as_batch(job, "pdf") and not main._as_batch(job, "url")
+    job.source = "folder"
+    assert not main._as_batch(job, "pdf")  # the watched folder has its own switch
+    monkeypatch.setattr(settings, "watch_batch", True)
+    assert main._as_batch(job, "pdf")
+    other = jobs.create_job("x.pdf")
+    monkeypatch.setattr(settings, "upload_batch", False)
+    other.batch = True  # chosen at the estimate
+    assert main._as_batch(other, "pdf")
+
+
+def test_estimate_button_asks_for_a_batch(monkeypatch):
+    import threading
+    import time
+    from fastapi.testclient import TestClient
+    from app import jobs, main
+    monkeypatch.setattr(settings, "import_confirm_tokens", 1000)
+    monkeypatch.setattr(llm_provider, "batch_supported", lambda: True)
+    job = jobs.create_job("big.pdf")
+    thread = threading.Thread(target=lambda: main._go_ahead(job, PAGES, None, None))
+    thread.start()
+    for _ in range(100):
+        if job.status == "confirm":
+            break
+        time.sleep(0.02)
+    TestClient(main.app).post(f"/api/jobs/{job.id}/confirm", json={"start": True, "batch": True})
+    thread.join(5)
+    assert job.batch and job.status == "processing"

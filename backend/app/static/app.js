@@ -720,6 +720,8 @@ function showImportEstimate(job) {
     total: fmt(est.total), input: fmt(est.input), output: fmt(est.output) });
   el('confirm-budget').textContent = est.budget_left == null ? t('confirmNoBudget')
     : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
+  // Claude / OpenAI: the same at half price as a batch - ready within up to 24 hours
+  el('confirm-batch').classList.toggle('hidden', !(APP_CONFIG.batch_available && est.chunks > 1));
   el('confirm-box').classList.remove('hidden');
 }
 
@@ -729,11 +731,11 @@ function hideImportEstimate() {
   el('processing-text').classList.remove('hidden');
 }
 
-async function answerImportEstimate(start) {
+async function answerImportEstimate(start, batch = false) {
   const jobId = state.jobId;
   try {
     const res = await fetch(`/api/jobs/${jobId}/confirm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, batch }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
   } catch (e) {
@@ -746,6 +748,7 @@ async function answerImportEstimate(start) {
 }
 el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
 el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
+el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
 
 function leaveCancelledImport() {
   clearTimeout(state.pollTimer);
@@ -1115,7 +1118,7 @@ function renderDetail(r) {
   const ingredientsHtml = r.ingredients.map((ing, i) => {
     const stepOptions = r.steps.map((s, si) => `<option value="${si}" ${((ing.step_index ?? 0) === si) ? 'selected' : ''}>${si + 1}</option>`).join('');
     return `
-    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}" draggable="true">
+    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}">
       <span class="ing-drag-handle" title="${t('dragToReorder')}">⠿</span>
       <input class="ing-amount" value="${ing.amount ?? ''}" placeholder="${t('placeholderAmount')}" />
       <div class="ing-unit-wrap">
@@ -1430,6 +1433,12 @@ function renderDetail(r) {
   let dragSrcRow = null;
 
   detail.querySelectorAll('.ingredient-row').forEach((row) => {
+    // Only the handle makes the row draggable: a draggable row keeps the
+    // browser from placing the cursor in its fields with a click.
+    const handle = row.querySelector('.ing-drag-handle');
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    handle.addEventListener('touchstart', () => { row.draggable = true; }, { passive: true });
+    row.addEventListener('mouseup', () => { row.draggable = false; });
     row.addEventListener('dragstart', (e) => {
       dragSrcRow = row;
       row.classList.add('dragging');
@@ -1438,6 +1447,7 @@ function renderDetail(r) {
     });
 
     row.addEventListener('dragend', () => {
+      row.draggable = false;
       row.classList.remove('dragging');
       ingredientsWrap.querySelectorAll('.ingredient-row').forEach((el2) => {
         el2.classList.remove('drag-over-top', 'drag-over-bottom');
@@ -1769,7 +1779,8 @@ function showImportSummary(results, cookbookName, cookbookWarning, postProcessin
   }
 
   let lines = [];
-  lines.push(tf('modalSummaryLine', { ok, total }));
+  lines.push(failed === 0 && ok === 1 ? t('modalSummaryOne')
+    : failed === 0 ? tf('modalSummaryAll', { ok }) : tf('modalSummaryLine', { ok, total }));
   if (cookbookName) {
     lines.push(tf('modalCookbookLine', { name: cookbookName }));
   }
