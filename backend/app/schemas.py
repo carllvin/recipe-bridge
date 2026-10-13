@@ -70,7 +70,7 @@ class ExtractedRecipe(BaseModel):
 class Job(BaseModel):
     id: str
     filename: str
-    status: str = "processing"  # processing | ready | error
+    status: str = "processing"  # processing | confirm (a large import asks about half price) | ready | error | cancelled
     error: Optional[str] = None
     page_count: int = 0
     recipes: list[ExtractedRecipe] = Field(default_factory=list)
@@ -87,6 +87,7 @@ class Job(BaseModel):
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
     source_tag: Optional[str] = None  # the import's source tag (source_tag.py) - remembered for its cookbook on import
     batch: bool = False  # the import page's "half price" checkbox: the AI reads it as a batch (up to 24 h)
+    estimate: Optional[dict] = None  # status "confirm": {"total", "input", "output", "chunks" | "links", "budget_left"}
 
 
 class ToolSuggestion(BaseModel):

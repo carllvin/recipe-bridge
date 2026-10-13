@@ -9,6 +9,8 @@
 - AI batches at half price (Claude, OpenAI; ready within up to 24 hours):
   on by default for the watched folder (`WATCH_BATCH`), a checkbox on the
   import page for everything else – files, links, link lists, text
+- A large import (from about 50,000 tokens) started without “half price”
+  asks once more: half price after all, now at full price, or cancel
 - A page imported before is flagged as a duplicate by its address, even
   when the title differs (translated, renamed); addresses come from the
   overview's read and from every import

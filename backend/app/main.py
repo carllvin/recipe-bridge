@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
-from .ai_extractor import extract_each_as_batch, extract_recipes_from_pages, guess_cookbook_title
+from .ai_extractor import estimate_tokens, extract_each_as_batch, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
@@ -243,7 +243,11 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
+        if _asks_about_half_price(job):
+            if not _go_ahead(job, estimate_tokens(result["pages"], toc_pages=toc_pages, existing_tags=existing_tags)):
+                return
         recipes: list[ExtractedRecipe]
+
         def batch_wait(done: int, total: int) -> None:
             job.progress_current, job.progress_total = done, total
             job.progress_label = f"Waiting for the AI batch: {done}/{total} part(s) done (half price, up to 24 h)"
@@ -296,7 +300,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.status = "error"
         job.error = str(exc)
     finally:
-        if doc_type != "links":  # _run_link_list records its own usage
+        if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
             _record_usage(job)
             notify.import_finished(job)
         jobs.save_job(job)
@@ -308,6 +312,58 @@ def _as_batch(job) -> bool:
     if job.source == "folder":
         return settings.watch_batch and llm_provider.batch_supported()
     return job.batch and llm_provider.batch_supported()
+
+
+LARGE_IMPORT_TOKENS = 50000  # from here on, an import without "half price" asks once more
+TOKENS_PER_LINK = 4500       # a recipe page, roughly (instructions, page text, answer)
+CONFIRM_WAIT_SECONDS = 3600
+
+
+def _asks_about_half_price(job) -> bool:
+    """Started at the screen, without the checkbox, with a provider that has batches."""
+    return not job.source and not job.batch and llm_provider.batch_supported()
+
+
+def _go_ahead(job, estimate: dict) -> bool:
+    """A large import (LARGE_IMPORT_TOKENS) without "half price" waits here
+    for an answer - POST /api/jobs/{id}/confirm: half price after all, full
+    price now, or cancel. False: cancelled (or no answer within an hour)."""
+    log.info("Import %s estimated at %d tokens", job.id, estimate["total"])
+    if estimate["total"] < LARGE_IMPORT_TOKENS:
+        return True
+    budget = usage_log.budget_status()
+    estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None
+    job.estimate = estimate
+    job.status = "confirm"
+    job.progress_label = None
+    jobs.save_job(job)
+    until = time.monotonic() + CONFIRM_WAIT_SECONDS
+    while job.status == "confirm" and time.monotonic() < until:
+        time.sleep(0.5)
+    if job.status == "processing":
+        return True
+    if job.status == "confirm":
+        job.status = "cancelled"
+    return False
+
+
+@app.post("/api/jobs/{job_id}/confirm")
+async def confirm_import(job_id: str, body: dict = Body(...)):
+    """{"start": true | false, "batch"?: true} - the answer to a large import's question."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.status != "confirm":
+        raise HTTPException(409, "This import isn't waiting for an answer.")
+    if body.get("start"):
+        _check_budget()
+        job.batch = bool(body.get("batch")) and llm_provider.batch_supported()
+        job.status = "processing"
+        job.progress_label = "Reading the pages with the AI …"
+    else:
+        job.status = "cancelled"
+    jobs.save_job(job)
+    return {"status": job.status}
 
 
 def _record_usage(job) -> None:
@@ -356,6 +412,11 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         existing_tags = _fetch_existing_tags()
         job.progress_total = len(links)
         job.page_count = len(links)
+        if _asks_about_half_price(job):
+            total = len(links) * TOKENS_PER_LINK
+            if not _go_ahead(job, {"links": len(links), "total": total, "input": round(total * 0.7),
+                                   "output": round(total * 0.3)}):
+                return
         batched = _as_batch(job)
         loaded = []  # (number, url, result) - read first when the AI gets them as one batch
         for number, url in enumerate(links, 1):
@@ -405,8 +466,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.status = "error"
         job.error = str(exc)
     finally:
-        _record_usage(job)
-        notify.import_finished(job)
+        if job.status != "cancelled":
+            _record_usage(job)
+            notify.import_finished(job)
         jobs.save_job(job)
 
 
@@ -804,7 +866,7 @@ async def list_import_jobs():
     """Recent imports (newest first) for the import page. Import jobs live in
     memory, so this covers the time since the last restart."""
     items = []
-    for job in sorted(jobs.list_jobs(), key=lambda j: -j.created_at)[:15]:
+    for job in sorted((j for j in jobs.list_jobs() if j.status != "cancelled"), key=lambda j: -j.created_at)[:15]:
         items.append({
             "id": job.id, "filename": job.filename, "status": job.status, "created_at": job.created_at,
             "recipes": len(job.recipes),

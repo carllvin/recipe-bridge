@@ -714,6 +714,8 @@ function pollJob() {
         return;
       }
 
+      if (job.status === 'confirm') { showImportEstimate(job); return; }
+      if (job.status === 'cancelled') { leaveCancelledImport(); return; }
       updateProgressUI(job);
       state.pollTimer = setTimeout(tick, 2000);
     } catch (e) {
@@ -731,6 +733,56 @@ function showJobFailed(job) {
   el('processing-screen').classList.add('hidden');
   el('upload-screen').classList.remove('hidden');
   showUploadError(`${t('processingErrorPrefix')} ${job.error || ''}`);
+  loadRecentImports();
+}
+
+// A large import without "half price" asks once more: half price after
+// all (ready within up to 24 hours), now at full price, or cancel.
+function showImportEstimate(job) {
+  const est = job.estimate || {};
+  const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
+  el('processing-screen').querySelector('.spinner').classList.add('hidden');
+  el('processing-text').classList.add('hidden');
+  el('progress-track').classList.add('hidden');
+  el('confirm-text').textContent = tf(est.links ? 'confirmTextLinks' : 'confirmText',
+    { pages: fmt(job.page_count), links: fmt(est.links), total: fmt(est.total), half: fmt(Math.round((est.total || 0) / 2)) });
+  el('confirm-budget').textContent = est.budget_left == null ? ''
+    : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
+  el('confirm-box').classList.remove('hidden');
+}
+
+function hideImportEstimate() {
+  el('confirm-box').classList.add('hidden');
+  el('processing-screen').querySelector('.spinner').classList.remove('hidden');
+  el('processing-text').classList.remove('hidden');
+}
+
+async function answerImportEstimate(start, batch = false) {
+  const jobId = state.jobId;
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/confirm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, batch }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  } catch (e) {
+    el('confirm-budget').textContent = `⚠️ ${e.message}`;
+    return;
+  }
+  hideImportEstimate();
+  if (start) pollJob();
+  else leaveCancelledImport();
+}
+el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
+el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
+el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
+
+function leaveCancelledImport() {
+  clearTimeout(state.pollTimer);
+  hideImportEstimate();
+  state.jobId = null;
+  setJobUrl(null);
+  el('processing-screen').classList.add('hidden');
+  el('upload-screen').classList.remove('hidden');
   loadRecentImports();
 }
 
@@ -1931,6 +1983,7 @@ async function loadRecentImports() {
     if (!items.length) { box.classList.add('hidden'); return; }
     el('recent-imports-list').innerHTML = items.map((j) => {
       const status = j.status === 'processing' ? t('recentImportRunning')
+        : j.status === 'confirm' ? t('recentImportConfirm')
         : j.status === 'error' ? t('recentImportError')
         : tf('recentImportLine', { recipes: j.recipes, imported: j.imported });
       return `<div class="new-recipes-open-job"><span><strong>${escapeHtml(j.filename)}</strong> · ${escapeHtml(status)} · ${escapeHtml(shortWhen(j.created_at))}</span>
