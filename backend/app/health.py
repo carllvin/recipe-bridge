@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, migration, photo_quality, mealie_client, mealie_maintenance, source_tag, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, migration, photo_quality, mealie_client, mealie_maintenance, source_index, source_tag, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -155,6 +155,7 @@ def _compute() -> None:
             unit_conversions = tools_conversions._fetch_all(client, "unit-conversion")
             books = migration._tandoor_books(client)  # recipe id -> its cookbooks, for the source tag
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
+            source_index.rebuild((r.get("source_url"), r.get("name", "")) for r in recipes)  # duplicates by address
             weak_photos = photo_quality.problems_of(
                 {str(r["id"]): r["image"] for r in recipes if r.get("image")}, photo_quality.fetcher(client))
             pairs = tools_conversions.recipe_pairs(recipes)

@@ -93,6 +93,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
     for Tandoor): each recipe's version (updatedAt) and how many recipes use
     each ingredient, unit and tag."""
     recipes = fetch_recipes_full(client)
+    from . import source_index
+    source_index.rebuild((r.get("orgURL"), r.get("name", "")) for r in recipes)  # duplicates by address
     try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
         from . import cook_today, mealie_plan
         cook_today.save_index([mealie_plan.as_tandoor(r) for r in recipes])

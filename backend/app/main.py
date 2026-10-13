@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, diagnostics, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -88,6 +88,12 @@ def _mark_duplicates(job) -> None:
     existing_lower = {n.strip().lower(): n for n in existing_names if n.strip()}
 
     for recipe in job.recipes:
+        same_page = source_index.find(recipe.source_url) if recipe.source_url else None
+        if same_page and same_page in existing_names:  # the same page, whatever its title says
+            recipe.duplicate_match = same_page
+            recipe.duplicate_exact = True
+            recipe.selected = False
+            continue
         title_norm = recipe.title.strip().lower()
         if not title_norm:
             continue
@@ -1102,6 +1108,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 try:
                     tandoor_id = api.create_recipe(client, recipe, step_images=step_images, warnings=warnings)
                     recipe.tandoor_recipe_id = tandoor_id
+                    if recipe.source_url:
+                        source_index.add(recipe.source_url, recipe.title)
 
                     if image_path and os.path.exists(image_path):
                         try:
@@ -1204,6 +1212,8 @@ def _delete_imported(client, recipe) -> None:
     """Undo an import: the recipe - and with Tandoor its step photos, which
     live in Tandoor's file storage on their own."""
     target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+    if recipe.source_url:
+        source_index.remove(recipe.source_url)
     if recipe.step_file_ids and not target.is_mealie():
         tandoor_client.delete_user_files(client, recipe.step_file_ids)
         recipe.step_file_ids = []

@@ -3,6 +3,9 @@
 ## Unreleased
 
 **Import**
+- A page imported before is flagged as a duplicate by its address, even
+  when the title differs (translated, renamed); addresses come from the
+  overview's read and from every import
 - Cookbooks with Claude: the extraction's instructions are cached across
   the book's chunks – after the first chunk they cost about a tenth (usage
   and budget count cache reads that way)
