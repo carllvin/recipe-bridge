@@ -138,14 +138,20 @@ SINGLE_RECIPE_NOTE = (
 
 
 def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
-                    single_recipe: bool = False, handwriting: bool = False) -> None:
+                    single_recipe: bool = False, handwriting: bool = False, resume: dict | None = None) -> None:
+    """resume: a batch sent before a restart (_resume_batches) - the pages
+    read then, and the batch whose answers are still to be collected."""
     job = jobs.get_job(job_id)
     if job is None:
         return
     try:
         images_dir = os.path.join(_job_dir(job_id), "images")
 
-        if doc_type == "pdf":
+        if resume is not None:
+            result = resume["result"]
+            job.progress_label = "Waiting for the AI batch (picked up again after a restart) …"
+            jobs.save_job(job)
+        elif doc_type == "pdf":
             job.progress_label = "Reading PDF …"
             jobs.save_job(job)
             result = process_pdf(source_paths[0], images_dir, force_ocr=force_ocr)
@@ -260,6 +266,9 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             existing_tags=existing_tags,
             batch=_as_batch(job),
             on_wait=batch_wait,
+            on_submit=lambda ref: _remember_batch(job, ref, kind="pages", doc_type=doc_type, source_paths=source_paths,
+                                                  result=_keepable(result)),
+            batch_ref=(resume or {}).get("ref"),
         )
         if doc_type == "url":
             for recipe in recipes:
@@ -303,7 +312,73 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
             _record_usage(job)
             notify.import_finished(job)
+        if doc_type != "links":
+            _forget_batch(job.id)
         jobs.save_job(job)
+
+
+# ---------- AI batches across a restart ----------
+#
+# An import waiting for its AI batch (up to 24 hours) keeps what it needs on
+# disk: the batch's reference, the pages it read, the job. After a restart
+# (an update in Dockge, say) _resume_batches picks it up and collects the
+# answers - the batch was paid for, nothing is sent twice.
+
+def _batch_path(job_id: str) -> str:
+    return os.path.join(_job_dir(job_id), "batch.json")
+
+
+def _keepable(result: dict) -> dict:
+    """What of a reader's result is needed after a restart (JSON only)."""
+    return {k: result.get(k) for k in ("pages", "images", "page_count", "metadata_title", "metadata_author",
+                                       "toc_pages", "source_tag") if k in result}
+
+
+def _remember_batch(job, ref: dict, **context) -> None:
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    data = {"ref": ref, "job": job.model_dump(mode="json"), **context}
+    tmp = _batch_path(job.id) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, _batch_path(job.id))
+    log.info("Import %s: AI batch %s sent (%d part(s)) - kept for a restart", job.id, ref.get("id"), ref.get("n", 0))
+
+
+def _forget_batch(job_id: str) -> None:
+    try:
+        os.remove(_batch_path(job_id))
+    except OSError:
+        pass
+
+
+def _resume_batches() -> int:
+    """At startup: every import that was waiting for its AI batch waits on."""
+    from .schemas import Job
+    count = 0
+    if not os.path.isdir(settings.data_dir):
+        return 0
+    for name in os.listdir(settings.data_dir):
+        path = _batch_path(name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            job = Job.model_validate(data["job"])
+        except Exception as exc:  # noqa: BLE001 - a broken file must not stop the start
+            log.warning("AI batch of import %s can't be picked up again: %s", name, exc)
+            continue
+        job.status, job.error = "processing", None
+        jobs.save_job(job)
+        if data.get("kind") == "links":
+            target_fn, args = _run_link_list, (job, [], os.path.join(_job_dir(job.id), "images"))
+            kwargs = {"resume": data}
+        else:
+            target_fn, args = _run_extraction, (job.id, data.get("source_paths") or [], data.get("doc_type") or "pdf")
+            kwargs = {"resume": data}
+        threading.Thread(target=target_fn, args=args, kwargs=kwargs, daemon=True).start()
+        count += 1
+    return count
 
 
 def _as_batch(job) -> bool:
@@ -399,7 +474,7 @@ def _finish_extraction(job, step_photos: bool = True) -> None:
     job.status = "ready"
 
 
-def _run_link_list(job, links: list[str], images_dir: str) -> None:
+def _run_link_list(job, links: list[str], images_dir: str, resume: dict | None = None) -> None:
     """Recipe links (a .txt file, or picked from a site scan / bookmarks):
     every link is loaded and extracted on its own (one web page = one AI
     call), and all recipes end up in one review. Each link's page number is
@@ -407,12 +482,14 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
     that can't be loaded or contain no recipe are skipped and listed in
     job.notes."""
     try:
-        if not links:
+        if not links and resume is None:
             raise ValueError("The text file contains no links (http:// or https://).")
         existing_tags = _fetch_existing_tags()
-        job.progress_total = len(links)
-        job.page_count = len(links)
-        if _asks_about_half_price(job):
+        if resume is not None:  # a batch sent before a restart: its pages were read already
+            links = []
+        job.progress_total = len(links) or job.progress_total
+        job.page_count = len(links) or job.page_count
+        if links and _asks_about_half_price(job):
             total = len(links) * TOKENS_PER_LINK
             if not _go_ahead(job, {"links": len(links), "total": total, "input": round(total * 0.7),
                                    "output": round(total * 0.3)}):
@@ -438,6 +515,8 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 job.notes.append(f"{url} – {exc}")
                 continue
             _add_link_recipes(job, number, url, result, recipes)
+        if resume is not None:
+            loaded = [tuple(item) for item in resume["loaded"]]
         if loaded:
             page_sets = [[{"page": number, "text": result["pages"][0]["text"]}] for number, _u, result in loaded]
 
@@ -446,7 +525,11 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 job.progress_label = f"Waiting for the AI batch: {done}/{total} page(s) done (half price, up to 24 h)"
                 jobs.save_job(job)
             try:
-                answers = extract_each_as_batch(page_sets, existing_tags=existing_tags, on_wait=batch_wait)
+                answers = extract_each_as_batch(
+                    page_sets, existing_tags=existing_tags, on_wait=batch_wait,
+                    on_submit=lambda ref: _remember_batch(job, ref, kind="links", loaded=[
+                        (number, url, _keepable(result)) for number, url, result in loaded]),
+                    batch_ref=(resume or {}).get("ref"))
             except Exception as exc:  # noqa: BLE001 - one by one instead
                 log.warning("AI batch for the link list failed (%s) - reading the pages one by one", exc)
                 answers = [extract_recipes_from_pages(pages, existing_tags=existing_tags) for pages in page_sets]
@@ -469,6 +552,7 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         if job.status != "cancelled":
             _record_usage(job)
             notify.import_finished(job)
+        _forget_batch(job.id)
         jobs.save_job(job)
 
 
@@ -2169,6 +2253,9 @@ async def on_startup() -> None:
     loaded = tool_jobs.load_tool_jobs()
     if loaded:
         log.info("Restored %d tool run(s) from disk", loaded)
+    resumed = _resume_batches()
+    if resumed:
+        log.info("Waiting again for the AI batch of %d import(s)", resumed)
     tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()

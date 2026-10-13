@@ -34,7 +34,7 @@ data volume, no restart needed.
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |
-| `WATCH_BATCH` | `true` | Imports from the watched folder go to the AI as a batch: half price, done within up to 24 hours (Claude, OpenAI). A restart while waiting ends that import – put the file (from `processed/`) into the folder again. Imports started in the app have a checkbox for it |
+| `WATCH_BATCH` | `true` | Imports from the watched folder go to the AI as a batch: half price, done within up to 24 hours (Claude, OpenAI). A restart while waiting (an update) is fine – the import picks up its batch again. Imports started in the app have a checkbox for it |
 | `CONVERT_TO_METRIC` | `true` | Converts cups/oz/lb/°F/inch to g/ml/°C/cm |
 | `CHECK_DUPLICATES` | `true` | Flags recipes whose title already exists |
 | `REUSE_EXISTING_TAGS` | `true` | Asks the AI to prefer your existing tags |

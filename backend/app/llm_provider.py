@@ -322,18 +322,62 @@ def batch_supported() -> bool:
 
 
 def complete_batch(system_prompt, contents: list[str], max_tokens: int = 4096,
-                   on_wait=None) -> list[tuple[str, TokenUsage]]:
+                   on_wait=None, on_submit=None) -> list[tuple[str, TokenUsage]]:
     """One answer per content, in their order. system_prompt: one for all,
-    or a list with one per content. on_wait(done, total) while waiting.
-    Raises when the batch fails or takes too long - the caller then asks
-    one by one."""
+    or a list with one per content. on_submit(ref) right after the batch
+    is sent - keeping ref lets collect_batch() pick it up again after a
+    restart. on_wait(done, total) while waiting. Raises when the batch
+    fails or takes too long - the caller then asks one by one."""
+    ref = submit_batch(system_prompt, contents, max_tokens)
+    if on_submit:
+        on_submit(ref)
+    return collect_batch(ref, on_wait)
+
+
+def submit_batch(system_prompt, contents: list[str], max_tokens: int = 4096) -> dict:
+    """Sends the batch - {"provider", "id", "n"}."""
     provider = _active_provider()
     model = _model(provider, tools=False)
+    systems = _systems(system_prompt, len(contents))
     if provider == "anthropic":
-        return _batch_anthropic(system_prompt, contents, max_tokens, model, on_wait)
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        def params(system, content):
+            p = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
+            if system:  # mostly the same for every request: cached inside the batch too
+                p["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+            return p
+        batch = client.messages.batches.create(requests=[
+            {"custom_id": f"c{n}", "params": params(system, content)}
+            for n, (system, content) in enumerate(zip(systems, contents))])
+        return {"provider": "anthropic", "id": batch.id, "n": len(contents)}
     if provider == "openai":
-        return _batch_openai(system_prompt, contents, max_tokens, model, on_wait)
+        import json
+
+        client = _openai_client("openai")
+        lines = []
+        for n, (system, content) in enumerate(zip(systems, contents)):
+            messages = ([{"role": "system", "content": system}] if system else []) + \
+                       [{"role": "user", "content": content}]
+            lines.append(json.dumps({"custom_id": f"c{n}", "method": "POST", "url": "/v1/chat/completions",
+                                     "body": {"model": model, "max_completion_tokens": max_tokens,
+                                              "messages": messages}}))
+        uploaded = client.files.create(file=("chunks.jsonl", "\n".join(lines).encode("utf-8")), purpose="batch")
+        batch = client.batches.create(input_file_id=uploaded.id, endpoint="/v1/chat/completions",
+                                      completion_window="24h")
+        return {"provider": "openai", "id": batch.id, "n": len(contents)}
     raise RuntimeError(f"Batches aren't available with AI_PROVIDER={provider}.")
+
+
+def collect_batch(ref: dict, on_wait=None) -> list[tuple[str, TokenUsage]]:
+    """Waits for a sent batch and returns its answers in order."""
+    if ref["provider"] == "anthropic":
+        return _collect_anthropic(ref, on_wait)
+    if ref["provider"] == "openai":
+        return _collect_openai(ref, on_wait)
+    raise RuntimeError(f"Unknown batch provider {ref['provider']!r}.")
 
 
 def _wait(check, on_wait):
@@ -359,60 +403,45 @@ def _systems(system_prompt, n: int) -> list:
     return list(system_prompt) if isinstance(system_prompt, (list, tuple)) else [system_prompt] * n
 
 
-def _batch_anthropic(system_prompt, contents, max_tokens, model, on_wait):
+def _collect_anthropic(ref, on_wait):
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    def params(system, content):
-        p = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
-        if system:  # mostly the same for every request: cached inside the batch too
-            p["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-        return p
-    batch = client.messages.batches.create(requests=[
-        {"custom_id": f"c{n}", "params": params(system, content)}
-        for n, (system, content) in enumerate(zip(_systems(system_prompt, len(contents)), contents))])
+    total = ref["n"]
 
     def check():
-        b = client.messages.batches.retrieve(batch.id)
+        b = client.messages.batches.retrieve(ref["id"])
         counts = b.request_counts
         done = (counts.succeeded or 0) + (counts.errored or 0) + (counts.canceled or 0) + (counts.expired or 0)
-        return done, len(contents), b.processing_status == "ended"
+        return done, total, b.processing_status == "ended"
     _wait(check, on_wait)
     answers = {}
-    for item in client.messages.batches.results(batch.id):
+    for item in client.messages.batches.results(ref["id"]):
         if item.result.type == "succeeded":
             message = item.result.message
             answers[item.custom_id] = ("".join(b.text for b in message.content if b.type == "text"),
                                        _half(_anthropic_usage(message)))
         else:
             answers[item.custom_id] = None
-    failed = [cid for cid in (f"c{n}" for n in range(len(contents))) if not answers.get(cid)]
+    failed = [cid for cid in (f"c{n}" for n in range(total)) if not answers.get(cid)]
     if failed:
-        raise RuntimeError(f"{len(failed)} of {len(contents)} batch request(s) failed.")
-    return [answers[f"c{n}"] for n in range(len(contents))]
+        raise RuntimeError(f"{len(failed)} of {total} batch request(s) failed.")
+    return [answers[f"c{n}"] for n in range(total)]
 
 
-def _batch_openai(system_prompt, contents, max_tokens, model, on_wait):
+def _collect_openai(ref, on_wait):
     import json
 
     client = _openai_client("openai")
-    lines = []
-    for n, (system, content) in enumerate(zip(_systems(system_prompt, len(contents)), contents)):
-        messages = ([{"role": "system", "content": system}] if system else []) + \
-                   [{"role": "user", "content": content}]
-        lines.append(json.dumps({"custom_id": f"c{n}", "method": "POST", "url": "/v1/chat/completions",
-                                 "body": {"model": model, "max_completion_tokens": max_tokens, "messages": messages}}))
-    uploaded = client.files.create(file=("chunks.jsonl", "\n".join(lines).encode("utf-8")), purpose="batch")
-    batch = client.batches.create(input_file_id=uploaded.id, endpoint="/v1/chat/completions", completion_window="24h")
+    total = ref["n"]
     state = {}
 
     def check():
-        b = client.batches.retrieve(batch.id)
+        b = client.batches.retrieve(ref["id"])
         state["batch"] = b
         counts = b.request_counts
         done = ((counts.completed or 0) + (counts.failed or 0)) if counts else 0
-        return done, len(contents), b.status in ("completed", "failed", "expired", "cancelled")
+        return done, total, b.status in ("completed", "failed", "expired", "cancelled")
     _wait(check, on_wait)
     b = state["batch"]
     if b.status != "completed" or not b.output_file_id:
@@ -429,7 +458,7 @@ def _batch_openai(system_prompt, contents, max_tokens, model, on_wait):
         answers[row["custom_id"]] = (body["choices"][0]["message"].get("content") or "",
                                      _half(TokenUsage(input_tokens=usage.get("prompt_tokens", 0) or 0,
                                                       output_tokens=usage.get("completion_tokens", 0) or 0)))
-    failed = [n for n in range(len(contents)) if f"c{n}" not in answers]
+    failed = [n for n in range(total) if f"c{n}" not in answers]
     if failed:
-        raise RuntimeError(f"{len(failed)} of {len(contents)} batch request(s) failed.")
-    return [answers[f"c{n}"] for n in range(len(contents))]
+        raise RuntimeError(f"{len(failed)} of {total} batch request(s) failed.")
+    return [answers[f"c{n}"] for n in range(total)]

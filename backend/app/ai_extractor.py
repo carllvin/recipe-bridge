@@ -528,13 +528,18 @@ def _page_text(pages: list[dict]) -> str:
 
 
 def extract_each_as_batch(page_sets: list[list[dict]], existing_tags: Optional[list[str]] = None,
-                          on_wait=None) -> list[tuple[list[ExtractedRecipe], TokenUsage]]:
+                          on_wait=None, on_submit=None,
+                          batch_ref: Optional[dict] = None) -> list[tuple[list[ExtractedRecipe], TokenUsage]]:
     """A link list as one batch: every page set (one web page each) is its
-    own request with its own instructions, all at half price. Raises when
-    the batch fails - the caller then reads them one by one."""
-    systems = [_system_prompt_for(pages, existing_tags) for pages in page_sets]
-    answers = llm_provider.complete_batch(systems, [_page_text(pages) for pages in page_sets],
-                                          max_tokens=8000, on_wait=on_wait)
+    own request with its own instructions, all at half price. on_submit /
+    batch_ref: see extract_recipes_from_pages. Raises when the batch fails
+    - the caller then reads them one by one."""
+    if batch_ref is not None:  # sent before a restart - only the answers are missing
+        answers = llm_provider.collect_batch(batch_ref, on_wait)
+    else:
+        systems = [_system_prompt_for(pages, existing_tags) for pages in page_sets]
+        answers = llm_provider.complete_batch(systems, [_page_text(pages) for pages in page_sets],
+                                              max_tokens=8000, on_wait=on_wait, on_submit=on_submit)
     out = []
     for (text_out, usage) in answers:
         try:
@@ -553,11 +558,15 @@ def extract_recipes_from_pages(
     existing_tags: Optional[list[str]] = None,
     batch: bool = False,
     on_wait=None,
+    on_submit=None,
+    batch_ref: Optional[dict] = None,
 ) -> tuple[list[ExtractedRecipe], TokenUsage]:
     """batch=True (the import page's checkbox, WATCH_BATCH): all chunks as
     one batch at half price - on_wait(done, total) while it runs; falls
     back to one call per chunk when the provider has no batches or the
-    batch fails."""
+    batch fails. on_submit(ref) once the batch is sent (the caller keeps it
+    for a restart); batch_ref: a batch sent before a restart - its answers
+    are collected instead of sending again."""
     if not llm_provider.is_configured():
         raise RuntimeError(llm_provider.missing_key_hint())
     system_prompt = _system_prompt_for(pages, existing_tags)
@@ -575,11 +584,12 @@ def extract_recipes_from_pages(
     texts = [_page_text(chunk) for chunk in chunks]
     answers: dict[int, tuple[str, TokenUsage]] = {}
     wanted = [n for n, t in enumerate(texts) if t.strip()]
-    if batch and llm_provider.batch_supported() and wanted:
+    if (batch or batch_ref) and llm_provider.batch_supported() and wanted:
         try:
             log.info("Extraction as one AI batch: %d chunk(s), half price, up to 24 h", len(wanted))
-            results = llm_provider.complete_batch(system_prompt, [texts[n] for n in wanted], max_tokens=8000,
-                                                  on_wait=on_wait)
+            results = (llm_provider.collect_batch(batch_ref, on_wait) if batch_ref is not None else
+                       llm_provider.complete_batch(system_prompt, [texts[n] for n in wanted], max_tokens=8000,
+                                                   on_wait=on_wait, on_submit=on_submit))
             answers = dict(zip(wanted, results))
         except Exception as exc:  # noqa: BLE001 - one by one instead
             log.warning("AI batch failed (%s) - asking chunk by chunk", exc)

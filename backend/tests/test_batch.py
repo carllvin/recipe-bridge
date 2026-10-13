@@ -152,7 +152,7 @@ def test_link_list_as_one_batch(monkeypatch):
     monkeypatch.setattr(main, "extract_recipes_from_pages", lambda *a, **k: (_ for _ in ()).throw(AssertionError("one by one")))
     seen = {}
 
-    def batch(page_sets, existing_tags=None, on_wait=None):
+    def batch(page_sets, existing_tags=None, on_wait=None, on_submit=None, batch_ref=None):
         seen["n"] = len(page_sets)
         return [([ExtractedRecipe(id=f"r{n}", title=f"R{n}", source_page_start=1, source_page_end=1)],
                  TokenUsage(input_tokens=50)) for n in range(len(page_sets))]
@@ -171,3 +171,94 @@ def test_each_page_its_own_request_in_one_batch(monkeypatch):
     assert len(batches.created) == 2 and not direct
     assert all("system" in r["params"] for r in batches.created)
     assert [[r.title for r in recipes] for recipes, _u in out] == [["Suppe"], ["Suppe"]]
+
+
+def _wait_for(job_id, status="ready"):
+    import time
+    from app import jobs
+    for _ in range(200):
+        job = jobs.get_job(job_id)
+        if job and job.status in (status, "error"):
+            return job
+        time.sleep(0.02)
+    return jobs.get_job(job_id)
+
+
+def _quiet_finish(monkeypatch):
+    from app import main
+    monkeypatch.setattr(main, "_fetch_existing_tags", lambda: [])
+    monkeypatch.setattr(main, "_mark_duplicates", lambda job: None)
+    monkeypatch.setattr(main.import_matching, "match_job_ingredients", lambda job: None)
+    monkeypatch.setattr(main, "guess_cookbook_title", lambda *a, **k: ("Buch", ai_extractor.TokenUsage()))
+
+
+def test_batch_survives_a_restart(monkeypatch):
+    """Sent, then the container restarts: the batch is collected afterwards, not sent again."""
+    import os
+    from app import jobs, main
+    _quiet_finish(monkeypatch)
+    monkeypatch.setattr(settings, "anthropic_api_key", "x")
+    monkeypatch.setattr(llm_provider, "batch_supported", lambda: True)
+    sent = []
+    monkeypatch.setattr(llm_provider, "submit_batch", lambda *a, **k: sent.append(1) or {"provider": "anthropic", "id": "b9", "n": 3})
+
+    class Restart(Exception):
+        pass
+
+    def gone(ref, on_wait=None):
+        raise Restart()
+    monkeypatch.setattr(llm_provider, "collect_batch", gone)
+    job = jobs.create_job("buch.pdf")
+    job.batch = True
+    monkeypatch.setattr(main, "process_pdf", lambda path, d, force_ocr=False: {
+        "pages": PAGES, "images": {}, "page_count": len(PAGES), "metadata_title": "Buch", "toc_pages": []})
+    main._run_extraction(job.id, ["/nowhere.pdf"], "pdf")  # the batch "fails" - falls back to single calls...
+    assert sent == [1]
+    # ...so simulate the real case: the container stopped while waiting - the file is still there
+    main._remember_batch(job, {"provider": "anthropic", "id": "b9", "n": 3}, kind="pages", doc_type="pdf",
+                         source_paths=["/nowhere.pdf"], result=main._keepable(
+                             {"pages": PAGES, "images": {}, "page_count": len(PAGES), "toc_pages": []}))
+    jobs._jobs.clear()
+    collected = []
+
+    def answers(ref, on_wait=None):
+        collected.append(ref["id"])
+        return [(RECIPE, ai_extractor.TokenUsage(input_tokens=500, output_tokens=100))] * ref["n"]
+    monkeypatch.setattr(llm_provider, "collect_batch", answers)
+    assert main._resume_batches() == 1
+    resumed = _wait_for(job.id)
+    assert collected == ["b9"] and sent == [1]  # nothing sent twice
+    assert resumed.status == "ready" and [r.title for r in resumed.recipes] == ["Suppe"]
+    import time
+    for _ in range(100):
+        if not os.path.exists(main._batch_path(job.id)):
+            break
+        time.sleep(0.02)
+    assert not os.path.exists(main._batch_path(job.id))
+
+
+def test_link_list_batch_survives_a_restart(monkeypatch):
+    import os
+    from app import jobs, main
+    _quiet_finish(monkeypatch)
+    monkeypatch.setattr(settings, "anthropic_api_key", "x")
+    monkeypatch.setattr(llm_provider, "batch_supported", lambda: True)
+    job = jobs.create_job("2 links")
+    job.batch = True
+    loaded = [(1, "https://a.example/1", {"pages": [{"page": 1, "text": "Soup " * 50}], "images": {}}),
+              (2, "https://b.example/2", {"pages": [{"page": 1, "text": "Cake " * 50}], "images": {}})]
+    main._remember_batch(job, {"provider": "anthropic", "id": "b7", "n": 2}, kind="links", loaded=loaded)
+    jobs._jobs.clear()
+    monkeypatch.setattr(main, "process_url", lambda *a: (_ for _ in ()).throw(AssertionError("pages read again")))
+    monkeypatch.setattr(llm_provider, "collect_batch",
+                        lambda ref, on_wait=None: [(RECIPE, ai_extractor.TokenUsage(input_tokens=10))] * ref["n"])
+    assert main._resume_batches() == 1
+    resumed = _wait_for(job.id)
+    assert resumed.status == "ready", resumed.error
+    assert [r.source_url for r in resumed.recipes] == ["https://a.example/1", "https://b.example/2"]
+    import time
+    for _ in range(100):  # removed right after the job is done
+        if not os.path.exists(main._batch_path(job.id)):
+            break
+        time.sleep(0.02)
+    assert not os.path.exists(main._batch_path(job.id))
