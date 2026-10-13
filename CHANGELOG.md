@@ -48,6 +48,8 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Amounts in the steps work again for steps with several photos (the
+  photos in the step text made the check discard the result)
 - Mealie: no more *amounts into the steps* – Mealie has no templates,
   and amounts written into the text were wrong as soon as the servings
   changed (tile, tool and *Process new recipes*)

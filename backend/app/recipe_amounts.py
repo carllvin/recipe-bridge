@@ -152,6 +152,17 @@ def _numbers(text) -> list[str]:
     return re.findall(r"\d+(?:[.,]\d+)?", text or "")
 
 
+# Further step photos are shown in the step text as markdown images
+# (tandoor_client) - kept out of the AI's text and the checks (their
+# addresses hold numbers), and put back behind the new text.
+PHOTOS = re.compile(r"(?:\s*!\[[^\]]*\]\([^)]*\))+\s*$")
+
+
+def _split_photos(text) -> tuple[str, str]:
+    match = PHOTOS.search(text or "")
+    return ((text or "")[:match.start()], match.group(0)) if match else (text or "", "")
+
+
 def amounts_plan(job, recipe) -> dict:
     """One AI call. Returns {"steps": [{"index", "text", "ids"}]} for the
     steps that change; raises ValueError for an answer that can't be
@@ -166,7 +177,7 @@ def amounts_plan(job, recipe) -> dict:
                 own[f"i{n}"] = ing
                 n += 1
         keyed.append(own)
-    payload = {"steps": [{"instruction": s.get("instruction") or "",
+    payload = {"steps": [{"instruction": _split_photos(s.get("instruction"))[0],
                           "ingredients": [{"key": k, "text": amount_text(i)} for k, i in own.items()]}
                          for s, own in zip(steps, keyed)]}
 
@@ -183,12 +194,13 @@ def amounts_plan(job, recipe) -> dict:
 
     changed = []
     for index, (step, own, text) in enumerate(zip(steps, keyed, texts)):
-        old = step.get("instruction") or ""
+        old, photos = _split_photos(step.get("instruction"))
         text, seen = _checked(old, text, own, index)
-        if not seen or text == old:
+        if not seen or text == old.strip():
             continue
         changed.append({"index": index, "text": text, "keys": {k: own[k].get("id") for k in seen},
-                        "ids": [i.get("id") for i in step.get("ingredients") or []], "own": own, "original": old})
+                        "ids": [i.get("id") for i in step.get("ingredients") or []], "own": own, "original": old,
+                        **({"photos": photos} if photos else {})})
     _proofread(job, changed)
     for change in changed:
         del change["own"], change["original"]
@@ -460,7 +472,10 @@ def build_payload(recipe, plan) -> dict:
             ingredients.append(ing)
         step["ingredients"] = ingredients
         if n in texts:
-            step["instruction"] = render(texts[n]["text"], old.get("ingredients") or [], texts[n]["keys"], templates=True)
+            step["instruction"] = (render(texts[n]["text"], old.get("ingredients") or [], texts[n]["keys"], templates=True)
+                                   + texts[n].get("photos", ""))
+        if isinstance(step.get("file"), dict) and step["file"].get("id"):  # the step's photo: as a reference, like food and unit
+            step["file"] = {"id": step["file"]["id"], "name": step["file"].get("name", "")}
         steps.append(step)
     return {"steps": steps}
 
