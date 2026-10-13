@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
-from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
+from .ai_extractor import extract_each_as_batch, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
@@ -243,8 +243,6 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
-        if not _go_ahead(job, result["pages"], toc_pages, existing_tags, doc_type):
-            return
         recipes: list[ExtractedRecipe]
         def batch_wait(done: int, total: int) -> None:
             job.progress_current, job.progress_total = done, total
@@ -256,7 +254,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             on_progress=progress_cb,
             toc_pages=toc_pages,
             existing_tags=existing_tags,
-            batch=_as_batch(job, doc_type),
+            batch=_as_batch(job),
             on_wait=batch_wait,
         )
         if doc_type == "url":
@@ -298,74 +296,18 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         job.status = "error"
         job.error = str(exc)
     finally:
-        if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
+        if doc_type != "links":  # _run_link_list records its own usage
             _record_usage(job)
             notify.import_finished(job)
         jobs.save_job(job)
 
 
-def _as_batch(job, doc_type: str) -> bool:
-    """An AI batch (half price, up to 24 h): asked for at the estimate, or
-    WATCH_BATCH for the watched folder, UPLOAD_BATCH for uploaded files."""
-    if job.batch:
-        return True
+def _as_batch(job) -> bool:
+    """An AI batch (half price, up to 24 h): the import page's checkbox, or
+    WATCH_BATCH for the watched folder (on by default - nobody waits there)."""
     if job.source == "folder":
-        return settings.watch_batch
-    return settings.upload_batch and not job.source and doc_type not in ("url", "text", "links", "audio")
-
-
-CONFIRM_WAIT_SECONDS = 3600
-
-
-ASKED_TYPES = ("pdf", "epub", "docx", "rtf", "txt")  # cookbooks - not a link, a text, a photo, a voice note
-
-
-def _go_ahead(job, pages: list[dict], toc_pages, existing_tags, doc_type: str = "pdf") -> bool:
-    """A cookbook started at the screen waits here for the OK - POST
-    /api/jobs/{id}/confirm - with its estimate shown (IMPORT_CONFIRM: always,
-    or only above IMPORT_CONFIRM_TOKENS). Single recipes (links, text,
-    photos, voice notes) and imports from the phone or the watched folder
-    run on - the monthly budget is their limit. False: cancelled (or no answer)."""
-    mode = (settings.import_confirm or "always").strip().lower()
-    if job.source or mode == "never" or doc_type not in ASKED_TYPES:
-        return True
-    estimate = estimate_tokens(pages, toc_pages=toc_pages, existing_tags=existing_tags)
-    log.info("Import %s estimated at %d tokens in %d chunk(s)", job.id, estimate["total"], estimate["chunks"])
-    if mode == "large" and estimate["total"] < settings.import_confirm_tokens:
-        return True
-    budget = usage_log.budget_status()
-    estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None
-    job.estimate = estimate
-    job.status = "confirm"
-    job.progress_label = None
-    jobs.save_job(job)
-    until = time.monotonic() + CONFIRM_WAIT_SECONDS
-    while job.status == "confirm" and time.monotonic() < until:
-        time.sleep(0.5)
-    if job.status == "processing":
-        return True
-    if job.status == "confirm":
-        job.status = "cancelled"
-    return False
-
-
-@app.post("/api/jobs/{job_id}/confirm")
-async def confirm_import(job_id: str, body: dict = Body(...)):
-    """{"start": true | false} - the answer to a large import's estimate."""
-    job = jobs.get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found.")
-    if job.status != "confirm":
-        raise HTTPException(409, "This import isn't waiting for an answer.")
-    if body.get("start"):
-        _check_budget()
-        job.batch = bool(body.get("batch")) and llm_provider.batch_supported()
-        job.status = "processing"
-        job.progress_label = "Reading the pages with the AI …"
-    else:
-        job.status = "cancelled"
-    jobs.save_job(job)
-    return {"status": job.status}
+        return settings.watch_batch and llm_provider.batch_supported()
+    return job.batch and llm_provider.batch_supported()
 
 
 def _record_usage(job) -> None:
@@ -414,6 +356,8 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         existing_tags = _fetch_existing_tags()
         job.progress_total = len(links)
         job.page_count = len(links)
+        batched = _as_batch(job)
+        loaded = []  # (number, url, result) - read first when the AI gets them as one batch
         for number, url in enumerate(links, 1):
             job.progress_current = number
             job.progress_label = f"Link {number}/{len(links)}: {urlparse(url).netloc}"
@@ -422,6 +366,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 result = process_url(url, images_dir)
                 for image_id, info in result["images"].items():
                     job.images[image_id] = _image_entry(info, number)
+                if batched:
+                    loaded.append((number, url, result))
+                    continue
                 page = {"page": number, "text": result["pages"][0]["text"]}
                 recipes, usage = extract_recipes_from_pages([page], existing_tags=existing_tags)
                 job.token_usage.add(usage)
@@ -429,16 +376,22 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 log.info("Link %s skipped: %s", url, exc)
                 job.notes.append(f"{url} – {exc}")
                 continue
-            if not recipes:
-                job.notes.append(f"{url} – no recipe found")
-                continue
-            for recipe in recipes:
-                recipe.source_url = url
-                recipe.source_page_start = recipe.source_page_end = number
-            if source_tag.enabled() and result.get("source_tag"):
-                source_tag.add(recipes, result["source_tag"])
-                source_tag.remember("hosts", source_tag.host_of(url), result["source_tag"])
-            job.recipes.extend(recipes)
+            _add_link_recipes(job, number, url, result, recipes)
+        if loaded:
+            page_sets = [[{"page": number, "text": result["pages"][0]["text"]}] for number, _u, result in loaded]
+
+            def batch_wait(done: int, total: int) -> None:
+                job.progress_current, job.progress_total = done, total
+                job.progress_label = f"Waiting for the AI batch: {done}/{total} page(s) done (half price, up to 24 h)"
+                jobs.save_job(job)
+            try:
+                answers = extract_each_as_batch(page_sets, existing_tags=existing_tags, on_wait=batch_wait)
+            except Exception as exc:  # noqa: BLE001 - one by one instead
+                log.warning("AI batch for the link list failed (%s) - reading the pages one by one", exc)
+                answers = [extract_recipes_from_pages(pages, existing_tags=existing_tags) for pages in page_sets]
+            for (number, url, result), (recipes, usage) in zip(loaded, answers):
+                job.token_usage.add(usage)
+                _add_link_recipes(job, number, url, result, recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")
         # Each link is its own "page": only that page's photos belong to its
@@ -455,6 +408,20 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         _record_usage(job)
         notify.import_finished(job)
         jobs.save_job(job)
+
+
+def _add_link_recipes(job, number: int, url: str, result: dict, recipes) -> None:
+    """A link list: one page's recipes into the review (or a note that it had none)."""
+    if not recipes:
+        job.notes.append(f"{url} – no recipe found")
+        return
+    for recipe in recipes:
+        recipe.source_url = url
+        recipe.source_page_start = recipe.source_page_end = number
+    if source_tag.enabled() and result.get("source_tag"):
+        source_tag.add(recipes, result["source_tag"])
+        source_tag.remember("hosts", source_tag.host_of(url), result["source_tag"])
+    job.recipes.extend(recipes)
 
 
 def _classify_upload(filenames: list[str]) -> tuple[str, str]:
@@ -492,7 +459,7 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 @app.post("/api/upload")
 async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False),
-                       handwriting: bool = Form(False)):
+                       handwriting: bool = Form(False), batch: bool = Form(False)):
     """single_recipe: the uploaded photos all show one recipe (e.g. across a
     double page) - the AI is told to return exactly one. handwriting: the AI
     reads the photos instead of OCR (handwritten recipe cards)."""
@@ -504,6 +471,7 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
 
     job = jobs.create_job(_display_name(filenames))
     source_paths = await _save_uploads(files, _job_dir(job.id))
+    job.batch = batch  # the import page's "half price" checkbox
     _launch_extraction(job, source_paths, doc_type, single_recipe, handwriting)
     return {"job_id": job.id}
 
@@ -542,7 +510,7 @@ def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recip
 
 
 def _start_url_job(url: str, source: str | None = None, html: str | None = None,
-                   photos: dict[str, bytes] | None = None):
+                   photos: dict[str, bytes] | None = None, batch: bool = False):
     """Raises HTTPException(400) for an invalid address. html: the page as
     the browser has it (bookmark button) - not loaded again then; photos:
     its photos the browser already fetched ({address: bytes})."""
@@ -552,6 +520,7 @@ def _start_url_job(url: str, source: str | None = None, html: str | None = None,
         raise HTTPException(400, str(exc))
     job = jobs.create_job(urlparse(url).netloc or url)
     job.source = source
+    job.batch = batch
     os.makedirs(_job_dir(job.id), exist_ok=True)
     if html:
         with open(os.path.join(_job_dir(job.id), "page.html"), "w", encoding="utf-8") as f:
@@ -589,12 +558,13 @@ def _given_photos(job_id: str) -> dict[str, bytes]:
     return out
 
 
-def _start_text_job(text: str, source: str | None = None):
+def _start_text_job(text: str, source: str | None = None, batch: bool = False):
     text = (text or "").strip()
     if len(text) < 20:
         raise HTTPException(400, "Please paste a recipe text.")
     job = jobs.create_job(title_from_text(text))
     job.source = source
+    job.batch = batch
     os.makedirs(_job_dir(job.id), exist_ok=True)
     path = os.path.join(_job_dir(job.id), "source.txt")
     with open(path, "w", encoding="utf-8") as f:
@@ -673,7 +643,7 @@ async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
     and import flow as an uploaded document (see url_processor)."""
     _check_budget()
-    return {"job_id": _start_url_job(body.get("url", "")).id}
+    return {"job_id": _start_url_job(body.get("url", ""), batch=bool(body.get("batch"))).id}
 
 
 MAX_PAGE_PHOTOS = 16  # the main photo and the step photos (url_processor.MAX_STEP_IMAGES)
@@ -690,7 +660,8 @@ async def import_page(body: dict = Body(...)):
     if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
         raise HTTPException(413, "The page is too large.")
     photos = _page_photos(body.get("photos"))
-    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos).id}
+    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos,
+                                     batch=bool(body.get("batch"))).id}
 
 
 @app.post("/api/page-photos")
@@ -728,7 +699,7 @@ async def import_text(body: dict = Body(...)):
     """Pasted recipe text (e.g. from a message or a note) - same extraction,
     review and import flow as a document."""
     _check_budget()
-    return {"job_id": _start_text_job(body.get("text") or "").id}
+    return {"job_id": _start_text_job(body.get("text") or "", batch=bool(body.get("batch"))).id}
 
 
 @app.post("/share")
@@ -795,6 +766,7 @@ async def import_links(body: dict = Body(...)):
     if not urls:
         raise HTTPException(400, "No valid links selected.")
     job = jobs.create_job((body.get("name") or f"{len(urls)} links")[:80])
+    job.batch = bool(body.get("batch"))
     os.makedirs(_job_dir(job.id), exist_ok=True)
     path = os.path.join(_job_dir(job.id), "links.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -832,7 +804,7 @@ async def list_import_jobs():
     """Recent imports (newest first) for the import page. Import jobs live in
     memory, so this covers the time since the last restart."""
     items = []
-    for job in sorted((j for j in jobs.list_jobs() if j.status != "cancelled"), key=lambda j: -j.created_at)[:15]:
+    for job in sorted(jobs.list_jobs(), key=lambda j: -j.created_at)[:15]:
         items.append({
             "id": job.id, "filename": job.filename, "status": job.status, "created_at": job.created_at,
             "recipes": len(job.recipes),

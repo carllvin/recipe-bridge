@@ -31,13 +31,10 @@ data volume, no restart needed.
 | `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
 | `STEP_PHOTOS_AI` | `true` | The review's "place photos into the steps" button may use the image AI; `false` = it only places a recipe page's own step photos (free), the rest by hand |
 | `SOURCE_TAG` | `true` | A tag with the recipe's source: the website's name (`nytcooking`), the video channel, the cookbook's author (`ottolenghi` – from the book's metadata, else one small AI call); `false` = no such tag |
-| `IMPORT_CONFIRM` | `always` | Before the AI reads a cookbook started in the app (PDF, EPUB, Word, RTF, text file): the estimate with **Start**, **Half price (ready within 24 h)** and **Cancel** – `always`, `large` (only above `IMPORT_CONFIRM_TOKENS`) or `never`. Links, texts, photos, voice notes and imports from the phone or the watched folder don't ask |
-| `IMPORT_CONFIRM_TOKENS` | `50000` | The limit for `IMPORT_CONFIRM=large` |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |
-| `WATCH_BATCH` | `false` | Imports from the watched folder go to the AI as one batch: half price, done within up to 24 hours (Claude, OpenAI). A restart while waiting ends that import – put the file (from `processed/`) into the folder again |
-| `UPLOAD_BATCH` | `false` | The same for cookbooks uploaded in the app. Without it, the estimate before the import offers **Half price (ready within 24 h)** |
+| `WATCH_BATCH` | `true` | Imports from the watched folder go to the AI as a batch: half price, done within up to 24 hours (Claude, OpenAI). A restart while waiting ends that import – put the file (from `processed/`) into the folder again. Imports started in the app have a checkbox for it |
 | `CONVERT_TO_METRIC` | `true` | Converts cups/oz/lb/°F/inch to g/ml/°C/cm |
 | `CHECK_DUPLICATES` | `true` | Flags recipes whose title already exists |
 | `REUSE_EXISTING_TAGS` | `true` | Asks the AI to prefer your existing tags |

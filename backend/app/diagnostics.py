@@ -48,8 +48,6 @@ def info() -> list[dict]:
                             else ("on, but no key" if settings.image_gen_enabled else "off")),
          None if not settings.image_gen_enabled else image_gen.is_configured()),
         ("ai", "Monthly budget", _budget(), None),
-        ("ai", "IMPORT_CONFIRM", settings.import_confirm + (f" (from {settings.import_confirm_tokens:,} tokens)"
-                                                         if settings.import_confirm == "large" else ""), None),
         ("lang", "OUTPUT_LANGUAGE", f"{settings.output_language} (interface: {get_ui_language_code(settings.output_language)})", None),
         ("lang", "TRANSLATE_RECIPES", str(app_settings.translating()).lower(), None),
         ("lang", "STEP_PHOTOS_AI", str(settings.step_photos_ai).lower(), None),
@@ -59,7 +57,6 @@ def info() -> list[dict]:
          if settings.custom_instructions.strip() else "none", None),
         ("system", "OCR", _ocr(), None),
         ("system", "Data folder", f"{settings.data_dir} – {free.free // 2**30} GB free", free.free > 2**30),
-        ("ai", "UPLOAD_BATCH", str(settings.upload_batch).lower(), None),
         ("system", "Watched folder", (settings.watch_dir + (" (as AI batch, half price)" if settings.watch_batch else ""))
          if settings.watch_dir else "off", None),
         ("system", "Time zone (TZ)", os.environ.get("TZ") or time.strftime("%Z"), None),

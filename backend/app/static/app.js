@@ -351,6 +351,7 @@ async function uploadFiles(files, options = {}) {
   files.forEach((f) => formData.append('files', f));
   if (options.singleRecipe) formData.append('single_recipe', 'true');
   if (options.handwriting) formData.append('handwriting', 'true');
+  if (batchWanted()) formData.append('batch', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
@@ -381,7 +382,21 @@ async function uploadFiles(files, options = {}) {
 // Single recipe from a web page: same processing / review / import flow.
 // Starts an import that isn't a file upload (web page, pasted text, picked
 // links) and switches to the processing screen.
+// The import page's "half price" checkbox (Claude / OpenAI): the AI reads
+// the import as a batch - ready within up to 24 hours. Kept for the next visit.
+function batchWanted() {
+  return APP_CONFIG.batch_available && el('import-batch').checked;
+}
+el('import-batch').addEventListener('change', () => {
+  try { localStorage.setItem('importBatch', el('import-batch').checked ? '1' : ''); } catch (e) { /* this visit only */ }
+});
+function initBatchCheckbox() {
+  el('batch-wrap').classList.toggle('hidden', !APP_CONFIG.batch_available);
+  try { el('import-batch').checked = localStorage.getItem('importBatch') === '1'; } catch (e) { /* unchecked */ }
+}
+
 async function startImportRequest(endpoint, body, loadingText, onStarted) {
+  if (endpoint !== '/api/migration' && batchWanted()) body = { ...body, batch: true };
   el('upload-error').classList.add('hidden');
   requestNotificationPermission();
   el('upload-screen').classList.add('hidden');
@@ -698,8 +713,6 @@ function pollJob() {
         showJobFailed(job);
         return;
       }
-      if (job.status === 'confirm') { showImportEstimate(job); return; }
-      if (job.status === 'cancelled') { leaveCancelledImport(); return; }
 
       updateProgressUI(job);
       state.pollTimer = setTimeout(tick, 2000);
@@ -718,58 +731,6 @@ function showJobFailed(job) {
   el('processing-screen').classList.add('hidden');
   el('upload-screen').classList.remove('hidden');
   showUploadError(`${t('processingErrorPrefix')} ${job.error || ''}`);
-  loadRecentImports();
-}
-
-// A large import waits for the OK (IMPORT_CONFIRM_TOKENS): the estimate
-// instead of the spinner, Start or Cancel.
-function showImportEstimate(job) {
-  const est = job.estimate || {};
-  const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
-  el('processing-screen').querySelector('.spinner').classList.add('hidden');
-  el('processing-text').classList.add('hidden');
-  el('progress-track').classList.add('hidden');
-  el('confirm-text').textContent = tf('confirmText', { pages: fmt(job.page_count), chunks: fmt(est.chunks),
-    total: fmt(est.total), input: fmt(est.input), output: fmt(est.output) });
-  el('confirm-budget').textContent = est.budget_left == null ? t('confirmNoBudget')
-    : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
-  // Claude / OpenAI: the same at half price as a batch - ready within up to 24 hours
-  el('confirm-batch').classList.toggle('hidden', !(APP_CONFIG.batch_available && est.chunks > 0));
-  el('confirm-box').classList.remove('hidden');
-}
-
-function hideImportEstimate() {
-  el('confirm-box').classList.add('hidden');
-  el('processing-screen').querySelector('.spinner').classList.remove('hidden');
-  el('processing-text').classList.remove('hidden');
-}
-
-async function answerImportEstimate(start, batch = false) {
-  const jobId = state.jobId;
-  try {
-    const res = await fetch(`/api/jobs/${jobId}/confirm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, batch }),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
-  } catch (e) {
-    el('confirm-budget').textContent = `⚠️ ${e.message}`;
-    return;
-  }
-  hideImportEstimate();
-  if (start) pollJob();
-  else leaveCancelledImport();
-}
-el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
-el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
-el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
-
-function leaveCancelledImport() {
-  clearTimeout(state.pollTimer);
-  hideImportEstimate();
-  state.jobId = null;
-  setJobUrl(null);
-  el('processing-screen').classList.add('hidden');
-  el('upload-screen').classList.remove('hidden');
   loadRecentImports();
 }
 
@@ -1970,7 +1931,6 @@ async function loadRecentImports() {
     if (!items.length) { box.classList.add('hidden'); return; }
     el('recent-imports-list').innerHTML = items.map((j) => {
       const status = j.status === 'processing' ? t('recentImportRunning')
-        : j.status === 'confirm' ? t('recentImportConfirm')
         : j.status === 'error' ? t('recentImportError')
         : tf('recentImportLine', { recipes: j.recipes, imported: j.imported });
       return `<div class="new-recipes-open-job"><span><strong>${escapeHtml(j.filename)}</strong> · ${escapeHtml(status)} · ${escapeHtml(shortWhen(j.created_at))}</span>
@@ -4016,6 +3976,7 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
+  initBatchCheckbox();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

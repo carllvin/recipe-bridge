@@ -483,29 +483,42 @@ def _sliding_windows(start: int, end: int, size: int, overlap: int):
 ProgressCallback = Callable[[int, int, int, int], None]  # (chunk_idx, total_chunks, page_start, page_end)
 
 
-CHARS_PER_TOKEN = 4      # rough, for the estimate before a large import
-OUTPUT_SHARE = 0.6       # the recipes' JSON is about this share of the text it comes from
-MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
+def _system_prompt_for(pages: list[dict], existing_tags: Optional[list[str]] = None) -> str:
+    """The extraction's instructions for these pages - whether they are in
+    the target language already decides between translating and keeping
+    the wording (see _build_system_prompt)."""
+    source_lang = _detect_source_language(pages)
+    target_lang = get_language_code(settings.output_language)
+    same_language = bool(source_lang and target_lang and source_lang == target_lang)
+    from .config import LANGUAGE_NAMES
+    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags,
+                                         source_language=LANGUAGE_NAMES.get(source_lang or ""))
+    log.info("Extraction language: translate=%s, detected=%s, instruction: %s", app_settings_translating(),
+             source_lang, next((line for line in system_prompt.splitlines() if "IMPORTANT - Language" in line), "-"))
+    return system_prompt
 
 
-def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
-                    existing_tags: Optional[list[str]] = None) -> dict:
-    """{"chunks", "input", "output", "total"} - roughly what the extraction
-    of these pages will use, without asking the AI: the chunks' text (with
-    the overlapping pages counted twice) plus the instructions per chunk
-    (with Claude cached after the first), and the answers as a share of the
-    text."""
-    prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
-    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
-    texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
-    if len(chunks) > 1 and llm_provider._active_provider() == "anthropic":
-        # cached after the first chunk (complete_text cache=True): written once at 1.25x, then read at a tenth
-        prompt_total = round(prompt * 1.25) + round(prompt * 0.1) * (len(chunks) - 1)
-    else:
-        prompt_total = prompt * len(chunks)
-    tokens_in = sum(texts) + prompt_total
-    tokens_out = sum(min(MAX_OUTPUT_TOKENS, int(t * OUTPUT_SHARE)) for t in texts)
-    return {"chunks": len(chunks), "input": tokens_in, "output": tokens_out, "total": tokens_in + tokens_out}
+def _page_text(pages: list[dict]) -> str:
+    return "".join(f"\n\n===== PAGE {p['page']} =====\n{p['text']}" for p in pages)
+
+
+def extract_each_as_batch(page_sets: list[list[dict]], existing_tags: Optional[list[str]] = None,
+                          on_wait=None) -> list[tuple[list[ExtractedRecipe], TokenUsage]]:
+    """A link list as one batch: every page set (one web page each) is its
+    own request with its own instructions, all at half price. Raises when
+    the batch fails - the caller then reads them one by one."""
+    systems = [_system_prompt_for(pages, existing_tags) for pages in page_sets]
+    answers = llm_provider.complete_batch(systems, [_page_text(pages) for pages in page_sets],
+                                          max_tokens=8000, on_wait=on_wait)
+    out = []
+    for (text_out, usage) in answers:
+        try:
+            parsed = _extract_json_array(text_out)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not parse a batch answer as JSON (%s)", exc)
+            parsed = []
+        out.append((_dedupe_recipes(parsed), usage))
+    return out
 
 
 def extract_recipes_from_pages(
@@ -516,22 +529,13 @@ def extract_recipes_from_pages(
     batch: bool = False,
     on_wait=None,
 ) -> tuple[list[ExtractedRecipe], TokenUsage]:
-    """batch=True (WATCH_BATCH): all chunks as one batch at half price -
-    on_wait(done, total) while it runs; falls back to one call per chunk
-    when the provider has no batches or the batch fails."""
+    """batch=True (the import page's checkbox, WATCH_BATCH): all chunks as
+    one batch at half price - on_wait(done, total) while it runs; falls
+    back to one call per chunk when the provider has no batches or the
+    batch fails."""
     if not llm_provider.is_configured():
         raise RuntimeError(llm_provider.missing_key_hint())
-
-    # Once per job, check whether the cookbook is already in the target language -
-    # if so, the AI doesn't need to "translate", just structure (see _build_system_prompt).
-    source_lang = _detect_source_language(pages)
-    target_lang = get_language_code(settings.output_language)
-    same_language = bool(source_lang and target_lang and source_lang == target_lang)
-    from .config import LANGUAGE_NAMES
-    system_prompt = _build_system_prompt(same_language, existing_tags=existing_tags,
-                                         source_language=LANGUAGE_NAMES.get(source_lang or ""))
-    log.info("Extraction language: translate=%s, detected=%s, instruction: %s", app_settings_translating(),
-             source_lang, next((line for line in system_prompt.splitlines() if "IMPORTANT - Language" in line), "-"))
+    system_prompt = _system_prompt_for(pages, existing_tags)
 
     chunks = list(_chunk_pages(pages, toc_pages=toc_pages))
     total_chunks = len(chunks) or 1
@@ -543,7 +547,7 @@ def extract_recipes_from_pages(
         len(pages), total_chunks, toc_pages or "none",
     )
 
-    texts = ["".join(f"\n\n===== PAGE {p['page']} =====\n{p['text']}" for p in chunk) for chunk in chunks]
+    texts = [_page_text(chunk) for chunk in chunks]
     answers: dict[int, tuple[str, TokenUsage]] = {}
     wanted = [n for n, t in enumerate(texts) if t.strip()]
     if batch and llm_provider.batch_supported() and wanted:

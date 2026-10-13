@@ -5,11 +5,10 @@
 **Import**
 - Several links in the import field – separated by commas, spaces or lines –
   are imported like a link list (each page on its own, one review)
-- Uploaded cookbooks as an AI batch too: `UPLOAD_BATCH=true`, or the
-  button **Half price (ready within 24 h)** at a large import's estimate
 - A shorter message after the import
-- `WATCH_BATCH=true`: files from the watched folder go to the AI as one
-  batch – half price, ready within up to 24 hours (Claude, OpenAI)
+- AI batches at half price (Claude, OpenAI; ready within up to 24 hours):
+  on by default for the watched folder (`WATCH_BATCH`), a checkbox on the
+  import page for everything else – files, links, link lists, text
 - A page imported before is flagged as a duplicate by its address, even
   when the title differs (translated, renamed); addresses come from the
   overview's read and from every import
@@ -30,11 +29,6 @@
   author, one small AI call per book); one suggestion per source
 - Review: **Preview | Edit** – a recipe opens in the preview, as Tandoor
   (every step with its ingredients) or Mealie will, with the step photos
-- Before the AI reads a cookbook started in the app, it shows the estimated
-  tokens and what is left of the monthly budget and waits for **Start**,
-  **Half price (ready within 24 h)** or **Cancel** (`IMPORT_CONFIRM`:
-  always / large / never); with Claude the estimate counts the cached
-  instructions
 - WebP photos (.webp) can be imported like JPEG, PNG and HEIC
 - RTF files (.rtf, e.g. from TextEdit or WordPad) are read as recipe text
 - Links in an RTF or Word file or pasted as text are imported as a link

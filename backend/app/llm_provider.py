@@ -321,11 +321,12 @@ def batch_supported() -> bool:
     return _active_provider() in ("anthropic", "openai") and is_configured()
 
 
-def complete_batch(system_prompt: Optional[str], contents: list[str], max_tokens: int = 4096,
+def complete_batch(system_prompt, contents: list[str], max_tokens: int = 4096,
                    on_wait=None) -> list[tuple[str, TokenUsage]]:
-    """One answer per content, in their order. on_wait(done, total) while
-    waiting. Raises when the batch fails or takes too long - the caller then
-    asks one by one."""
+    """One answer per content, in their order. system_prompt: one for all,
+    or a list with one per content. on_wait(done, total) while waiting.
+    Raises when the batch fails or takes too long - the caller then asks
+    one by one."""
     provider = _active_provider()
     model = _model(provider, tools=False)
     if provider == "anthropic":
@@ -354,16 +355,23 @@ def _half(usage: TokenUsage) -> TokenUsage:
     return TokenUsage(input_tokens=round(usage.input_tokens / 2), output_tokens=round(usage.output_tokens / 2))
 
 
+def _systems(system_prompt, n: int) -> list:
+    return list(system_prompt) if isinstance(system_prompt, (list, tuple)) else [system_prompt] * n
+
+
 def _batch_anthropic(system_prompt, contents, max_tokens, model, on_wait):
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    params = {"model": model, "max_tokens": max_tokens}
-    if system_prompt:  # the same for every request: cached inside the batch too
-        params["system"] = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+
+    def params(system, content):
+        p = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
+        if system:  # mostly the same for every request: cached inside the batch too
+            p["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        return p
     batch = client.messages.batches.create(requests=[
-        {"custom_id": f"c{n}", "params": {**params, "messages": [{"role": "user", "content": content}]}}
-        for n, content in enumerate(contents)])
+        {"custom_id": f"c{n}", "params": params(system, content)}
+        for n, (system, content) in enumerate(zip(_systems(system_prompt, len(contents)), contents))])
 
     def check():
         b = client.messages.batches.retrieve(batch.id)
@@ -390,8 +398,8 @@ def _batch_openai(system_prompt, contents, max_tokens, model, on_wait):
 
     client = _openai_client("openai")
     lines = []
-    for n, content in enumerate(contents):
-        messages = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + \
+    for n, (system, content) in enumerate(zip(_systems(system_prompt, len(contents)), contents)):
+        messages = ([{"role": "system", "content": system}] if system else []) + \
                    [{"role": "user", "content": content}]
         lines.append(json.dumps({"custom_id": f"c{n}", "method": "POST", "url": "/v1/chat/completions",
                                  "body": {"model": model, "max_completion_tokens": max_tokens, "messages": messages}}))

@@ -50,8 +50,6 @@ class Settings(BaseSettings):
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them
     custom_instructions: str = ""      # extra instructions appended to the extraction prompt (see .env.example)
-    import_confirm: str = "always"     # ask before the AI reads a cookbook (estimate shown): always | large (above IMPORT_CONFIRM_TOKENS) | never
-    import_confirm_tokens: int = 50000  # "large" for IMPORT_CONFIRM=large
     toc_aware_chunking: bool = False   # align chunk boundaries to the PDF's bookmarks/TOC when present (EXPERIMENTAL - has caused some PDFs to yield 0 recipes, off by default until fixed; set true to opt in)
 
     # Housekeeping
@@ -77,8 +75,7 @@ class Settings(BaseSettings):
     # Watched folder: files put here are imported on their own and wait in the review inbox; empty = off
     watch_dir: str = ""
     watch_interval_seconds: int = 30
-    upload_batch: bool = False           # uploaded cookbooks as an AI batch too
-    watch_batch: bool = False            # imports from the watched folder as an AI batch: half price, done within up to 24 h (Claude, OpenAI)
+    watch_batch: bool = True             # imports from the watched folder as an AI batch: half price, done within up to 24 h (Claude, OpenAI)
 
     # Push notifications (see notify.py) - ntfy topic URL (e.g. https://ntfy.sh/my-secret-topic) and/or Telegram bot
     notify_ntfy_url: str = ""

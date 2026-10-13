@@ -20,7 +20,6 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "output_language", "Deutsch")
     monkeypatch.setattr(settings, "tandoor_url", "http://tandoor")
     monkeypatch.setattr(settings, "tandoor_token", "test")
-    monkeypatch.setattr(settings, "import_confirm", "never")  # tests that ask set it themselves
     with tool_jobs._lock:
         tool_jobs._tool_jobs.clear()
         tool_jobs._last_written.clear()
