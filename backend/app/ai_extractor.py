@@ -492,12 +492,18 @@ def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
                     existing_tags: Optional[list[str]] = None) -> dict:
     """{"chunks", "input", "output", "total"} - roughly what the extraction
     of these pages will use, without asking the AI: the chunks' text (with
-    the overlapping pages counted twice) plus the instructions per chunk,
-    and the answers as a share of the text."""
+    the overlapping pages counted twice) plus the instructions per chunk
+    (with Claude cached after the first), and the answers as a share of the
+    text."""
     prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
     chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
     texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
-    tokens_in = sum(texts) + prompt * len(chunks)
+    if len(chunks) > 1 and llm_provider._active_provider() == "anthropic":
+        # cached after the first chunk (complete_text cache=True): written once at 1.25x, then read at a tenth
+        prompt_total = round(prompt * 1.25) + round(prompt * 0.1) * (len(chunks) - 1)
+    else:
+        prompt_total = prompt * len(chunks)
+    tokens_in = sum(texts) + prompt_total
     tokens_out = sum(min(MAX_OUTPUT_TOKENS, int(t * OUTPUT_SHARE)) for t in texts)
     return {"chunks": len(chunks), "input": tokens_in, "output": tokens_out, "total": tokens_in + tokens_out}
 

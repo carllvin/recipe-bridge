@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them
     custom_instructions: str = ""      # extra instructions appended to the extraction prompt (see .env.example)
-    import_confirm_tokens: int = 50000  # an import estimated above this many tokens waits for your OK (cost shown); 0 = never ask
+    import_confirm: str = "always"     # ask before the AI reads a cookbook (estimate shown): always | large (above IMPORT_CONFIRM_TOKENS) | never
+    import_confirm_tokens: int = 50000  # "large" for IMPORT_CONFIRM=large
     toc_aware_chunking: bool = False   # align chunk boundaries to the PDF's bookmarks/TOC when present (EXPERIMENTAL - has caused some PDFs to yield 0 recipes, off by default until fixed; set true to opt in)
 
     # Housekeeping

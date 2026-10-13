@@ -19,6 +19,7 @@ def test_estimate_counts_overlap_and_instructions():
 
 
 def _waiting(monkeypatch, limit=1000):
+    monkeypatch.setattr(settings, "import_confirm", "large")
     monkeypatch.setattr(settings, "import_confirm_tokens", limit)
     job = jobs.create_job("Big book.pdf")
     answer = {}
@@ -52,11 +53,35 @@ def test_large_import_cancelled(monkeypatch):
 
 
 def test_small_or_unattended_imports_run_on(monkeypatch):
+    monkeypatch.setattr(settings, "import_confirm", "large")
     monkeypatch.setattr(settings, "import_confirm_tokens", 10**9)
     assert main._go_ahead(jobs.create_job("small"), PAGES, None, None) is True
     monkeypatch.setattr(settings, "import_confirm_tokens", 1000)
     shared = jobs.create_job("from the phone")
     shared.source = "share"
     assert main._go_ahead(shared, PAGES, None, None) is True and shared.status == "processing"
-    monkeypatch.setattr(settings, "import_confirm_tokens", 0)
+    monkeypatch.setattr(settings, "import_confirm", "never")
     assert main._go_ahead(jobs.create_job("off"), PAGES, None, None) is True
+
+
+def test_always_asks_for_a_cookbook_not_for_a_link(monkeypatch):
+    monkeypatch.setattr(settings, "import_confirm", "always")
+    assert main._go_ahead(jobs.create_job("link"), PAGES[:1], None, None, "url") is True
+    job = jobs.create_job("small.pdf")
+    thread = threading.Thread(target=lambda: main._go_ahead(job, PAGES[:2], None, None, "pdf"))
+    thread.start()
+    for _ in range(100):
+        if job.status == "confirm":
+            break
+        time.sleep(0.02)
+    assert job.status == "confirm" and job.estimate["chunks"] == 1  # even a small one
+    TestClient(main.app).post(f"/api/jobs/{job.id}/confirm", json={"start": False})
+    thread.join(5)
+
+
+def test_estimate_counts_the_cache_with_claude(monkeypatch):
+    from app import llm_provider
+    monkeypatch.setattr(llm_provider, "_active_provider", lambda: "anthropic")
+    cached = ai_extractor.estimate_tokens(PAGES)
+    monkeypatch.setattr(llm_provider, "_active_provider", lambda: "openai")
+    assert cached["input"] < ai_extractor.estimate_tokens(PAGES)["input"]

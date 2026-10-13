@@ -243,7 +243,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
-        if not _go_ahead(job, result["pages"], toc_pages, existing_tags):
+        if not _go_ahead(job, result["pages"], toc_pages, existing_tags, doc_type):
             return
         recipes: list[ExtractedRecipe]
         def batch_wait(done: int, total: int) -> None:
@@ -317,16 +317,21 @@ def _as_batch(job, doc_type: str) -> bool:
 CONFIRM_WAIT_SECONDS = 3600
 
 
-def _go_ahead(job, pages: list[dict], toc_pages, existing_tags) -> bool:
-    """A large import (IMPORT_CONFIRM_TOKENS) started at the screen waits
-    here for the OK - POST /api/jobs/{id}/confirm - with the estimate shown.
-    Imports from the phone or the watched folder run on (no one to ask -
-    the monthly budget is their limit). False: cancelled (or no answer)."""
-    if job.source or not settings.import_confirm_tokens:
+ASKED_TYPES = ("pdf", "epub", "docx", "rtf", "txt")  # cookbooks - not a link, a text, a photo, a voice note
+
+
+def _go_ahead(job, pages: list[dict], toc_pages, existing_tags, doc_type: str = "pdf") -> bool:
+    """A cookbook started at the screen waits here for the OK - POST
+    /api/jobs/{id}/confirm - with its estimate shown (IMPORT_CONFIRM: always,
+    or only above IMPORT_CONFIRM_TOKENS). Single recipes (links, text,
+    photos, voice notes) and imports from the phone or the watched folder
+    run on - the monthly budget is their limit. False: cancelled (or no answer)."""
+    mode = (settings.import_confirm or "always").strip().lower()
+    if job.source or mode == "never" or doc_type not in ASKED_TYPES:
         return True
     estimate = estimate_tokens(pages, toc_pages=toc_pages, existing_tags=existing_tags)
     log.info("Import %s estimated at %d tokens in %d chunk(s)", job.id, estimate["total"], estimate["chunks"])
-    if estimate["total"] < settings.import_confirm_tokens:
+    if mode == "large" and estimate["total"] < settings.import_confirm_tokens:
         return True
     budget = usage_log.budget_status()
     estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None

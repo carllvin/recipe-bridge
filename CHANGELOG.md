@@ -28,9 +28,11 @@
   author, one small AI call per book); one suggestion per source
 - Review: **Preview | Edit** – a recipe opens in the preview, as Tandoor
   (every step with its ingredients) or Mealie will, with the step photos
-- A large import (a whole cookbook) first shows its estimated tokens and
-  what is left of the monthly budget, and waits for **Start** or
-  **Cancel** (`IMPORT_CONFIRM_TOKENS`, default 50,000; 0 = never ask)
+- Before the AI reads a cookbook started in the app, it shows the estimated
+  tokens and what is left of the monthly budget and waits for **Start**,
+  **Half price (ready within 24 h)** or **Cancel** (`IMPORT_CONFIRM`:
+  always / large / never); with Claude the estimate counts the cached
+  instructions
 - WebP photos (.webp) can be imported like JPEG, PNG and HEIC
 - RTF files (.rtf, e.g. from TextEdit or WordPad) are read as recipe text
 - Links in an RTF or Word file or pasted as text are imported as a link

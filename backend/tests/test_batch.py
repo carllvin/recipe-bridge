@@ -130,7 +130,7 @@ def test_estimate_button_asks_for_a_batch(monkeypatch):
     import time
     from fastapi.testclient import TestClient
     from app import jobs, main
-    monkeypatch.setattr(settings, "import_confirm_tokens", 1000)
+    monkeypatch.setattr(settings, "import_confirm", "always")
     monkeypatch.setattr(llm_provider, "batch_supported", lambda: True)
     job = jobs.create_job("big.pdf")
     thread = threading.Thread(target=lambda: main._go_ahead(job, PAGES, None, None))
