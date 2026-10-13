@@ -4,13 +4,13 @@
 # To build the image yourself from a clone instead, see docker-compose.build.yml.
 services:
   recipe-bridge:
-    image: ghcr.io/carllvin/recipe-bridge:latest   # or a fixed version, e.g. :1.0
+    image: ghcr.io/carllvin/recipe-bridge:latest   # or a fixed version, e.g. :1.2
     container_name: recipe-bridge
     restart: unless-stopped
     ports:
       - "8420:8000"
-    # All settings come from .env (see .env.example); anything left out
-    # uses its default.
+    # All settings come from .env (see .env.example and docs/configuration.md);
+    # anything left out uses its default.
     env_file: .env
     volumes:
       - recipe_bridge_data:/app/data
