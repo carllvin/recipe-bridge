@@ -721,7 +721,7 @@ function showImportEstimate(job) {
   el('confirm-budget').textContent = est.budget_left == null ? t('confirmNoBudget')
     : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
   // Claude / OpenAI: the same at half price as a batch - ready within up to 24 hours
-  el('confirm-batch').classList.toggle('hidden', !(APP_CONFIG.batch_available && est.chunks > 1));
+  el('confirm-batch').classList.toggle('hidden', !(APP_CONFIG.batch_available && est.chunks > 0));
   el('confirm-box').classList.remove('hidden');
 }
 

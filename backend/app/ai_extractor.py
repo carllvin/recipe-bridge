@@ -546,7 +546,7 @@ def extract_recipes_from_pages(
     texts = ["".join(f"\n\n===== PAGE {p['page']} =====\n{p['text']}" for p in chunk) for chunk in chunks]
     answers: dict[int, tuple[str, TokenUsage]] = {}
     wanted = [n for n, t in enumerate(texts) if t.strip()]
-    if batch and llm_provider.batch_supported() and len(wanted) > 1:
+    if batch and llm_provider.batch_supported() and wanted:
         try:
             log.info("Extraction as one AI batch: %d chunk(s), half price, up to 24 h", len(wanted))
             results = llm_provider.complete_batch(system_prompt, [texts[n] for n in wanted], max_tokens=8000,
