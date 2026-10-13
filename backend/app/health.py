@@ -304,6 +304,11 @@ def _settled(metric: str, key: str, drops: set) -> bool:
 def settle(tool: str, suggestion) -> None:
     """Takes what an applied suggestion fixed off the tiles - or marks the
     overview stale when that can't be told."""
+    if suggestion.kind in ("merge", "rename", "delete_unused", "enrich", "food_category", "group_tags"):
+        # ingredients, units or tags changed inside recipes without Tandoor
+        # stamping them - the kept copy of the recipes is no longer right
+        from .tandoor_helpers import drop_recipe_cache
+        drop_recipe_cache()
     drops = _drops(tool, suggestion)
     if drops is None:
         mark_changed()

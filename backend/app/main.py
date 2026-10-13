@@ -1957,6 +1957,8 @@ def _undo_suggestion(job, suggestion_id):
         raise
     suggestion.status, suggestion.undoable, suggestion.error = "undone", False, None
     tool_jobs.save_tool_job(job)
+    from .tandoor_helpers import drop_recipe_cache
+    drop_recipe_cache()  # an undo can bring back ingredients inside recipes
     health.mark_changed()
     return suggestion
 

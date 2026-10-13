@@ -66,6 +66,11 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Maintain is faster again: recipes are read several at a time, and the
+  overview reads only recipes changed since its last read (everything
+  fresh once a day and after changes to ingredients, units or tags); a
+  tool started from a tile says how many recipes it checks because they
+  changed since the overview (without AI)
 - Editing a recipe in the review no longer drops its step titles, step
   times and ingredient groups
 - Maintain is faster: a tile with a few entries (duplicates, unused,

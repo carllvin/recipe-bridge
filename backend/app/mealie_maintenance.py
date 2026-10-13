@@ -39,12 +39,16 @@ DUPLICATE_TOOLS = {"ingredients_review": ("food", "foods_duplicates"), "units_re
 # ---------- reading ----------
 
 def fetch_recipes_full(client) -> list[dict]:
-    full = []
-    for item in mealie_client._paged(client, "/recipes"):
-        resp = client.get(f"/recipes/{item['slug']}")
-        if resp.status_code == 200:
-            full.append(resp.json())
-    return full
+    """Every recipe in full - several requests at a time."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .tandoor_helpers import PARALLEL_READS
+
+    def one(slug):
+        resp = client.get(f"/recipes/{slug}")
+        return resp.json() if resp.status_code == 200 else None
+    slugs = [item["slug"] for item in mealie_client._paged(client, "/recipes")]
+    with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
+        return [r for r in pool.map(one, slugs) if r is not None]
 
 
 def used_ids(recipes) -> dict[str, dict]:
