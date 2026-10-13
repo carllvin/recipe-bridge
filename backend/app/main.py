@@ -1639,8 +1639,7 @@ async def cooked_answer(body: dict = Body(...)):
         raise HTTPException(400, f"Missing field {exc}")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc))
-    health.mark_changed()
-    return {"ok": True}
+    return {"ok": True}  # a rating or cook log changes no tile - no new overview
 
 
 @app.get("/api/tools/meal-plan/options")
@@ -1908,7 +1907,7 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
             suggestion = apply_fn(job_id, suggestion_id)
         if suggestion.status == "applied" and before != "applied":
             _remember_applied(job, suggestion, journal)
-            health.mark_changed()
+            health.settle(job.tool, suggestion)
         return suggestion
     if action == "undo":
         return _undo_suggestion(job, suggestion_id)

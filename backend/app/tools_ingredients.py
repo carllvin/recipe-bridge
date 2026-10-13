@@ -100,11 +100,25 @@ def run_scan(job_id: str) -> None:
             return
 
         with tandoor_client.get_client() as client:
-            foods = tandoor_client.fetch_all_items(client, "food")
-            all_foods = foods
-            if job.meta.get("focus") == "duplicates":
-                # Only the likely duplicates from the health overview, each
-                # group kept together in one chunk.
+            listed = tile_duplicate_ids() if job.meta.get("focus") == "duplicates" else None
+            if listed is not None:
+                # Started from the tile: only the pairs the overview lists -
+                # read one by one instead of every ingredient (Tandoor's
+                # ingredient list is slow for large collections). Pairs are
+                # checked again, gone ones drop out.
+                job.progress_label = "Loading the listed ingredients..."
+                tool_jobs.save_tool_job(job)
+                full = fetch_foods_by_ids(client, listed)
+                by_id = {f["id"]: f for f in full}
+                groups = duplicates.open_duplicate_ids(duplicates.food_duplicates(full), "foods_duplicates")
+                chunks = [[by_id[i] for i in chunk if i in by_id]
+                          for chunk in duplicates.pack_groups(groups, CHUNK_SIZE)]
+                foods = [f for chunk in chunks for f in chunk]
+                all_foods = None  # name collisions: looked up by name below
+            elif job.meta.get("focus") == "duplicates":
+                # Only the likely duplicates, each group kept together in one chunk.
+                foods = tandoor_client.fetch_all_items(client, "food")
+                all_foods = foods
                 by_id = {f["id"]: f for f in foods}
                 groups = duplicates.open_duplicate_ids(
                     duplicates.food_duplicates(fetch_all_foods_full(client)), "foods_duplicates")
@@ -112,6 +126,8 @@ def run_scan(job_id: str) -> None:
                           for chunk in duplicates.pack_groups(groups, CHUNK_SIZE)]
                 foods = [f for chunk in chunks for f in chunk]
             else:
+                foods = tandoor_client.fetch_all_items(client, "food")
+                all_foods = foods
                 chunks = list(chunked(foods, CHUNK_SIZE))
             job.progress_total = len(foods)
             job.cost_estimate = format_cost_estimate(len(foods), "chunked_review")
@@ -137,6 +153,8 @@ def run_scan(job_id: str) -> None:
             # through, build suggestions from whatever was gathered - a
             # cancelled scan shouldn't throw away chunks that already cost
             # real AI calls and produced valid suggestions.
+            if all_foods is None:
+                all_foods = with_name_matches(client, foods, all_actions)
             all_actions = duplicates.drop_ignored_merges(resolve_name_collisions(all_actions, all_foods), "foods_duplicates")
             by_id = {f["id"]: f for f in all_foods}
 
@@ -472,6 +490,51 @@ def enrich_suggestions(job, targets, categories) -> list[ToolSuggestion]:
 ENRICH_TILES = ("foods_without_nutrition", "foods_without_category")
 
 
+MAX_SINGLE_READS = 100  # more listed entries than this: one pass over the whole list is faster
+
+
+def tile_duplicate_ids() -> set[int] | None:
+    """Ingredient ids of the duplicate pairs the overview lists (not the
+    ignored ones) - None without an overview or with too many to read one
+    by one."""
+    from . import health
+    items = (health._read().get("items") or {}).get("foods_duplicates")
+    if items is None:
+        return None
+    skip = ignored.keys("foods_duplicates")
+    ids = {int(x) for i in items if i["key"] not in skip for x in i["key"].split(":") if x.isdigit()}
+    return ids if len(ids) <= MAX_SINGLE_READS else None
+
+
+def fetch_foods_by_ids(client, ids) -> list[dict]:
+    """Full ingredients, one request each - gone ones (merged, deleted) are left out."""
+    out = []
+    for food_id in sorted(int(i) for i in ids):
+        resp = client.get(f"/food/{food_id}/")
+        if resp.status_code == 404:
+            continue
+        resp.raise_for_status()
+        out.append(resp.json())
+    return out
+
+
+def with_name_matches(client, foods, actions) -> list[dict]:
+    """The given ingredients plus every existing one named like a name the
+    actions would give - all resolve_name_collisions needs, without reading
+    the whole list."""
+    items = {f["id"]: f for f in foods}
+    names = {a.get("new_name") or a.get("keep_name") for a in actions} - {None, ""}
+    for name in names:
+        resp = client.get("/food/", params={"query": name, "page_size": 25})
+        if resp.status_code != 200:
+            continue
+        data = resp.json()
+        for item in data.get("results", data) if isinstance(data, dict) else data:
+            if item.get("id") is not None and item.get("name"):
+                items.setdefault(item["id"], item)
+    return list(items.values())
+
+
 def tile_food_ids() -> set[str] | None:
     """Ingredients listed in the overview's "without nutrition" and "without
     supermarket category" tiles (not the ignored ones) - None without an
@@ -510,8 +573,11 @@ def run_enrich_scan(job_id: str) -> None:
             except tandoor_client.TandoorError as exc:
                 log.warning("Nutrition skipped - property types unavailable: %s", exc)
                 nutrition_available = False
-            foods = fetch_all_foods_full(client)
             listed = tile_food_ids() if job.meta.get("focus") == "tiles" else None
+            if listed is not None and len(listed) <= MAX_SINGLE_READS:
+                foods = fetch_foods_by_ids(client, listed)  # a few listed: read one by one
+            else:
+                foods = fetch_all_foods_full(client)
             if listed is not None:
                 # Started from a tile: only the ingredients the overview
                 # lists there, not every ingredient of the collection.

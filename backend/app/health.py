@@ -218,3 +218,104 @@ def _compute() -> None:
         _state["error"] = str(exc)
     finally:
         _state["running"] = False
+
+
+# ---------- after a suggestion was applied: the tiles, not a new scan ----------
+#
+# Every applied suggestion used to make the overview stale - the next visit
+# to Maintain then read the whole collection again. What a suggestion fixed
+# is known, though: its entries are taken off the tiles right away. Only
+# what can't be told that way (unit conversions, undo) still marks it stale.
+
+RECIPE_KINDS = {
+    "restructure_recipe": "recipes_need_restructure", "translate_recipe": "recipes_not_translated",
+    "amounts_in_steps": "recipes_amounts_missing", "doctor_fix": "recipes_inconsistent",
+    "season": "recipes_without_season", "suggest_tags": "recipes_few_tags", "source_tag": "recipes_without_source",
+    "set_servings": "recipes_without_servings", "generate_image": "recipes_without_image",
+    "enhance_image": "recipes_weak_image",
+}
+ENTITY_METRICS = {
+    "food": ("foods_duplicates", "foods_without_nutrition", "foods_without_category", "foods_unused"),
+    "unit": ("units_duplicates", "units_unused"),
+    "keyword": ("keywords_unused", "keywords_ungrouped"),
+}
+TOOL_ENTITY = {"ingredients_review": "food", "units_review": "unit", "tags_cleanup": "keyword",
+               "tags_simplify": "keyword", "tags_translate": "keyword"}
+_settle_lock = threading.Lock()
+
+
+def _drops(tool: str, suggestion) -> dict | None:
+    """{metric: keys to take off} for an applied suggestion - None when it
+    can't be told (the overview then counts as stale)."""
+    d, kind = suggestion.detail or {}, suggestion.kind
+    if kind in RECIPE_KINDS:
+        ids = d.get("recipe_ids") or ([d["recipe_id"]] if "recipe_id" in d else [])
+        return {RECIPE_KINDS[kind]: {str(i) for i in ids}}
+    if kind == "meal_plan":
+        return {}
+    if kind == "enrich":
+        out = {}
+        if d.get("nutrition"):
+            out["foods_without_nutrition"] = {str(d["food_id"])}
+        if d.get("category"):
+            out["foods_without_category"] = {str(d["food_id"])}
+        return out
+    if kind == "food_category":
+        return {"foods_without_category": {str(i) for i in d.get("food_ids") or []}}
+    if kind == "group_tags":
+        return {"keywords_ungrouped": {str(t.get("id") if isinstance(t, dict) else t) for t in d.get("tags") or []}}
+    if kind == "delete_unused":
+        return _gone(d.get("endpoint"), [d.get("entity_id")])
+    if kind == "merge":
+        entity = d.get("entity") or TOOL_ENTITY.get(tool)
+        removed = list(d.get("remove_ids") or [])
+        merged = {str(i) for i in [d.get("keep_id"), *removed] if i is not None}
+        out = _gone(entity, removed)
+        if out is None:
+            return None
+        pairs = f"{entity}s_duplicates" if entity in ("food", "unit") else None
+        if pairs:  # the pairs inside the merged group are settled too
+            out.setdefault(pairs, set())
+            out[pairs] |= {("pair", k) for k in merged}
+        return out
+    return None
+
+
+def _gone(entity, ids) -> dict | None:
+    if entity not in ENTITY_METRICS:
+        return None
+    keys = {str(i) for i in ids if i is not None}
+    return {metric: {("any", k) for k in keys} if metric.endswith("_duplicates") else set(keys)
+            for metric in ENTITY_METRICS[entity]}
+
+
+def _settled(metric: str, key: str, drops: set) -> bool:
+    if key in drops:
+        return True
+    if metric.endswith("_duplicates"):  # key "a:b"
+        a_b = set(key.split(":"))
+        merged = {k for tag, k in (d for d in drops if isinstance(d, tuple)) if tag == "pair"}
+        gone = {k for tag, k in (d for d in drops if isinstance(d, tuple)) if tag == "any"}
+        return bool(a_b & gone) or (len(a_b) == 2 and a_b <= merged)
+    return False
+
+
+def settle(tool: str, suggestion) -> None:
+    """Takes what an applied suggestion fixed off the tiles - or marks the
+    overview stale when that can't be told."""
+    drops = _drops(tool, suggestion)
+    if drops is None:
+        mark_changed()
+        return
+    if not drops:
+        return
+    with _settle_lock:
+        data = _read()
+        items = data.get("items")
+        if not items:
+            return
+        for metric, keys in drops.items():
+            if metric in items:
+                items[metric] = [i for i in items[metric] if not _settled(metric, str(i["key"]), keys)]
+        _write(data.get("computed_at"), data.get("metrics") or {}, items, data.get("recipe_versions"),
+               {k: v for k, v in data.items() if k not in ("computed_at", "metrics", "items", "recipe_versions")})

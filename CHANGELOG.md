@@ -54,6 +54,10 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Maintain is faster: a tile with a few entries (duplicates, unused,
+  without nutrition/category) reads only those, not every ingredient; an
+  applied suggestion takes its entries off the tiles instead of making the
+  whole overview scan again (a rating no longer does either)
 - After an import, a recipe with every ingredient in step 1 gets its
   amounts in the steps too (it waited for a revision that never comes after
   an import); the log names why a new recipe gets no amounts

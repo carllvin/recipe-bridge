@@ -52,6 +52,21 @@ def protected_unit_ids(foods, conversions) -> set[int]:
     return ids
 
 
+MAX_SINGLE_READS = 100  # more listed entries than this: one pass over the whole list is faster
+
+
+def _fetch_by_ids(client, endpoint, ids) -> list[dict]:
+    """The entries, one request each - gone ones are left out."""
+    out = []
+    for item_id in sorted(ids):
+        resp = client.get(f"/{endpoint}/{item_id}/")
+        if resp.status_code == 404:
+            continue
+        resp.raise_for_status()
+        out.append(resp.json())
+    return out
+
+
 def find_unused(endpoint, items, used: set[int], protected=frozenset()) -> list[dict]:
     return sorted((i for i in items if i["id"] not in used and i["id"] not in protected and not i.get("numchild")),
                   key=lambda i: (i.get("name") or "").casefold())
@@ -67,20 +82,27 @@ def run_scan(job_id: str) -> None:
         with tandoor_client.get_client() as client:
             job.progress_label = "Loading the entries..."
             tool_jobs.save_tool_job(job)
-            items = _fetch_all(client, endpoint)
-            protected = set()
-            if endpoint == "unit":
-                protected = protected_unit_ids(_fetch_all(client, "food"), _fetch_all(client, "unit-conversion"))
             # The overview already knows what no recipe used - only recipes
             # changed since then are read again. Without one: all recipes.
             known = recipe_scope.changed_since_overview(client, job)
+            candidates = None
+            if known is not None:
+                listed, changed = known
+                candidates = {int(i["key"]) for i in listed.get(metric, []) if str(i["key"]).isdigit()}
+            if candidates is not None and endpoint != "unit" and len(candidates) <= MAX_SINGLE_READS:
+                # only the listed entries, read one by one - not the whole
+                # (for ingredients slow) list
+                items = _fetch_by_ids(client, endpoint, candidates)
+            else:
+                items = _fetch_all(client, endpoint)
+            protected = set()
+            if endpoint == "unit":
+                protected = protected_unit_ids(_fetch_all(client, "food"), _fetch_all(client, "unit-conversion"))
             if known is None:
                 job.progress_label = "Scanning every recipe's full detail..."
                 tool_jobs.save_tool_job(job)
                 used = used_ids(fetch_all_recipes_full(client))[endpoint]
             else:
-                listed, changed = known
-                candidates = {int(i["key"]) for i in listed.get(metric, []) if str(i["key"]).isdigit()}
                 # everything the overview didn't list counts as used
                 used = {i["id"] for i in items if i["id"] not in candidates} | used_ids(changed)[endpoint]
         skip = ignored.keys(metric)
