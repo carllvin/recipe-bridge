@@ -1,104 +1,88 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
-**Import**
-- Several links in the import field – separated by commas, spaces or lines –
-  are imported like a link list (each page on its own, one review)
-- A shorter message after the import
+Docker image `ghcr.io/carllvin/recipe-bridge:1.2.0` (or `:1.2`). No changes
+to the configuration are needed. Worth knowing:
+
+- Imports from the **watched folder** now go to the AI as a batch at half
+  price and are ready within up to 24 hours (Claude, OpenAI) –
+  `WATCH_BATCH=false` brings back the immediate import.
+- Drag the **bookmark button** into your bookmark bar again once – the new
+  one hands over the page and its photos.
+- New, all optional: `TRANSLATE_RECIPES`, `STEP_PHOTOS_AI`, `SOURCE_TAG`,
+  `WATCH_BATCH` (see `.env.example`).
+
+**Costs**
 - AI batches at half price (Claude, OpenAI; ready within up to 24 hours):
-  on by default for the watched folder (`WATCH_BATCH`), a checkbox on the
-  import page for everything else – files, links, link lists, text
-  – an import waiting for its batch survives a restart (an update) and
-  collects the answers afterwards; nothing is sent or paid twice
-- A large import (from about 50,000 tokens) started without “half price”
-  asks once more: half price after all, now at full price, or cancel
-- A page imported before is flagged as a duplicate by its address, even
-  when the title differs (translated, renamed); addresses come from the
-  overview's read and from every import
+  on by default for the watched folder, a checkbox on the import page for
+  everything else – files, photos, links, link lists, text. A large import
+  (from about 50,000 tokens) started without it asks once more. An import
+  waiting for its batch survives a restart and collects the answers
+  afterwards – nothing is sent or paid twice
 - Cookbooks with Claude: the extraction's instructions are cached across
   the book's chunks – after the first chunk they cost about a tenth (usage
   and budget count cache reads that way)
-- Amounts in the steps are written while the recipe is read (Tandoor): the
-  extraction marks where a step names an ingredient, the review's preview
-  shows the amounts, the import turns them into Tandoor's templates – no
-  second AI call per recipe after the import any more (saves roughly
-  2,000–4,000 tokens per recipe); recipes without markers still get them
-  afterwards as before
+- Amounts in the steps are written while the recipe is read (Tandoor) – no
+  second AI call per recipe after the import (roughly 2,000–4,000 tokens
+  per recipe); recipes without them still get them afterwards
+
+**Import**
+- Recipe language: `TRANSLATE_RECIPES=false` keeps every recipe in the
+  language it was written in – also the clean-up of *Process new recipes*,
+  the reuse of existing tags and the amounts in the steps
+- Photos in the steps: in the review every photo can be the main photo,
+  go into a step or stay unused; **Place photos into the steps** places
+  them – a recipe page's step photos by position (free), the others by the
+  image AI (`STEP_PHOTOS_AI=false` leaves it out); own photos with the "+"
+  tile. With Tandoor as step files, with Mealie as recipe assets
 - A tag with the source on every imported recipe: the website
   (`nytcooking`), the video channel or the cookbook's author (`ottolenghi`)
   – `SOURCE_TAG=false` turns it off
-- Maintain: tile **Recipes without source tag** for existing recipes – by
-  their address (the site's name, looked up once) or their cookbook (its
-  author, one small AI call per book); one suggestion per source
-- Review: **Preview | Edit** – a recipe opens in the preview, as Tandoor
-  (every step with its ingredients) or Mealie will, with the step photos
-- WebP photos (.webp) can be imported like JPEG, PNG and HEIC
-- RTF files (.rtf, e.g. from TextEdit or WordPad) are read as recipe text
-- Links in an RTF or Word file or pasted as text are imported as a link
-  list (each page read on its own) instead of becoming empty recipes; a
-  "recipe" with neither ingredients nor steps is left out
-- Own photos can be added to a recipe in the review (the "+" tile)
-- Photos in the steps: in the review every photo can be the main photo,
-  go into a step or stay unused; nothing is placed until you ask with
-  **Place photos into the steps** (per recipe or for all): a recipe page's
-  step photos by position (free), the others by the image AI (tools model,
-  only sure placements, hand-placed photos stay, its own line in *AI
-  usage*; `STEP_PHOTOS_AI=false` leaves the AI out); with Tandoor as step
-  files, with Mealie as recipe assets in the step text
-- `TRANSLATE_RECIPES=false` keeps recipes in the language they were
-  written in – also the ingredient/unit/tag clean-up of *Process new
-  recipes*, the reuse of existing tags and the amounts in the steps; the
-  prompts name the recipe's language ("written in English")
+- Several links in the import field – separated by commas, spaces or lines
+  – are imported like a link list; links in an RTF or Word file or pasted
+  as text too (instead of becoming empty recipes)
+- A page imported before is flagged as a duplicate by its address, even
+  when the title differs
 - Sites with bot protection (403): the app asks like a browser and tries a
-  second time; the bookmark button now hands over the page your browser
-  already shows, so such sites import too (drag the button in again once)
-- The bookmark button also hands over the recipe's photos (main photo and
-  step photos) as your browser loads them – for sites that refuse the app
-  their pictures; photos the browser can't fetch are loaded as before
-- A site that doesn't answer no longer keeps the import waiting: shorter
-  waits with a clear hint, and a recipe's photos stop once their server
-  hangs or refuses (at most 30 seconds for all of them)
-- A failed import goes back to the import page with the error instead of
-  leaving the loading screen turning
-- Recipe pages read more reliably: a Recipe entry with only name and photo
-  no longer hides the recipe on the page, step-by-step guides (schema.org
-  HowTo) are read like recipes, and the page text comes from its largest
-  text block instead of the first article (often a teaser)
-- Recipe data written as "recipe" (lower case) or with a schema.org prefix
-  is recognised (e.g. Tesco Real Food), and pages that put everything into
-  one form (ASP.NET) keep their text
-- Handwritten notes are kept: the transcription marks every note and
-  correction, the extraction puts them into the ingredient, the step or a
-  final "Note" step instead of dropping them
+  second time; the bookmark button hands over the page and its photos as
+  your browser shows them, so such sites import too
+- Recipe pages read more reliably: Recipe entries without a recipe, HowTo
+  guides, "recipe" in lower case, pages inside one big form (e.g. Tesco Real
+  Food), the largest text block instead of a teaser
+- A site that doesn't answer no longer keeps the import waiting, and a
+  failed import goes back to the import page with the error
+- Handwritten notes are kept (in the ingredient, the step or a final "Note"
+  step)
+- WebP photos and RTF files
+- A shorter message after the import
+
+**Review**
+- **Preview | Edit**: a recipe opens in the preview – as Tandoor (every step
+  with its ingredients and amounts) or Mealie will show it, with the step
+  photos
+- Editing no longer drops step titles, step times and ingredient groups
+- A click into an ingredient field places the cursor again in Safari and
+  Firefox (only the ⠿ handle starts a drag)
+
+**Maintain**
+- Tile **Recipes without source tag**: existing recipes get their source
+  tag by address (the site's name) or cookbook (its author)
+- Faster: recipes are read several at a time; the overview reads only
+  recipes changed since its last read; a tile with a few entries reads only
+  those; an applied suggestion takes its entries off the tiles instead of a
+  new scan
+- **Diagnosis** (collapsed at the bottom): what the running app uses –
+  version, recipe manager, AI provider and models, budget, settings, OCR,
+  free space – with an AI test and a copy button for bug reports
+- Mealie: no more *amounts into the steps* (no templates – written-out
+  amounts were wrong once the servings changed)
+- Amounts in the steps: fixed for steps with several photos and for
+  recipes with every ingredient in step 1 after an import; the log says why
+  a recipe gets none
 
 **Also**
-- Review: a click into an ingredient field places the cursor again in
-  Safari and Firefox (only the ⠿ handle starts a drag now)
-- Maintain is faster again: recipes are read several at a time, and the
-  overview reads only recipes changed since its last read (everything
-  fresh once a day and after changes to ingredients, units or tags); a
-  tool started from a tile says how many recipes it checks because they
-  changed since the overview (without AI)
-- Editing a recipe in the review no longer drops its step titles, step
-  times and ingredient groups
-- Maintain is faster: a tile with a few entries (duplicates, unused,
-  without nutrition/category) reads only those, not every ingredient; an
-  applied suggestion takes its entries off the tiles instead of making the
-  whole overview scan again (a rating no longer does either)
-- After an import, a recipe with every ingredient in step 1 gets its
-  amounts in the steps too (it waited for a revision that never comes after
-  an import); the log names why a new recipe gets no amounts
-- Amounts in the steps work again for steps with several photos (the
-  photos in the step text made the check discard the result)
-- Mealie: no more *amounts into the steps* – Mealie has no templates,
-  and amounts written into the text were wrong as soon as the servings
-  changed (tile, tool and *Process new recipes*)
-- Maintain → **Diagnosis** (collapsed at the bottom): what the running
-  app actually uses – version, recipe manager reachable, AI provider and
-  models, budget, language settings, OCR, free space – with a quick AI
-  test and a copy button for bug reports; never shows a key
-- "Undo all imports" updates the review again (it stopped with an error)
+- "Undo all imports" updates the review again
 - The frontend is checked with ESLint on every pull request
 
 ## 1.1.0
