@@ -180,7 +180,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Reading the text …"
             jobs.save_job(job)
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
-                result = process_text(f.read())
+                content = f.read()
+            if looks_like_link_list(content):  # pasted links
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
+            result = process_text(content)
         elif doc_type == "rtf":
             job.progress_label = "Reading the text …"
             jobs.save_job(job)
@@ -188,6 +193,10 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             content = rtf_to_text(source_paths[0])
             if len(content) < 20:
                 raise ValueError("The RTF file contains no readable text.")
+            if looks_like_link_list(content):  # e.g. links collected in TextEdit
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
             result = process_text(content)
         elif doc_type == "audio":
             job.progress_label = "Listening to the voice note …"
@@ -203,6 +212,11 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Reading the Word document …"
             jobs.save_job(job)
             result = process_docx(source_paths[0], images_dir)
+            content = "\n".join(p.get("text") or "" for p in result["pages"])
+            if looks_like_link_list(content):  # a Word file of links
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
         else:
             raise ValueError(f"Unknown document type: {doc_type}")
 

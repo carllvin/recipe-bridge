@@ -608,6 +608,10 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
             )
         except Exception:
             continue
+        if not recipe.ingredients and not recipe.steps:
+            # only a title - e.g. made up from a bare link - is no recipe
+            log.info("Skipping %r: no ingredients and no steps", recipe.title)
+            continue
 
         is_duplicate = False
         for existing in results:
