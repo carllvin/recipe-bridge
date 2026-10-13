@@ -376,6 +376,9 @@ Mealie's fixed ones (breakfast, lunch, dinner, …).
 - **Video links**: YouTube, Instagram and TikTok change often and sometimes
   show bots a login or consent page – then only the caption (or nothing) is
   found.
+- **Amounts in the steps** are written while a recipe is read: in the
+  review a step shows `[[i0:Mehl]]` (edit) or "250 g Mehl" (preview) –
+  on import it becomes Tandoor's template.
 - **Amounts in the steps** with Tandoor use its templates; the comment in
   brackets uses `{{ ingredients[n].note }}` – if your Tandoor version shows
   `()` instead, please report it.

@@ -5,6 +5,7 @@ import os
 
 import httpx
 
+from . import step_amounts
 from .config import settings
 from .schemas import ExtractedRecipe
 
@@ -262,7 +263,8 @@ def _build_recipe_payload(recipe: ExtractedRecipe, client: httpx.Client,
         steps_payload.append({
             "name": step.title or "",
             # the first photo is the step's file, further ones are shown in its text
-            "instruction": step.instruction + "".join(f"\n\n![]({_file_url(f)})" for f in files[1:]),
+            "instruction": (step_amounts.to_tandoor(step.instruction, ingredients_by_step.get(order, []))
+                            + "".join(f"\n\n![]({_file_url(f)})" for f in files[1:])),
             "ingredients": ingredients_payload,
             "time": step.time_minutes or 0,
             "order": order,

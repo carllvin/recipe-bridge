@@ -29,7 +29,7 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import json_answer, llm_provider
+from . import json_answer, llm_provider, step_amounts
 from .schemas import Job, TokenUsage
 
 log = logging.getLogger("recipe-bridge")
@@ -125,7 +125,7 @@ def _contact_sheet(paths: list[str]) -> bytes:
 
 def _ask_ai(recipe, paths: list[str]) -> tuple[dict[int, int], TokenUsage]:
     """{photo index: step index} for the photos the AI placed - and is sure about."""
-    steps = "\n".join(f"{i}. {s.instruction[:STEP_CHARS]}" for i, s in enumerate(recipe.steps, 1))
+    steps = "\n".join(f"{i}. {step_amounts.plain(s.instruction)[:STEP_CHARS]}" for i, s in enumerate(recipe.steps, 1))
     prompt = PROMPT.format(n=len(paths), steps=steps, m=len(recipe.steps))
     text, usage = llm_provider.transcribe_image(_contact_sheet(paths), prompt, max_tokens=600, tools=True)
     try:

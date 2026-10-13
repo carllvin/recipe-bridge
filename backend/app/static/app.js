@@ -1259,6 +1259,7 @@ function renderDetail(r) {
     <div id="ingredients-wrap">${ingredientsHtml}</div>
 
     <div class="section-title">${t('fieldSteps')}</div>
+    ${r.steps.some((s) => /\[\[i\d+:/.test(s.instruction)) ? `<p class="settings-hint">${t('stepMarkersHint')}</p>` : ''}
     <div id="steps-wrap">${stepsHtml}</div>
   `;
 
@@ -1327,6 +1328,7 @@ function renderDetail(r) {
         step_index: numOrNull(row.querySelector('.ing-step')?.value) ?? 0,
         tandoor_match: unchanged ? (before.tandoor_match ?? null) : null,
         original_name: unchanged ? (before.original_name ?? null) : null,
+        ref: before.ref ?? null,  // what the steps' amount markers point to
       };
     });
 
@@ -1493,6 +1495,18 @@ async function undoImport(r) {
   }
 }
 
+// "[[i0:Mehl]]" in a step (step_amounts.py) as the recipe will read it:
+// with the amount - Mealie gets the plain name (no templates).
+const AMOUNT_MARK = /\[\[(i\d+):([^\][]*)\]\]/g;
+function withAmounts(text, r) {
+  return (text || '').replace(AMOUNT_MARK, (_m, ref, name) => {
+    const ing = r.ingredients.find((i) => i.ref === ref);
+    if (!ing) return name;
+    if (isMealie() || !ing.amount) return ing.name;
+    return [formatAmount(ing.amount), ing.unit, ing.name].filter(Boolean).join(' ') + (ing.note ? ` (${ing.note})` : '');
+  });
+}
+
 // Review: see the recipe as the recipe manager will show it (the default),
 // or edit it - the last choice is kept.
 function reviewView() {
@@ -1517,7 +1531,7 @@ function recipePreviewHtml(r) {
       return `${head}<li>${ingLine(ing)}</li>`;
     }).join('')}</ul>`;
   };
-  const text = (s) => escapeHtml(s || '').split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  const text = (s) => escapeHtml(withAmounts(s, r)).split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
   const photos = (s) => (s.image_ids || []).length
     ? `<div class="pv-photos">${s.image_ids.map((iid) => `<img src="${imageUrl(iid)}" alt="" loading="lazy">`).join('')}</div>` : '';
   const facts = [

@@ -114,6 +114,9 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
         f"out. Diet tags don't count towards the 5 general tags."
     )
 
+    from . import step_amounts
+    amounts_instruction = f"\n{step_amounts.PROMPT}" if step_amounts.wanted() else ""
+
     custom_instruction_block = ""
     if settings.custom_instructions.strip():
         custom_instruction_block = (
@@ -200,7 +203,7 @@ the onion belongs to that step; "season with salt and pepper" -> salt/pepper \
 belong to that later step). Ingredients that belong right at the start (e.g. "prep \
 the ingredients") or that can't be clearly assigned to one single step (e.g. base \
 ingredients like flour in a dough processed across several steps) get step_index 0.
-{custom_instruction_block}
+{amounts_instruction}{custom_instruction_block}
 IMPORTANT - Valid JSON only: the output MUST be syntactically valid JSON. Any \
 double-quote character that appears inside a text value (a quoted word, a \
 typographic quotation mark copied from the source, an inch/size mark like 9") \
@@ -590,8 +593,11 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
     def overlaps(a_start, a_end, b_start, b_end) -> bool:
         return a_start <= b_end and b_start <= a_end
 
+    from . import step_amounts
     for item in raw_recipes:
         try:
+            if isinstance(item, dict):
+                step_amounts.from_extraction(item)
             recipe = ExtractedRecipe(
                 id=uuid.uuid4().hex[:10],
                 title=item.get("title") or "Untitled recipe",

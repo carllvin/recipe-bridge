@@ -3,6 +3,12 @@
 ## Unreleased
 
 **Import**
+- Amounts in the steps are written while the recipe is read (Tandoor): the
+  extraction marks where a step names an ingredient, the review's preview
+  shows the amounts, the import turns them into Tandoor's templates – no
+  second AI call per recipe after the import any more (saves roughly
+  2,000–4,000 tokens per recipe); recipes without markers still get them
+  afterwards as before
 - A tag with the source on every imported recipe: the website
   (`nytcooking`), the video channel or the cookbook's author (`ottolenghi`)
   – `SOURCE_TAG=false` turns it off
