@@ -3,6 +3,8 @@
 ## Unreleased
 
 **Import**
+- Review: **Edit | Preview** – the preview shows the recipe as Tandoor
+  (every step with its ingredients) or Mealie will, with the step photos
 - A large import (a whole cookbook) first shows its estimated tokens and
   what is left of the monthly budget, and waits for **Start** or
   **Cancel** (`IMPORT_CONFIRM_TOKENS`, default 50,000; 0 = never ask)

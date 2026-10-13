@@ -1200,10 +1200,32 @@ function renderDetail(r) {
        </div>`
     : '';
 
-  detail.innerHTML = `
+  const banners = `
     ${r.import_error ? `<div class="error-banner" style="margin-bottom:20px;">${escapeHtml(r.import_error)}</div>` : ''}
     ${duplicateNotice}
-    ${importedNotice}
+    ${importedNotice}`;
+  const viewSwitch = `<div class="view-switch" role="tablist">
+      <button type="button" data-view="edit" class="${reviewView() === 'edit' ? 'active' : ''}">✏️ ${t('reviewEdit')}</button>
+      <button type="button" data-view="preview" class="${reviewView() === 'preview' ? 'active' : ''}">👁 ${t('reviewPreview')}</button>
+    </div>`;
+  const bindViewSwitch = () => detail.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => {
+    setReviewView(b.dataset.view);
+    renderDetail(r);
+  }));
+  const bindUndo = () => {
+    const undoBtn = detail.querySelector('.undo-import-btn');
+    if (undoBtn) undoBtn.addEventListener('click', () => undoImport(r));
+  };
+  if (reviewView() === 'preview') {
+    detail.innerHTML = banners + viewSwitch + recipePreviewHtml(r);
+    bindViewSwitch();
+    bindUndo();
+    return;
+  }
+
+  detail.innerHTML = `
+    ${banners}
+    ${viewSwitch}
     <div class="field title-field">
       <input id="f-title" value="${escapeHtml(r.title)}" />
     </div>
@@ -1445,28 +1467,88 @@ function renderDetail(r) {
     });
   });
 
-  const undoBtn = detail.querySelector('.undo-import-btn');
-  if (undoBtn) {
-    undoBtn.addEventListener('click', async () => {
-      undoBtn.disabled = true;
-      undoBtn.textContent = t('undoingImport');
-      try {
-        const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/undo-import`, { method: 'POST' });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || t('undoImportFailed'));
-        }
-        const updated = await res.json();
-        Object.assign(r, updated);
-        renderRecipeList();
-        renderDetail(r);
-      } catch (e) {
-        alert(`${t('undoImportFailed')}: ${e.message}`);
-        undoBtn.disabled = false;
-        undoBtn.textContent = t('undoImportBtn');
-      }
-    });
+  bindViewSwitch();
+  bindUndo();
+}
+
+// "Undo import" of one recipe (the banner above an imported recipe).
+async function undoImport(r) {
+  const undoBtn = el('recipe-detail').querySelector('.undo-import-btn');
+  undoBtn.disabled = true;
+  undoBtn.textContent = t('undoingImport');
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/undo-import`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || t('undoImportFailed'));
+    }
+    const updated = await res.json();
+    Object.assign(r, updated);
+    renderRecipeList();
+    renderDetail(r);
+  } catch (e) {
+    alert(`${t('undoImportFailed')}: ${e.message}`);
+    undoBtn.disabled = false;
+    undoBtn.textContent = t('undoImportBtn');
   }
+}
+
+// Review: edit the recipe, or see it as the recipe manager will show it.
+function reviewView() {
+  try { return localStorage.getItem('reviewView') === 'preview' ? 'preview' : 'edit'; } catch (e) { return 'edit'; }
+}
+
+function setReviewView(view) {
+  try { localStorage.setItem('reviewView', view); } catch (e) { /* only for this page view */ }
+}
+
+// The recipe as Tandoor shows it - every step with its own ingredients next
+// to the text - or Mealie: one ingredient list, then the method. Photos in
+// the steps where they will appear. Nothing is sent anywhere.
+function recipePreviewHtml(r) {
+  const ingLine = (ing) => `${escapeHtml([formatAmount(ing.amount), ing.unit, ing.name].filter(Boolean).join(' '))}`
+    + (ing.note ? ` <span class="pv-note">${escapeHtml(ing.note)}</span>` : '');
+  const ingList = (ings) => {
+    let group = null;
+    return `<ul class="pv-ings">${ings.map((ing) => {
+      const head = ing.group && ing.group !== group ? `<li class="pv-group">${escapeHtml(ing.group)}</li>` : '';
+      group = ing.group || group;
+      return `${head}<li>${ingLine(ing)}</li>`;
+    }).join('')}</ul>`;
+  };
+  const text = (s) => escapeHtml(s || '').split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  const photos = (s) => (s.image_ids || []).length
+    ? `<div class="pv-photos">${s.image_ids.map((iid) => `<img src="${imageUrl(iid)}" alt="" loading="lazy">`).join('')}</div>` : '';
+  const facts = [
+    r.servings ? `${t('fieldServings')}: ${formatAmount(r.servings)}` : '',
+    r.prep_time_minutes ? `${t('fieldPrep')}: ${r.prep_time_minutes} min` : '',
+    r.cook_time_minutes ? `${t('fieldCook')}: ${r.cook_time_minutes} min` : '',
+  ].filter(Boolean);
+  const stepIngs = (i) => r.ingredients.filter((ing) => Math.min(ing.step_index ?? 0, Math.max(0, r.steps.length - 1)) === i);
+  const steps = isMealie()
+    ? `${r.ingredients.length ? `<h3 class="pv-h">${t('fieldIngredients')}</h3>${ingList(r.ingredients)}` : ''}
+       <h3 class="pv-h">${t('fieldSteps')}</h3>
+       <ol class="pv-method">${r.steps.map((s) => `<li>${s.title ? `<strong>${escapeHtml(s.title)}</strong>` : ''}${text(s.instruction)}${photos(s)}</li>`).join('')}</ol>`
+    : r.steps.map((s, i) => {
+      const own = stepIngs(i);
+      return `<section class="pv-step">
+        <div class="pv-step-head">${tf('previewStep', { n: i + 1 })}${s.title ? ` · ${escapeHtml(s.title)}` : ''}${s.time_minutes ? ` · ${s.time_minutes} min` : ''}</div>
+        <div class="pv-step-body ${own.length ? '' : 'no-ings'}">
+          ${own.length ? ingList(own) : ''}
+          <div class="pv-text">${text(s.instruction)}${photos(s)}</div>
+        </div>
+      </section>`;
+    }).join('');
+  return `<article class="recipe-preview">
+    ${r.selected_image_id ? `<img class="pv-main" src="${imageUrl(r.selected_image_id)}" alt="">` : ''}
+    <h2 class="pv-title">${escapeHtml(r.title)}</h2>
+    ${r.tags.length ? `<div class="pv-tags">${r.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+    ${facts.length ? `<div class="pv-facts">${facts.map(escapeHtml).join(' · ')}</div>` : ''}
+    ${r.description ? `<div class="pv-desc">${text(r.description)}</div>` : ''}
+    ${steps || `<p class="settings-hint">${t('noSteps')}</p>`}
+    ${r.source_url ? `<div class="source-line">${t('sourceUrlLabel')}: <a href="${escapeHtml(r.source_url)}" target="_blank" rel="noopener">${escapeHtml(r.source_url.replace(/^https?:\/\/(www\.)?/, ''))}</a></div>` : ''}
+    <p class="settings-hint pv-hint">${escapeHtml(tf('previewHint', { manager: APP_CONFIG.recipe_manager || 'Tandoor' }))}</p>
+  </article>`;
 }
 
 async function triggerImageGeneration(recipe, tileEl) {
