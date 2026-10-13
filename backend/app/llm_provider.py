@@ -66,22 +66,40 @@ def _model(provider: str, tools: bool) -> str:
 
 
 def complete_text(
-    system_prompt: Optional[str], user_content: str, max_tokens: int = 4096, tools: bool = False
+    system_prompt: Optional[str], user_content: str, max_tokens: int = 4096, tools: bool = False,
+    cache: bool = False,
 ) -> tuple[str, TokenUsage]:
     """Sends a prompt to the configured AI provider and returns (response_text, token_usage).
     system_prompt may be empty/None (in which case no system prompt is sent).
     tools=True uses the cheaper *_TOOLS_MODEL (if set) - for the maintenance
-    tools' small, structured tasks, not for cookbook extraction."""
+    tools' small, structured tasks, not for cookbook extraction.
+    cache=True: the system prompt comes again in the next calls (a
+    cookbook's chunks) - Claude caches it (a cache read costs about a tenth;
+    OpenAI and Gemini cache repeated prompts on their own)."""
     provider = _active_provider()
     model = _model(provider, tools)
     if provider in ("openai", "compatible"):
         return _complete_openai(system_prompt, user_content, max_tokens, model, provider)
     if provider == "gemini":
         return _complete_gemini(system_prompt, user_content, max_tokens, model)
-    return _complete_anthropic(system_prompt, user_content, max_tokens, model)
+    return _complete_anthropic(system_prompt, user_content, max_tokens, model, cache)
 
 
-def _complete_anthropic(system_prompt: Optional[str], user_content: str, max_tokens: int, model: str) -> tuple[str, TokenUsage]:
+def _anthropic_usage(response) -> TokenUsage:
+    """Input as billed: cache writes count 1.25x, cache reads a tenth - so
+    the budget and "AI usage" show what caching saves."""
+    usage = TokenUsage()
+    u = getattr(response, "usage", None)
+    if u is not None:
+        written = getattr(u, "cache_creation_input_tokens", 0) or 0
+        read = getattr(u, "cache_read_input_tokens", 0) or 0
+        usage.input_tokens = (getattr(u, "input_tokens", 0) or 0) + round(written * 1.25) + round(read * 0.1)
+        usage.output_tokens = getattr(u, "output_tokens", 0) or 0
+    return usage
+
+
+def _complete_anthropic(system_prompt: Optional[str], user_content: str, max_tokens: int, model: str,
+                        cache: bool = False) -> tuple[str, TokenUsage]:
     import anthropic
 
     if not settings.anthropic_api_key:
@@ -89,7 +107,9 @@ def _complete_anthropic(system_prompt: Optional[str], user_content: str, max_tok
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     kwargs = {}
-    if system_prompt:
+    if system_prompt and cache:  # the same instructions for every chunk: read from the cache after the first
+        kwargs["system"] = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+    elif system_prompt:
         kwargs["system"] = system_prompt
 
     response = client.messages.create(
@@ -99,12 +119,7 @@ def _complete_anthropic(system_prompt: Optional[str], user_content: str, max_tok
         **kwargs,
     )
     text = "".join(block.text for block in response.content if block.type == "text")
-
-    usage = TokenUsage()
-    if getattr(response, "usage", None) is not None:
-        usage.input_tokens = getattr(response.usage, "input_tokens", 0) or 0
-        usage.output_tokens = getattr(response.usage, "output_tokens", 0) or 0
-    return text, usage
+    return text, _anthropic_usage(response)
 
 
 def _complete_openai(system_prompt: Optional[str], user_content: str, max_tokens: int, model: str,

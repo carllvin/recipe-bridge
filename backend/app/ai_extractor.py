@@ -544,7 +544,8 @@ def extract_recipes_from_pages(
                 on_progress(idx, total_chunks, page_start, page_end)
             continue
 
-        text_out, usage = llm_provider.complete_text(system_prompt, chunk_text, max_tokens=8000)
+        text_out, usage = llm_provider.complete_text(system_prompt, chunk_text, max_tokens=8000,
+                                                     cache=total_chunks > 1)
         total_usage.add(usage)
         try:
             parsed = _extract_json_array(text_out)

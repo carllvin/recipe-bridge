@@ -3,6 +3,9 @@
 ## Unreleased
 
 **Import**
+- Cookbooks with Claude: the extraction's instructions are cached across
+  the book's chunks – after the first chunk they cost about a tenth (usage
+  and budget count cache reads that way)
 - Amounts in the steps are written while the recipe is read (Tandoor): the
   extraction marks where a step names an ingredient, the review's preview
   shows the amounts, the import turns them into Tandoor's templates – no
