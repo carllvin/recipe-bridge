@@ -1324,7 +1324,7 @@ function renderDetail(r) {
         original_unit: unitUnchanged ? (before.original_unit ?? null) : null,
         name,
         note: row.querySelector('.ing-note').value || null,
-        group: null,
+        group: before.group ?? null,  // not edited here - kept
         step_index: numOrNull(row.querySelector('.ing-step')?.value) ?? 0,
         tandoor_match: unchanged ? (before.tandoor_match ?? null) : null,
         original_name: unchanged ? (before.original_name ?? null) : null,
@@ -1332,10 +1332,11 @@ function renderDetail(r) {
       };
     });
 
+    // title and time aren't edited here - kept as read
     r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row, i) => ({
       instruction: row.querySelector('.step-instruction').value,
-      title: null,
-      time_minutes: null,
+      title: (r.steps[i] || {}).title ?? null,
+      time_minutes: (r.steps[i] || {}).time_minutes ?? null,
       image_ids: (r.steps[i] || {}).image_ids || [],
     }));
 

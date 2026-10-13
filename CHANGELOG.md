@@ -60,6 +60,8 @@
   final "Note" step instead of dropping them
 
 **Also**
+- Editing a recipe in the review no longer drops its step titles, step
+  times and ingredient groups
 - Maintain is faster: a tile with a few entries (duplicates, unused,
   without nutrition/category) reads only those, not every ingredient; an
   applied suggestion takes its entries off the tiles instead of making the
