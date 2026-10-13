@@ -71,7 +71,8 @@ def links_from_text(text: str) -> list[str]:
     """Every http(s) link in a text file (one per line, or anywhere in the
     text), without duplicates, in their order, at most MAX_LINKS."""
     links = []
-    for match in _URL_RE.findall(text or ""):
+    text = re.sub(r",\s*(?=https?://)", "\n", text or "")  # "https://a.example/x,https://b.example/y"
+    for match in _URL_RE.findall(text):
         url = match.rstrip(".,;:!?")
         if url not in links:
             links.append(url)

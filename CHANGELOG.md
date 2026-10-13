@@ -3,6 +3,8 @@
 ## Unreleased
 
 **Import**
+- Several links in the import field – separated by commas, spaces or lines –
+  are imported like a link list (each page on its own, one review)
 - Uploaded cookbooks as an AI batch too: `UPLOAD_BATCH=true`, or the
   button **Half price (ready within 24 h)** at a large import's estimate
 - A shorter message after the import

@@ -427,8 +427,19 @@ function isVideoLink(url) {
   } catch (e) { return false; }
 }
 
+// Several links - separated by commas, spaces or lines - and nothing else:
+// imported like a link list (each page on its own, all in one review).
+function smartLinks(value) {
+  const parts = value.split(/[\s,;]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const links = parts.map(smartLink);
+  return links.every(Boolean) ? [...new Set(links)] : null;
+}
+
 function smartMode() {
   const value = el('smart-input').value.trim();
+  const links = smartLinks(value);
+  if (links) return { mode: 'links', value: links };
   const link = !value.includes('\n') ? smartLink(value) : null;
   if (link) return { mode: 'url', value: link };
   if (value.length >= 20) return { mode: 'text', value };
@@ -441,12 +452,13 @@ function updateSmartForm() {
   input.style.height = `${Math.min(input.scrollHeight, 320)}px`;
   const { mode } = smartMode();
   el('smart-import').disabled = !mode;
-  el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
+  el('smart-import').textContent = mode === 'links' ? tf('smartImportLinks', { n: smartMode().value.length })
+    : t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
   // A video link: the recipe comes from the description / subtitles - no website scan.
   const video = mode === 'url' && isVideoLink(smartMode().value);
   el('smart-scan').classList.toggle('hidden', mode !== 'url' || video);
   el('smart-depth-wrap').classList.toggle('hidden', mode !== 'url' || video);
-  el('smart-hint').textContent = video ? t('smartHintVideo')
+  el('smart-hint').textContent = video ? t('smartHintVideo') : mode === 'links' ? t('smartHintLinks')
     : mode === 'url' ? `${t('smartHintUrl')} ${t('scanDepthHint')}` : mode === 'text' ? t('smartHintText') : '';
 }
 
@@ -458,7 +470,7 @@ function clearSmartForm() {
 el('smart-input').addEventListener('input', updateSmartForm);
 // Enter imports a link; in a recipe text it's a new line.
 el('smart-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && smartMode().mode === 'url') {
+  if (e.key === 'Enter' && !e.shiftKey && ['url', 'links'].includes(smartMode().mode)) {
     e.preventDefault();
     el('smart-form').requestSubmit();
   }
@@ -468,6 +480,7 @@ el('smart-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const { mode, value } = smartMode();
   if (mode === 'url') startImportRequest('/api/import-url', { url: value }, t('urlImportLoading'), clearSmartForm);
+  else if (mode === 'links') startImportRequest('/api/import-links', { urls: value }, t('urlImportLoading'), clearSmartForm);
   else if (mode === 'text') startImportRequest('/api/import-text', { text: value }, t('textImportLoading'), clearSmartForm);
 });
 

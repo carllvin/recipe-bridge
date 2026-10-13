@@ -117,3 +117,9 @@ def test_a_title_without_ingredients_or_steps_is_no_recipe():
     recipes = ai_extractor._dedupe_recipes([{"title": "Mushroom bourguignon"},
                                             {"title": "Soup", "steps": [{"instruction": "Cook."}]}])
     assert [r.title for r in recipes] == ["Soup"]
+
+
+def test_links_separated_by_commas():
+    text = "https://a.example/soup,https://b.example/cake, https://c.example/x?id=3,"
+    assert url_processor.links_from_text(text) == ["https://a.example/soup", "https://b.example/cake",
+                                                   "https://c.example/x?id=3"]
