@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     # Watched folder: files put here are imported on their own and wait in the review inbox; empty = off
     watch_dir: str = ""
     watch_interval_seconds: int = 30
+    watch_batch: bool = False            # imports from the watched folder as an AI batch: half price, done within up to 24 h (Claude, OpenAI)
 
     # Push notifications (see notify.py) - ntfy topic URL (e.g. https://ntfy.sh/my-secret-topic) and/or Telegram bot
     notify_ntfy_url: str = ""

@@ -507,7 +507,12 @@ def extract_recipes_from_pages(
     on_progress: Optional[ProgressCallback] = None,
     toc_pages: Optional[list[int]] = None,
     existing_tags: Optional[list[str]] = None,
+    batch: bool = False,
+    on_wait=None,
 ) -> tuple[list[ExtractedRecipe], TokenUsage]:
+    """batch=True (WATCH_BATCH): all chunks as one batch at half price -
+    on_wait(done, total) while it runs; falls back to one call per chunk
+    when the provider has no batches or the batch fails."""
     if not llm_provider.is_configured():
         raise RuntimeError(llm_provider.missing_key_hint())
 
@@ -532,10 +537,20 @@ def extract_recipes_from_pages(
         len(pages), total_chunks, toc_pages or "none",
     )
 
+    texts = ["".join(f"\n\n===== PAGE {p['page']} =====\n{p['text']}" for p in chunk) for chunk in chunks]
+    answers: dict[int, tuple[str, TokenUsage]] = {}
+    wanted = [n for n, t in enumerate(texts) if t.strip()]
+    if batch and llm_provider.batch_supported() and len(wanted) > 1:
+        try:
+            log.info("Extraction as one AI batch: %d chunk(s), half price, up to 24 h", len(wanted))
+            results = llm_provider.complete_batch(system_prompt, [texts[n] for n in wanted], max_tokens=8000,
+                                                  on_wait=on_wait)
+            answers = dict(zip(wanted, results))
+        except Exception as exc:  # noqa: BLE001 - one by one instead
+            log.warning("AI batch failed (%s) - asking chunk by chunk", exc)
+
     for idx, chunk in enumerate(chunks, start=1):
-        chunk_text = "".join(
-            f"\n\n===== PAGE {p['page']} =====\n{p['text']}" for p in chunk
-        )
+        chunk_text = texts[idx - 1]
         page_start, page_end = chunk[0]["page"], chunk[-1]["page"]
 
         if not chunk_text.strip():
@@ -544,8 +559,11 @@ def extract_recipes_from_pages(
                 on_progress(idx, total_chunks, page_start, page_end)
             continue
 
-        text_out, usage = llm_provider.complete_text(system_prompt, chunk_text, max_tokens=8000,
-                                                     cache=total_chunks > 1)
+        if idx - 1 in answers:
+            text_out, usage = answers[idx - 1]
+        else:
+            text_out, usage = llm_provider.complete_text(system_prompt, chunk_text, max_tokens=8000,
+                                                         cache=total_chunks > 1)
         total_usage.add(usage)
         try:
             parsed = _extract_json_array(text_out)

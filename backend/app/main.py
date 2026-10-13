@@ -246,11 +246,18 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         if not _go_ahead(job, result["pages"], toc_pages, existing_tags):
             return
         recipes: list[ExtractedRecipe]
+        def batch_wait(done: int, total: int) -> None:
+            job.progress_current, job.progress_total = done, total
+            job.progress_label = f"Waiting for the AI batch: {done}/{total} part(s) done (half price, up to 24 h)"
+            jobs.save_job(job)
+
         recipes, usage = extract_recipes_from_pages(
             result["pages"],
             on_progress=progress_cb,
             toc_pages=toc_pages,
             existing_tags=existing_tags,
+            batch=settings.watch_batch and job.source == "folder",
+            on_wait=batch_wait,
         )
         if doc_type == "url":
             for recipe in recipes:

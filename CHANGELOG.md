@@ -3,6 +3,8 @@
 ## Unreleased
 
 **Import**
+- `WATCH_BATCH=true`: files from the watched folder go to the AI as one
+  batch – half price, ready within up to 24 hours (Claude, OpenAI)
 - A page imported before is flagged as a duplicate by its address, even
   when the title differs (translated, renamed); addresses come from the
   overview's read and from every import

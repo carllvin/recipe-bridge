@@ -58,7 +58,8 @@ def info() -> list[dict]:
          if settings.custom_instructions.strip() else "none", None),
         ("system", "OCR", _ocr(), None),
         ("system", "Data folder", f"{settings.data_dir} – {free.free // 2**30} GB free", free.free > 2**30),
-        ("system", "Watched folder", settings.watch_dir or "off", None),
+        ("system", "Watched folder", (settings.watch_dir + (" (as AI batch, half price)" if settings.watch_batch else ""))
+         if settings.watch_dir else "off", None),
         ("system", "Time zone (TZ)", os.environ.get("TZ") or time.strftime("%Z"), None),
     ]
     return [{"group": g, "label": label, "value": value, **({"ok": ok} if ok is not None else {})}
