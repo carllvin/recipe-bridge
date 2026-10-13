@@ -12,6 +12,7 @@ class Ingredient(BaseModel):
     note: Optional[str] = None
     group: Optional[str] = None  # e.g. "For the dough", "For the filling"
     step_index: Optional[int] = None  # 0-based index of the step that needs this ingredient
+    ref: Optional[str] = None  # "i3" - what the steps' amount markers point to (step_amounts.py)
     tandoor_match: Optional[str] = None  # "exists" | "matched" | "new" - set by import_matching before review
     original_name: Optional[str] = None  # name before it was matched to an existing Tandoor ingredient
     unit_match: Optional[str] = None  # same for the unit: "exists" | "matched" | "new"
@@ -69,7 +70,7 @@ class ExtractedRecipe(BaseModel):
 class Job(BaseModel):
     id: str
     filename: str
-    status: str = "processing"  # processing | confirm (a large import waits for your OK) | ready | error | cancelled
+    status: str = "processing"  # processing | confirm (a large import asks about half price) | ready | error | cancelled
     error: Optional[str] = None
     page_count: int = 0
     recipes: list[ExtractedRecipe] = Field(default_factory=list)
@@ -84,7 +85,9 @@ class Job(BaseModel):
     created_at: float = Field(default_factory=time.time)  # epoch seconds, used for cleanup
     notes: list[str] = Field(default_factory=list)  # e.g. links of a link list that were skipped, shown in the review
     source: Optional[str] = None  # "share" (phone share menu) or "folder" (watched folder) - shown in the review inbox
-    estimate: Optional[dict] = None  # status "confirm": {"chunks", "input", "output", "total", "budget_left"} (ai_extractor.estimate_tokens)
+    source_tag: Optional[str] = None  # the import's source tag (source_tag.py) - remembered for its cookbook on import
+    batch: bool = False  # the import page's "half price" checkbox: the AI reads it as a batch (up to 24 h)
+    estimate: Optional[dict] = None  # status "confirm": {"total", "input", "output", "chunks" | "links", "budget_left"}
 
 
 class ToolSuggestion(BaseModel):

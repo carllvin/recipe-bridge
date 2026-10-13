@@ -88,10 +88,14 @@ def recipes_for(client, metric: str, matches, skip=frozenset(), job=None) -> lis
 
     ids = {item["key"] for item in listed}
     overview = fetch_recipe_overview(client)
-    ids |= {str(item["id"]) for item in overview if _is_changed(item, versions, computed_at)}
+    changed = {str(item["id"]) for item in overview if _is_changed(item, versions, computed_at)} - ids
+    ids |= changed
     todo = [item["id"] for item in overview if str(item["id"]) in ids and str(item["id"]) not in skip]
     if job is not None:
-        job.progress_label = f"Reading {len(todo)} recipe(s)..."
+        # the tile's own ones, plus the ones changed since the overview - checked without AI
+        job.progress_label = (f"Checking {len(todo)} recipe(s): {len(todo) - len(changed)} from the tile, "
+                              f"{len(changed)} changed since the overview (no AI)..." if changed
+                              else f"Reading {len(todo)} recipe(s)...")
         tool_jobs.save_tool_job(job)
     log.info("%s: reading %d of %d recipes (from the health overview)", metric, len(todo), len(overview))
     return [r for r in fetch_recipes_full(client, todo) if matches(r)]

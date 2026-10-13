@@ -112,6 +112,30 @@ def test_tandoor_gets_templates(tandoor, monkeypatch):
     assert [i["food"]["name"] for i in steps[0]["ingredients"]] == ["Mehl", "Milch", "Ei"]
 
 
+def test_step_photos_stay_out_of_the_ai_text(tandoor, monkeypatch):
+    """Further step photos sit in the step text as markdown images - their
+    addresses (numbers) must not trip the checks, and they stay behind the
+    new text."""
+    ai = AI(monkeypatch, GOOD)
+    for i in range(1, 6):
+        tandoor.db.setdefault("food", {})[i] = {"id": i, "name": ["", "Mehl", "Milch", "Ei", "Butter", "Salz"][i]}
+    tandoor.db.setdefault("unit", {})[1] = {"id": 1, "name": "g"}
+    r = recipe()
+    photos = "\n\n![](/media/files/12/teig_2048.jpg)\n\n![](/api/download-file/31/)"
+    r["steps"][0]["instruction"] += photos
+    r["steps"][0]["file"] = {"id": 30, "name": "teig", "file_download": "/api/download-file/30/", "preview": "x"}
+    tandoor.add("recipe", r)
+    job = tool_jobs.create_tool_job("recipes_amounts")
+    tool_jobs.save_tool_job(job)
+    job.suggestions = [recipe_amounts.plan_suggestion(job, tandoor.db["recipe"][7])]
+    assert job.suggestions[0] is not None and "![](" not in json.dumps(ai.seen)
+    tool_jobs.save_tool_job(job)
+    assert recipe_amounts.apply_suggestion(job.id, job.suggestions[0].id).status == "applied"
+    step = tandoor.db["recipe"][7]["steps"][0]
+    assert step["instruction"] == "{{ ingredients[0] }} mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren." + photos
+    assert step["file"] == {"id": 30, "name": "teig"}
+
+
 def test_mealie_has_no_amounts_in_the_steps(monkeypatch):
     """Mealie has no templates - written-out amounts would be wrong once the
     servings change, so the tile and the tool aren't offered."""
@@ -249,3 +273,18 @@ def test_old_templates_reading_0_pepper_are_repaired(monkeypatch):
     assert fixed == "{{ ingredients[0] }} und Salz in die Pfanne geben."
     r["steps"][1]["instruction"] = fixed
     assert not recipe_amounts.needs_amounts(r)
+
+
+def test_after_an_import_all_ingredients_in_step_one_still_get_amounts():
+    """Reported: no amounts after an import. With every ingredient in step 1
+    the recipe waited for a structure revision - which never comes after an
+    import (the review was it)."""
+    r = recipe()
+    r["steps"][0]["ingredients"] += r["steps"][1]["ingredients"]
+    r["steps"][1]["ingredients"] = []
+    assert recipe_amounts.skip_reason(r) == "the structure revision comes first"
+    assert recipe_amounts.needs_amounts(r, after_import=True)
+    done = recipe()
+    done["steps"][0]["instruction"] = "250 g Mehl mit 500 ml Milch und 3 Eiern verrühren."
+    done["steps"][1]["instruction"] = "1 EL Butter erhitzen."
+    assert recipe_amounts.skip_reason(done, after_import=True) == "the steps name the amounts already"

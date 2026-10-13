@@ -33,20 +33,95 @@ def fetch_recipe_overview(client: httpx.Client, max_recipes: int | None = None) 
     return items
 
 
+PARALLEL_READS = 6  # recipes read at the same time - Tandoor answers each one on its own
+
+
 def fetch_recipes_full(client: httpx.Client, ids) -> list[dict]:
-    full = []
-    for rid in ids:
+    """Full recipes, several requests at a time (in the given order; gone ones left out)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(rid):
         resp = client.get(f"/recipe/{rid}/")
-        if resp.status_code == 200:
-            full.append(resp.json())
-    return full
+        return resp.json() if resp.status_code == 200 else None
+    ids = list(ids)
+    if len(ids) < 3:
+        found = [one(rid) for rid in ids]
+    else:
+        with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
+            found = list(pool.map(one, ids))
+    return [r for r in found if r is not None]
+
+
+# ---------- the collection read once, then only what changed ----------
+#
+# Every full read of the collection (the Maintain overview, tools without an
+# overview) used to fetch every recipe again. Full recipes are kept in the
+# data folder with their "updated_at"; a recipe Tandoor reports unchanged is
+# taken from there. Changes Tandoor doesn't stamp on the recipe (an
+# ingredient renamed or merged) are why the copy is dropped after an applied
+# change to ingredients, units or tags, and why once a day everything is read
+# fresh.
+
+CACHE_MAX_AGE = 24 * 3600
+_cache_lock = __import__("threading").Lock()
+
+
+def _cache_path() -> str:
+    import os
+    from .config import settings
+    return os.path.join(settings.data_dir, "recipe_cache.json")
+
+
+def drop_recipe_cache() -> None:
+    import os
+    with _cache_lock:
+        try:
+            os.remove(_cache_path())
+        except OSError:
+            pass
+
+
+def _load_cache() -> dict:
+    import json
+    import time
+    try:
+        with open(_cache_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if time.time() - (data.get("created_at") or 0) > CACHE_MAX_AGE:
+        return {}
+    return data
+
+
+def _save_cache(recipes: list[dict], created_at: float) -> None:
+    import json
+    import os
+    with _cache_lock:
+        tmp = _cache_path() + ".tmp"
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"created_at": created_at, "recipes": {str(r["id"]): r for r in recipes}}, f, ensure_ascii=False)
+        os.replace(tmp, _cache_path())
 
 
 def fetch_all_recipes_full(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:
-    """Fetches every recipe's full detail (steps + ingredients + keywords).
-    Used whenever a script needs to inspect what a recipe actually contains,
-    not just its compact list-view fields."""
-    return fetch_recipes_full(client, [item["id"] for item in fetch_recipe_overview(client, max_recipes)])
+    """Every recipe's full detail (steps + ingredients + keywords) - the
+    ones unchanged since the last full read come from its copy."""
+    import time
+    overview = fetch_recipe_overview(client, max_recipes)
+    if max_recipes:
+        return fetch_recipes_full(client, [item["id"] for item in overview])
+    cache = _load_cache()
+    kept = cache.get("recipes") or {}
+    fresh_ids = [item["id"] for item in overview
+                 if not item.get("updated_at") or (kept.get(str(item["id"])) or {}).get("updated_at") != item["updated_at"]]
+    fresh = {str(r["id"]): r for r in fetch_recipes_full(client, fresh_ids)}
+    recipes = [fresh.get(str(item["id"])) or kept.get(str(item["id"])) for item in overview]
+    recipes = [r for r in recipes if r is not None]
+    log.info("Collection read: %d recipe(s) fetched, %d unchanged from the last read", len(fresh), len(recipes) - len(fresh))
+    _save_cache(recipes, cache.get("created_at") or time.time())
+    return recipes
 
 
 def compute_usage_maps(recipes_full: list[dict]) -> dict[str, dict[int, int]]:

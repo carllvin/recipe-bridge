@@ -495,7 +495,9 @@ def run_scan(job_id: str) -> None:
             for recipe in recipes:
                 if job.cancel_requested:
                     break
-                if not recipe_amounts.needs_amounts(recipe):
+                reason = recipe_amounts.skip_reason(recipe, after_import=from_import)
+                if reason:
+                    log.info("No amounts into the steps of %r: %s", recipe.get("name", ""), reason)
                     continue
                 job.progress_label = f"Amounts into the steps of {recipe.get('name', '')!r}..."
                 tool_jobs.save_tool_job(job)

@@ -23,7 +23,7 @@ import re
 import time
 import uuid
 
-from . import app_settings, ignored, llm_provider, mealie_client, prep_notes, recipe_doctor, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
+from . import app_settings, ignored, llm_provider, mealie_client, prep_notes, recipe_doctor, source_tag, recipe_restructure, tool_jobs, tools_new_recipes, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .mealie_plan import minutes as _parse_minutes
 from .schemas import ToolSuggestion
@@ -34,8 +34,8 @@ log = logging.getLogger("recipe-bridge")
 
 TAG_REVIEW_PROMPTS = {"tags_cleanup": tools_tags.CLEANUP_SYSTEM_PROMPT, "tags_simplify": tools_tags.SIMPLIFY_SYSTEM_PROMPT,
                       "tags_translate": tools_tags.TRANSLATE_SYSTEM_PROMPT}
-TOOLS = [*TAG_REVIEW_PROMPTS, "tags_season", "tags_suggest_more", "recipes_translate", "recipes_restructure", "recipes_doctor", "new_recipes"]
-METRICS = ["recipes_not_translated", "recipes_need_restructure", "recipes_inconsistent", "recipes_without_season", "recipes_few_tags"]
+TOOLS = [*TAG_REVIEW_PROMPTS, "tags_season", "tags_suggest_more", "recipes_source", "recipes_translate", "recipes_restructure", "recipes_doctor", "new_recipes"]
+METRICS = ["recipes_not_translated", "recipes_need_restructure", "recipes_inconsistent", "recipes_without_season", "recipes_without_source", "recipes_few_tags"]
 PATHS = {"food": "/foods", "unit": "/units", "keyword": "/organizers/tags"}
 
 
@@ -77,6 +77,8 @@ def view(recipe: dict, for_tags: bool = False) -> dict:
         "id": recipe.get("slug"), "slug": recipe.get("slug"), "name": recipe.get("name", ""),
         "description": recipe.get("description") or "",
         "keywords": [{"id": t.get("id"), "name": t.get("name", "")} for t in recipe.get("tags") or []],
+        "source_url": recipe.get("orgURL") or "",  # source_tag
+        "books": [c.get("name", "") for c in recipe.get("recipeCategory") or [] if c.get("name")],  # an import's cookbook
         "servings": recipe.get("recipeServings") or recipe.get("recipeYieldQuantity") or 0,
         "working_time": working or (0 if waiting else _time(recipe, "totalTime")),
         "waiting_time": waiting,
@@ -118,6 +120,8 @@ def metric_items(recipes, foods) -> dict:
         "recipes_need_restructure": items(lambda v, tv: bool(recipe_restructure.needs_restructure(v))),
         "recipes_inconsistent": items(lambda v, tv, voc=[f["name"] for f in foods]: bool(recipe_doctor.findings(v, voc))),
         "recipes_without_season": items(lambda v, tv: not tools_tags.has_season_tag(v)),
+        "recipes_without_source": items(lambda v, tv, store=source_tag.known(): source_tag.missing(
+            v["source_url"], v["books"], [k["name"] for k in v["keywords"]], store) is not None),
         "recipes_few_tags": items(lambda v, tv: few_tags(tv, names)),
     }
 
@@ -307,7 +311,7 @@ def merge(client, entity, keep_id, keep_name, remove_ids) -> None:
             mealie_client._check(client.delete(f"{PATHS[entity]}/{remove_id}"), "deleting the merged tag")
 
 
-KINDS = {"rename", "merge", "season", "suggest_tags", "translate_recipe", "restructure_recipe", "doctor_fix"}
+KINDS = {"rename", "merge", "season", "suggest_tags", "translate_recipe", "restructure_recipe", "doctor_fix", "source_tag"}
 
 
 def apply(client, suggestion) -> None:
@@ -324,6 +328,9 @@ def apply(client, suggestion) -> None:
         apply_translation(client, d["recipe_id"], d["translated"], d["shape"])
     elif suggestion.kind == "restructure_recipe":
         apply_restructure(client, d["recipe_id"], d["plan"])
+    elif suggestion.kind == "source_tag":
+        for slug in d["recipe_ids"]:
+            add_tags(client, slug, [d["tag"]])
     elif suggestion.kind == "doctor_fix":
         apply_doctor(client, d["recipe_id"], d["plan"])
     else:
@@ -403,6 +410,15 @@ def season(job, client):
     job.progress_total = len(missing)
     job.cost_estimate = format_cost_estimate(len(missing), "batched_season")
     job.suggestions = tools_tags.season_suggestions(job, missing)
+
+
+def source(job, client):
+    """Recipes without source tag (source_tag) - no AI for sites, one small
+    call per cookbook."""
+    store = source_tag.known()
+    todo = _recipes_for(client, source_tag.METRIC, lambda v: source_tag.missing(
+        v["source_url"], v["books"], [k["name"] for k in v["keywords"]], store) is not None, job)
+    job.suggestions = source_tag.suggestions(job, todo)
 
 
 def suggest_more(job, client):
@@ -613,7 +629,7 @@ def new_recipes(job, client):
     job.suggestions = suggestions
 
 
-SCANS = {**{tool: tag_review for tool in TAG_REVIEW_PROMPTS}, "tags_season": season, "tags_suggest_more": suggest_more,
+SCANS = {**{tool: tag_review for tool in TAG_REVIEW_PROMPTS}, "tags_season": season, "tags_suggest_more": suggest_more, "recipes_source": source,
          "recipes_translate": translate, "recipes_restructure": restructure,
          "recipes_doctor": doctor,
          "new_recipes": new_recipes}

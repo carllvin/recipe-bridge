@@ -39,12 +39,16 @@ DUPLICATE_TOOLS = {"ingredients_review": ("food", "foods_duplicates"), "units_re
 # ---------- reading ----------
 
 def fetch_recipes_full(client) -> list[dict]:
-    full = []
-    for item in mealie_client._paged(client, "/recipes"):
-        resp = client.get(f"/recipes/{item['slug']}")
-        if resp.status_code == 200:
-            full.append(resp.json())
-    return full
+    """Every recipe in full - several requests at a time."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .tandoor_helpers import PARALLEL_READS
+
+    def one(slug):
+        resp = client.get(f"/recipes/{slug}")
+        return resp.json() if resp.status_code == 200 else None
+    slugs = [item["slug"] for item in mealie_client._paged(client, "/recipes")]
+    with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
+        return [r for r in pool.map(one, slugs) if r is not None]
 
 
 def used_ids(recipes) -> dict[str, dict]:
@@ -93,6 +97,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
     for Tandoor): each recipe's version (updatedAt) and how many recipes use
     each ingredient, unit and tag."""
     recipes = fetch_recipes_full(client)
+    from . import source_index
+    source_index.rebuild((r.get("orgURL"), r.get("name", "")) for r in recipes)  # duplicates by address
     try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
         from . import cook_today, mealie_plan
         cook_today.save_index([mealie_plan.as_tandoor(r) for r in recipes])

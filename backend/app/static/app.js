@@ -351,6 +351,7 @@ async function uploadFiles(files, options = {}) {
   files.forEach((f) => formData.append('files', f));
   if (options.singleRecipe) formData.append('single_recipe', 'true');
   if (options.handwriting) formData.append('handwriting', 'true');
+  if (batchWanted()) formData.append('batch', 'true');
 
   const label = files.length === 1 ? files[0].name : tf('photosCount', { n: files.length });
 
@@ -381,7 +382,21 @@ async function uploadFiles(files, options = {}) {
 // Single recipe from a web page: same processing / review / import flow.
 // Starts an import that isn't a file upload (web page, pasted text, picked
 // links) and switches to the processing screen.
+// The import page's "half price" checkbox (Claude / OpenAI): the AI reads
+// the import as a batch - ready within up to 24 hours. Kept for the next visit.
+function batchWanted() {
+  return APP_CONFIG.batch_available && el('import-batch').checked;
+}
+el('import-batch').addEventListener('change', () => {
+  try { localStorage.setItem('importBatch', el('import-batch').checked ? '1' : ''); } catch (e) { /* this visit only */ }
+});
+function initBatchCheckbox() {
+  el('batch-wrap').classList.toggle('hidden', !APP_CONFIG.batch_available);
+  try { el('import-batch').checked = localStorage.getItem('importBatch') === '1'; } catch (e) { /* unchecked */ }
+}
+
 async function startImportRequest(endpoint, body, loadingText, onStarted) {
+  if (endpoint !== '/api/migration' && batchWanted()) body = { ...body, batch: true };
   el('upload-error').classList.add('hidden');
   requestNotificationPermission();
   el('upload-screen').classList.add('hidden');
@@ -427,8 +442,19 @@ function isVideoLink(url) {
   } catch (e) { return false; }
 }
 
+// Several links - separated by commas, spaces or lines - and nothing else:
+// imported like a link list (each page on its own, all in one review).
+function smartLinks(value) {
+  const parts = value.split(/[\s,;]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const links = parts.map(smartLink);
+  return links.every(Boolean) ? [...new Set(links)] : null;
+}
+
 function smartMode() {
   const value = el('smart-input').value.trim();
+  const links = smartLinks(value);
+  if (links) return { mode: 'links', value: links };
   const link = !value.includes('\n') ? smartLink(value) : null;
   if (link) return { mode: 'url', value: link };
   if (value.length >= 20) return { mode: 'text', value };
@@ -441,7 +467,8 @@ function updateSmartForm() {
   input.style.height = `${Math.min(input.scrollHeight, 320)}px`;
   const { mode } = smartMode();
   el('smart-import').disabled = !mode;
-  el('smart-import').textContent = t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
+  el('smart-import').textContent = mode === 'links' ? tf('smartImportLinks', { n: smartMode().value.length })
+    : t(mode === 'text' ? 'smartImportText' : mode === 'url' ? 'smartImportUrl' : 'smartImport');
   // A video link: the recipe comes from the description / subtitles - no website scan.
   const video = mode === 'url' && isVideoLink(smartMode().value);
   el('smart-scan').classList.toggle('hidden', mode !== 'url' || video);
@@ -458,7 +485,7 @@ function clearSmartForm() {
 el('smart-input').addEventListener('input', updateSmartForm);
 // Enter imports a link; in a recipe text it's a new line.
 el('smart-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && smartMode().mode === 'url') {
+  if (e.key === 'Enter' && !e.shiftKey && ['url', 'links'].includes(smartMode().mode)) {
     e.preventDefault();
     el('smart-form').requestSubmit();
   }
@@ -468,6 +495,7 @@ el('smart-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const { mode, value } = smartMode();
   if (mode === 'url') startImportRequest('/api/import-url', { url: value }, t('urlImportLoading'), clearSmartForm);
+  else if (mode === 'links') startImportRequest('/api/import-links', { urls: value }, t('urlImportLoading'), clearSmartForm);
   else if (mode === 'text') startImportRequest('/api/import-text', { text: value }, t('textImportLoading'), clearSmartForm);
 });
 
@@ -685,9 +713,9 @@ function pollJob() {
         showJobFailed(job);
         return;
       }
+
       if (job.status === 'confirm') { showImportEstimate(job); return; }
       if (job.status === 'cancelled') { leaveCancelledImport(); return; }
-
       updateProgressUI(job);
       state.pollTimer = setTimeout(tick, 2000);
     } catch (e) {
@@ -708,17 +736,17 @@ function showJobFailed(job) {
   loadRecentImports();
 }
 
-// A large import waits for the OK (IMPORT_CONFIRM_TOKENS): the estimate
-// instead of the spinner, Start or Cancel.
+// A large import without "half price" asks once more: half price after
+// all (ready within up to 24 hours), now at full price, or cancel.
 function showImportEstimate(job) {
   const est = job.estimate || {};
   const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
   el('processing-screen').querySelector('.spinner').classList.add('hidden');
   el('processing-text').classList.add('hidden');
   el('progress-track').classList.add('hidden');
-  el('confirm-text').textContent = tf('confirmText', { pages: fmt(job.page_count), chunks: fmt(est.chunks),
-    total: fmt(est.total), input: fmt(est.input), output: fmt(est.output) });
-  el('confirm-budget').textContent = est.budget_left == null ? t('confirmNoBudget')
+  el('confirm-text').textContent = tf(est.links ? 'confirmTextLinks' : 'confirmText',
+    { pages: fmt(job.page_count), links: fmt(est.links), total: fmt(est.total), half: fmt(Math.round((est.total || 0) / 2)) });
+  el('confirm-budget').textContent = est.budget_left == null ? ''
     : tf(est.total > est.budget_left ? 'confirmOverBudget' : 'confirmBudget', { left: fmt(est.budget_left) });
   el('confirm-box').classList.remove('hidden');
 }
@@ -729,11 +757,11 @@ function hideImportEstimate() {
   el('processing-text').classList.remove('hidden');
 }
 
-async function answerImportEstimate(start) {
+async function answerImportEstimate(start, batch = false) {
   const jobId = state.jobId;
   try {
     const res = await fetch(`/api/jobs/${jobId}/confirm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, batch }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
   } catch (e) {
@@ -744,6 +772,7 @@ async function answerImportEstimate(start) {
   if (start) pollJob();
   else leaveCancelledImport();
 }
+el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
 el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
 el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
 
@@ -1115,7 +1144,7 @@ function renderDetail(r) {
   const ingredientsHtml = r.ingredients.map((ing, i) => {
     const stepOptions = r.steps.map((s, si) => `<option value="${si}" ${((ing.step_index ?? 0) === si) ? 'selected' : ''}>${si + 1}</option>`).join('');
     return `
-    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}" draggable="true">
+    <div class="ingredient-row ${originalLineHtml(ing) ? 'has-original' : ''}" data-idx="${i}">
       <span class="ing-drag-handle" title="${t('dragToReorder')}">⠿</span>
       <input class="ing-amount" value="${ing.amount ?? ''}" placeholder="${t('placeholderAmount')}" />
       <div class="ing-unit-wrap">
@@ -1200,10 +1229,32 @@ function renderDetail(r) {
        </div>`
     : '';
 
-  detail.innerHTML = `
+  const banners = `
     ${r.import_error ? `<div class="error-banner" style="margin-bottom:20px;">${escapeHtml(r.import_error)}</div>` : ''}
     ${duplicateNotice}
-    ${importedNotice}
+    ${importedNotice}`;
+  const viewSwitch = `<div class="view-switch" role="tablist">
+      <button type="button" data-view="preview" class="${reviewView() === 'preview' ? 'active' : ''}">👁 ${t('reviewPreview')}</button>
+      <button type="button" data-view="edit" class="${reviewView() === 'edit' ? 'active' : ''}">✏️ ${t('reviewEdit')}</button>
+    </div>`;
+  const bindViewSwitch = () => detail.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => {
+    setReviewView(b.dataset.view);
+    renderDetail(r);
+  }));
+  const bindUndo = () => {
+    const undoBtn = detail.querySelector('.undo-import-btn');
+    if (undoBtn) undoBtn.addEventListener('click', () => undoImport(r));
+  };
+  if (reviewView() === 'preview') {
+    detail.innerHTML = banners + viewSwitch + recipePreviewHtml(r);
+    bindViewSwitch();
+    bindUndo();
+    return;
+  }
+
+  detail.innerHTML = `
+    ${banners}
+    ${viewSwitch}
     <div class="field title-field">
       <input id="f-title" value="${escapeHtml(r.title)}" />
     </div>
@@ -1237,6 +1288,7 @@ function renderDetail(r) {
     <div id="ingredients-wrap">${ingredientsHtml}</div>
 
     <div class="section-title">${t('fieldSteps')}</div>
+    ${r.steps.some((s) => /\[\[i\d+:/.test(s.instruction)) ? `<p class="settings-hint">${t('stepMarkersHint')}</p>` : ''}
     <div id="steps-wrap">${stepsHtml}</div>
   `;
 
@@ -1301,17 +1353,19 @@ function renderDetail(r) {
         original_unit: unitUnchanged ? (before.original_unit ?? null) : null,
         name,
         note: row.querySelector('.ing-note').value || null,
-        group: null,
+        group: before.group ?? null,  // not edited here - kept
         step_index: numOrNull(row.querySelector('.ing-step')?.value) ?? 0,
         tandoor_match: unchanged ? (before.tandoor_match ?? null) : null,
         original_name: unchanged ? (before.original_name ?? null) : null,
+        ref: before.ref ?? null,  // what the steps' amount markers point to
       };
     });
 
+    // title and time aren't edited here - kept as read
     r.steps = Array.from(detail.querySelectorAll('.step-row')).map((row, i) => ({
       instruction: row.querySelector('.step-instruction').value,
-      title: null,
-      time_minutes: null,
+      title: (r.steps[i] || {}).title ?? null,
+      time_minutes: (r.steps[i] || {}).time_minutes ?? null,
       image_ids: (r.steps[i] || {}).image_ids || [],
     }));
 
@@ -1405,6 +1459,12 @@ function renderDetail(r) {
   let dragSrcRow = null;
 
   detail.querySelectorAll('.ingredient-row').forEach((row) => {
+    // Only the handle makes the row draggable: a draggable row keeps the
+    // browser from placing the cursor in its fields with a click.
+    const handle = row.querySelector('.ing-drag-handle');
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    handle.addEventListener('touchstart', () => { row.draggable = true; }, { passive: true });
+    row.addEventListener('mouseup', () => { row.draggable = false; });
     row.addEventListener('dragstart', (e) => {
       dragSrcRow = row;
       row.classList.add('dragging');
@@ -1413,6 +1473,7 @@ function renderDetail(r) {
     });
 
     row.addEventListener('dragend', () => {
+      row.draggable = false;
       row.classList.remove('dragging');
       ingredientsWrap.querySelectorAll('.ingredient-row').forEach((el2) => {
         el2.classList.remove('drag-over-top', 'drag-over-bottom');
@@ -1445,28 +1506,101 @@ function renderDetail(r) {
     });
   });
 
-  const undoBtn = detail.querySelector('.undo-import-btn');
-  if (undoBtn) {
-    undoBtn.addEventListener('click', async () => {
-      undoBtn.disabled = true;
-      undoBtn.textContent = t('undoingImport');
-      try {
-        const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/undo-import`, { method: 'POST' });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || t('undoImportFailed'));
-        }
-        const updated = await res.json();
-        Object.assign(r, updated);
-        renderRecipeList();
-        renderDetail(r);
-      } catch (e) {
-        alert(`${t('undoImportFailed')}: ${e.message}`);
-        undoBtn.disabled = false;
-        undoBtn.textContent = t('undoImportBtn');
-      }
-    });
+  bindViewSwitch();
+  bindUndo();
+}
+
+// "Undo import" of one recipe (the banner above an imported recipe).
+async function undoImport(r) {
+  const undoBtn = el('recipe-detail').querySelector('.undo-import-btn');
+  undoBtn.disabled = true;
+  undoBtn.textContent = t('undoingImport');
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/recipes/${r.id}/undo-import`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || t('undoImportFailed'));
+    }
+    const updated = await res.json();
+    Object.assign(r, updated);
+    renderRecipeList();
+    renderDetail(r);
+  } catch (e) {
+    alert(`${t('undoImportFailed')}: ${e.message}`);
+    undoBtn.disabled = false;
+    undoBtn.textContent = t('undoImportBtn');
   }
+}
+
+// "[[i0:Mehl]]" in a step (step_amounts.py) as the recipe will read it:
+// with the amount - Mealie gets the plain name (no templates).
+const AMOUNT_MARK = /\[\[(i\d+):([^\][]*)\]\]/g;
+function withAmounts(text, r) {
+  return (text || '').replace(AMOUNT_MARK, (_m, ref, name) => {
+    const ing = r.ingredients.find((i) => i.ref === ref);
+    if (!ing) return name;
+    if (isMealie() || !ing.amount) return ing.name;
+    return [formatAmount(ing.amount), ing.unit, ing.name].filter(Boolean).join(' ') + (ing.note ? ` (${ing.note})` : '');
+  });
+}
+
+// Review: see the recipe as the recipe manager will show it (the default),
+// or edit it - the last choice is kept.
+function reviewView() {
+  try { return localStorage.getItem('reviewView') === 'edit' ? 'edit' : 'preview'; } catch (e) { return 'preview'; }
+}
+
+function setReviewView(view) {
+  try { localStorage.setItem('reviewView', view); } catch (e) { /* only for this page view */ }
+}
+
+// The recipe as Tandoor shows it - every step with its own ingredients next
+// to the text - or Mealie: one ingredient list, then the method. Photos in
+// the steps where they will appear. Nothing is sent anywhere.
+function recipePreviewHtml(r) {
+  const ingLine = (ing) => `${escapeHtml([formatAmount(ing.amount), ing.unit, ing.name].filter(Boolean).join(' '))}`
+    + (ing.note ? ` <span class="pv-note">${escapeHtml(ing.note)}</span>` : '');
+  const ingList = (ings) => {
+    let group = null;
+    return `<ul class="pv-ings">${ings.map((ing) => {
+      const head = ing.group && ing.group !== group ? `<li class="pv-group">${escapeHtml(ing.group)}</li>` : '';
+      group = ing.group || group;
+      return `${head}<li>${ingLine(ing)}</li>`;
+    }).join('')}</ul>`;
+  };
+  const text = (s) => escapeHtml(withAmounts(s, r)).split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  const photos = (s) => (s.image_ids || []).length
+    ? `<div class="pv-photos">${s.image_ids.map((iid) => `<img src="${imageUrl(iid)}" alt="" loading="lazy">`).join('')}</div>` : '';
+  const facts = [
+    r.servings ? `${t('fieldServings')}: ${formatAmount(r.servings)}` : '',
+    r.prep_time_minutes ? `${t('fieldPrep')}: ${r.prep_time_minutes} min` : '',
+    r.cook_time_minutes ? `${t('fieldCook')}: ${r.cook_time_minutes} min` : '',
+  ].filter(Boolean);
+  const stepIngs = (i) => r.ingredients.filter((ing) => Math.min(ing.step_index ?? 0, Math.max(0, r.steps.length - 1)) === i);
+  const steps = isMealie()
+    ? `${r.ingredients.length ? `<h3 class="pv-h">${t('fieldIngredients')}</h3>${ingList(r.ingredients)}` : ''}
+       <h3 class="pv-h">${t('fieldSteps')}</h3>
+       <ol class="pv-method">${r.steps.map((s) => `<li>${s.title ? `<strong>${escapeHtml(s.title)}</strong>` : ''}${text(s.instruction)}${photos(s)}</li>`).join('')}</ol>`
+    : r.steps.map((s, i) => {
+      const own = stepIngs(i);
+      return `<section class="pv-step">
+        <div class="pv-step-head">${tf('previewStep', { n: i + 1 })}${s.title ? ` · ${escapeHtml(s.title)}` : ''}${s.time_minutes ? ` · ${s.time_minutes} min` : ''}</div>
+        <div class="pv-step-body ${own.length ? '' : 'no-ings'}">
+          ${own.length ? ingList(own) : ''}
+          <div class="pv-text">${text(s.instruction)}${photos(s)}</div>
+        </div>
+      </section>`;
+    }).join('');
+  return `<article class="recipe-preview">
+    ${r.selected_image_id ? `<img class="pv-main" src="${imageUrl(r.selected_image_id)}" alt="">` : ''}
+    <h2 class="pv-title">${escapeHtml(r.title)}</h2>
+    ${r.tags.length ? `<div class="pv-tags">${r.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+    ${facts.length ? `<div class="pv-facts">${facts.map(escapeHtml).join(' · ')}</div>` : ''}
+    ${r.description ? `<div class="pv-desc">${text(r.description)}</div>` : ''}
+    ${steps || `<p class="settings-hint">${t('noSteps')}</p>`}
+    ${r.source_url ? `<div class="source-line">${t('sourceUrlLabel')}: <a href="${escapeHtml(r.source_url)}" target="_blank" rel="noopener">${escapeHtml(r.source_url.replace(/^https?:\/\/(www\.)?/, ''))}</a></div>` : ''}
+    <p class="settings-hint pv-hint">${escapeHtml(tf('previewHint', { manager: APP_CONFIG.recipe_manager || 'Tandoor' }))}</p>
+  </article>`;
 }
 
 async function triggerImageGeneration(recipe, tileEl) {
@@ -1671,7 +1805,8 @@ function showImportSummary(results, cookbookName, cookbookWarning, postProcessin
   }
 
   let lines = [];
-  lines.push(tf('modalSummaryLine', { ok, total }));
+  lines.push(failed === 0 && ok === 1 ? t('modalSummaryOne')
+    : failed === 0 ? tf('modalSummaryAll', { ok }) : tf('modalSummaryLine', { ok, total }));
   if (cookbookName) {
     lines.push(tf('modalCookbookLine', { name: cookbookName }));
   }
@@ -1820,6 +1955,7 @@ const TOOL_TITLE_KEYS = {
   tags_simplify: 'toolTagsCleanupTitle',
   tags_translate: 'toolTagsCleanupTitle',
   tags_season: 'toolTagsSeasonTitle',
+  recipes_source: 'toolRecipesSourceTitle',
   tags_suggest_more: 'toolTagsSuggestMoreTitle',
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
@@ -1878,7 +2014,7 @@ const INBOX_GROUPS = [
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
   { key: 'recipes', icon: '🧩', match: (i) => ['restructure_recipe', 'translate_recipe', 'amounts_in_steps', 'doctor_fix'].includes(i.kind) },
-  { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' },
+  { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' || i.kind === 'source_tag' },
   { key: 'other', icon: '•', match: () => true },
 ];
 const inboxState = { items: [], selected: new Set(), collapsed: new Set(), busyGroup: null, results: {} };
@@ -2361,6 +2497,7 @@ const HEALTH_METRICS = [
   { key: 'recipes_amounts_missing', tool: 'recipes_amounts', endpoint: '/api/tools/recipes/amounts' },
   { key: 'recipes_inconsistent', tool: 'recipes_doctor', endpoint: '/api/tools/recipes/doctor' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
+  { key: 'recipes_without_source', tool: 'recipes_source', endpoint: '/api/tools/recipes/source' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
   { key: 'recipes_without_servings', tool: 'recipes_servings', endpoint: '/api/tools/recipes/servings' },
   { key: 'recipes_without_image', tool: 'recipes_images', endpoint: '/api/tools/recipes/images', needsImageGen: true },
@@ -2380,7 +2517,7 @@ const HEALTH_GROUPS = [
   { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
-    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_inconsistent', 'recipes_without_season', 'recipes_few_tags',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_inconsistent', 'recipes_without_season', 'recipes_without_source', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image', 'recipes_weak_image'] },
   { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
@@ -3892,6 +4029,7 @@ if ('serviceWorker' in navigator) {
   initVoice();
   initMigration();
   initDbChatWarning();
+  initBatchCheckbox();
   await tryRestoreJobFromUrl();
   showArea('import');
   if (!state.jobId) handleIncomingParams();

@@ -17,8 +17,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, diagnostics, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
-from .ai_extractor import estimate_tokens, extract_recipes_from_pages, guess_cookbook_title
+from . import app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from .ai_extractor import estimate_tokens, extract_each_as_batch, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
 from .image_processor import SUPPORTED_IMAGE_EXTENSIONS, process_images
@@ -88,6 +88,12 @@ def _mark_duplicates(job) -> None:
     existing_lower = {n.strip().lower(): n for n in existing_names if n.strip()}
 
     for recipe in job.recipes:
+        same_page = source_index.find(recipe.source_url) if recipe.source_url else None
+        if same_page and same_page in existing_names:  # the same page, whatever its title says
+            recipe.duplicate_match = same_page
+            recipe.duplicate_exact = True
+            recipe.selected = False
+            continue
         title_norm = recipe.title.strip().lower()
         if not title_norm:
             continue
@@ -132,14 +138,20 @@ SINGLE_RECIPE_NOTE = (
 
 
 def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_ocr: bool = False,
-                    single_recipe: bool = False, handwriting: bool = False) -> None:
+                    single_recipe: bool = False, handwriting: bool = False, resume: dict | None = None) -> None:
+    """resume: a batch sent before a restart (_resume_batches) - the pages
+    read then, and the batch whose answers are still to be collected."""
     job = jobs.get_job(job_id)
     if job is None:
         return
     try:
         images_dir = os.path.join(_job_dir(job_id), "images")
 
-        if doc_type == "pdf":
+        if resume is not None:
+            result = resume["result"]
+            job.progress_label = "Waiting for the AI batch (picked up again after a restart) …"
+            jobs.save_job(job)
+        elif doc_type == "pdf":
             job.progress_label = "Reading PDF …"
             jobs.save_job(job)
             result = process_pdf(source_paths[0], images_dir, force_ocr=force_ocr)
@@ -180,7 +192,12 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Reading the text …"
             jobs.save_job(job)
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
-                result = process_text(f.read())
+                content = f.read()
+            if looks_like_link_list(content):  # pasted links
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
+            result = process_text(content)
         elif doc_type == "rtf":
             job.progress_label = "Reading the text …"
             jobs.save_job(job)
@@ -188,6 +205,10 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             content = rtf_to_text(source_paths[0])
             if len(content) < 20:
                 raise ValueError("The RTF file contains no readable text.")
+            if looks_like_link_list(content):  # e.g. links collected in TextEdit
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
             result = process_text(content)
         elif doc_type == "audio":
             job.progress_label = "Listening to the voice note …"
@@ -203,6 +224,11 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             job.progress_label = "Reading the Word document …"
             jobs.save_job(job)
             result = process_docx(source_paths[0], images_dir)
+            content = "\n".join(p.get("text") or "" for p in result["pages"])
+            if looks_like_link_list(content):  # a Word file of links
+                doc_type = "links"
+                _run_link_list(job, links_from_text(content), images_dir)
+                return
         else:
             raise ValueError(f"Unknown document type: {doc_type}")
 
@@ -223,18 +249,41 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
-        if not _go_ahead(job, result["pages"], toc_pages, existing_tags):
-            return
+        if _asks_about_half_price(job):
+            if not _go_ahead(job, estimate_tokens(result["pages"], toc_pages=toc_pages, existing_tags=existing_tags)):
+                return
         recipes: list[ExtractedRecipe]
+
+        def batch_wait(done: int, total: int) -> None:
+            job.progress_current, job.progress_total = done, total
+            job.progress_label = f"Waiting for the AI batch: {done}/{total} part(s) done (half price, up to 24 h)"
+            jobs.save_job(job)
+
         recipes, usage = extract_recipes_from_pages(
             result["pages"],
             on_progress=progress_cb,
             toc_pages=toc_pages,
             existing_tags=existing_tags,
+            batch=_as_batch(job),
+            on_wait=batch_wait,
+            on_submit=lambda ref: _remember_batch(job, ref, kind="pages", doc_type=doc_type, source_paths=source_paths,
+                                                  result=_keepable(result)),
+            batch_ref=(resume or {}).get("ref"),
         )
         if doc_type == "url":
             for recipe in recipes:
                 recipe.source_url = source_paths[0]
+        if source_tag.enabled():
+            tag = result.get("source_tag") or source_tag.from_author(result.get("metadata_author") or "")
+            if not tag and doc_type in ("pdf", "epub") and recipes:
+                job.progress_label = "Looking for the cookbook's author …"
+                jobs.save_job(job)
+                tag, tag_usage = source_tag.guess_author(result["pages"])
+                job.token_usage.add(tag_usage)
+            source_tag.add(recipes, tag)
+            job.source_tag = tag or None
+            if tag and doc_type == "url":
+                source_tag.remember("hosts", source_tag.host_of(source_paths[0]), tag)
         job.recipes = recipes
         job.token_usage.add(usage)
         jobs.match_images_to_recipes(job)
@@ -263,22 +312,99 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         if doc_type != "links" and job.status != "cancelled":  # _run_link_list records its own usage
             _record_usage(job)
             notify.import_finished(job)
+        if doc_type != "links":
+            _forget_batch(job.id)
         jobs.save_job(job)
 
 
+# ---------- AI batches across a restart ----------
+#
+# An import waiting for its AI batch (up to 24 hours) keeps what it needs on
+# disk: the batch's reference, the pages it read, the job. After a restart
+# (an update in Dockge, say) _resume_batches picks it up and collects the
+# answers - the batch was paid for, nothing is sent twice.
+
+def _batch_path(job_id: str) -> str:
+    return os.path.join(_job_dir(job_id), "batch.json")
+
+
+def _keepable(result: dict) -> dict:
+    """What of a reader's result is needed after a restart (JSON only)."""
+    return {k: result.get(k) for k in ("pages", "images", "page_count", "metadata_title", "metadata_author",
+                                       "toc_pages", "source_tag") if k in result}
+
+
+def _remember_batch(job, ref: dict, **context) -> None:
+    os.makedirs(_job_dir(job.id), exist_ok=True)
+    data = {"ref": ref, "job": job.model_dump(mode="json"), **context}
+    tmp = _batch_path(job.id) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, _batch_path(job.id))
+    log.info("Import %s: AI batch %s sent (%d part(s)) - kept for a restart", job.id, ref.get("id"), ref.get("n", 0))
+
+
+def _forget_batch(job_id: str) -> None:
+    try:
+        os.remove(_batch_path(job_id))
+    except OSError:
+        pass
+
+
+def _resume_batches() -> int:
+    """At startup: every import that was waiting for its AI batch waits on."""
+    from .schemas import Job
+    count = 0
+    if not os.path.isdir(settings.data_dir):
+        return 0
+    for name in os.listdir(settings.data_dir):
+        path = _batch_path(name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            job = Job.model_validate(data["job"])
+        except Exception as exc:  # noqa: BLE001 - a broken file must not stop the start
+            log.warning("AI batch of import %s can't be picked up again: %s", name, exc)
+            continue
+        job.status, job.error = "processing", None
+        jobs.save_job(job)
+        if data.get("kind") == "links":
+            target_fn, args = _run_link_list, (job, [], os.path.join(_job_dir(job.id), "images"))
+            kwargs = {"resume": data}
+        else:
+            target_fn, args = _run_extraction, (job.id, data.get("source_paths") or [], data.get("doc_type") or "pdf")
+            kwargs = {"resume": data}
+        threading.Thread(target=target_fn, args=args, kwargs=kwargs, daemon=True).start()
+        count += 1
+    return count
+
+
+def _as_batch(job) -> bool:
+    """An AI batch (half price, up to 24 h): the import page's checkbox, or
+    WATCH_BATCH for the watched folder (on by default - nobody waits there)."""
+    if job.source == "folder":
+        return settings.watch_batch and llm_provider.batch_supported()
+    return job.batch and llm_provider.batch_supported()
+
+
+LARGE_IMPORT_TOKENS = 50000  # from here on, an import without "half price" asks once more
+TOKENS_PER_LINK = 4500       # a recipe page, roughly (instructions, page text, answer)
 CONFIRM_WAIT_SECONDS = 3600
 
 
-def _go_ahead(job, pages: list[dict], toc_pages, existing_tags) -> bool:
-    """A large import (IMPORT_CONFIRM_TOKENS) started at the screen waits
-    here for the OK - POST /api/jobs/{id}/confirm - with the estimate shown.
-    Imports from the phone or the watched folder run on (no one to ask -
-    the monthly budget is their limit). False: cancelled (or no answer)."""
-    if job.source or not settings.import_confirm_tokens:
-        return True
-    estimate = estimate_tokens(pages, toc_pages=toc_pages, existing_tags=existing_tags)
-    log.info("Import %s estimated at %d tokens in %d chunk(s)", job.id, estimate["total"], estimate["chunks"])
-    if estimate["total"] < settings.import_confirm_tokens:
+def _asks_about_half_price(job) -> bool:
+    """Started at the screen, without the checkbox, with a provider that has batches."""
+    return not job.source and not job.batch and llm_provider.batch_supported()
+
+
+def _go_ahead(job, estimate: dict) -> bool:
+    """A large import (LARGE_IMPORT_TOKENS) without "half price" waits here
+    for an answer - POST /api/jobs/{id}/confirm: half price after all, full
+    price now, or cancel. False: cancelled (or no answer within an hour)."""
+    log.info("Import %s estimated at %d tokens", job.id, estimate["total"])
+    if estimate["total"] < LARGE_IMPORT_TOKENS:
         return True
     budget = usage_log.budget_status()
     estimate["budget_left"] = max(0, budget["limit"] - budget["used"]) if budget["limit"] else None
@@ -298,7 +424,7 @@ def _go_ahead(job, pages: list[dict], toc_pages, existing_tags) -> bool:
 
 @app.post("/api/jobs/{job_id}/confirm")
 async def confirm_import(job_id: str, body: dict = Body(...)):
-    """{"start": true | false} - the answer to a large import's estimate."""
+    """{"start": true | false, "batch"?: true} - the answer to a large import's question."""
     job = jobs.get_job(job_id)
     if job is None:
         raise HTTPException(404, "Job not found.")
@@ -306,6 +432,7 @@ async def confirm_import(job_id: str, body: dict = Body(...)):
         raise HTTPException(409, "This import isn't waiting for an answer.")
     if body.get("start"):
         _check_budget()
+        job.batch = bool(body.get("batch")) and llm_provider.batch_supported()
         job.status = "processing"
         job.progress_label = "Reading the pages with the AI …"
     else:
@@ -347,7 +474,7 @@ def _finish_extraction(job, step_photos: bool = True) -> None:
     job.status = "ready"
 
 
-def _run_link_list(job, links: list[str], images_dir: str) -> None:
+def _run_link_list(job, links: list[str], images_dir: str, resume: dict | None = None) -> None:
     """Recipe links (a .txt file, or picked from a site scan / bookmarks):
     every link is loaded and extracted on its own (one web page = one AI
     call), and all recipes end up in one review. Each link's page number is
@@ -355,11 +482,20 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
     that can't be loaded or contain no recipe are skipped and listed in
     job.notes."""
     try:
-        if not links:
+        if not links and resume is None:
             raise ValueError("The text file contains no links (http:// or https://).")
         existing_tags = _fetch_existing_tags()
-        job.progress_total = len(links)
-        job.page_count = len(links)
+        if resume is not None:  # a batch sent before a restart: its pages were read already
+            links = []
+        job.progress_total = len(links) or job.progress_total
+        job.page_count = len(links) or job.page_count
+        if links and _asks_about_half_price(job):
+            total = len(links) * TOKENS_PER_LINK
+            if not _go_ahead(job, {"links": len(links), "total": total, "input": round(total * 0.7),
+                                   "output": round(total * 0.3)}):
+                return
+        batched = _as_batch(job)
+        loaded = []  # (number, url, result) - read first when the AI gets them as one batch
         for number, url in enumerate(links, 1):
             job.progress_current = number
             job.progress_label = f"Link {number}/{len(links)}: {urlparse(url).netloc}"
@@ -368,6 +504,9 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 result = process_url(url, images_dir)
                 for image_id, info in result["images"].items():
                     job.images[image_id] = _image_entry(info, number)
+                if batched:
+                    loaded.append((number, url, result))
+                    continue
                 page = {"page": number, "text": result["pages"][0]["text"]}
                 recipes, usage = extract_recipes_from_pages([page], existing_tags=existing_tags)
                 job.token_usage.add(usage)
@@ -375,13 +514,28 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
                 log.info("Link %s skipped: %s", url, exc)
                 job.notes.append(f"{url} – {exc}")
                 continue
-            if not recipes:
-                job.notes.append(f"{url} – no recipe found")
-                continue
-            for recipe in recipes:
-                recipe.source_url = url
-                recipe.source_page_start = recipe.source_page_end = number
-            job.recipes.extend(recipes)
+            _add_link_recipes(job, number, url, result, recipes)
+        if resume is not None:
+            loaded = [tuple(item) for item in resume["loaded"]]
+        if loaded:
+            page_sets = [[{"page": number, "text": result["pages"][0]["text"]}] for number, _u, result in loaded]
+
+            def batch_wait(done: int, total: int) -> None:
+                job.progress_current, job.progress_total = done, total
+                job.progress_label = f"Waiting for the AI batch: {done}/{total} page(s) done (half price, up to 24 h)"
+                jobs.save_job(job)
+            try:
+                answers = extract_each_as_batch(
+                    page_sets, existing_tags=existing_tags, on_wait=batch_wait,
+                    on_submit=lambda ref: _remember_batch(job, ref, kind="links", loaded=[
+                        (number, url, _keepable(result)) for number, url, result in loaded]),
+                    batch_ref=(resume or {}).get("ref"))
+            except Exception as exc:  # noqa: BLE001 - one by one instead
+                log.warning("AI batch for the link list failed (%s) - reading the pages one by one", exc)
+                answers = [extract_recipes_from_pages(pages, existing_tags=existing_tags) for pages in page_sets]
+            for (number, url, result), (recipes, usage) in zip(loaded, answers):
+                job.token_usage.add(usage)
+                _add_link_recipes(job, number, url, result, recipes)
         if not job.recipes:
             raise ValueError("No recipe could be read from any of the links.")
         # Each link is its own "page": only that page's photos belong to its
@@ -395,9 +549,25 @@ def _run_link_list(job, links: list[str], images_dir: str) -> None:
         job.status = "error"
         job.error = str(exc)
     finally:
-        _record_usage(job)
-        notify.import_finished(job)
+        if job.status != "cancelled":
+            _record_usage(job)
+            notify.import_finished(job)
+        _forget_batch(job.id)
         jobs.save_job(job)
+
+
+def _add_link_recipes(job, number: int, url: str, result: dict, recipes) -> None:
+    """A link list: one page's recipes into the review (or a note that it had none)."""
+    if not recipes:
+        job.notes.append(f"{url} – no recipe found")
+        return
+    for recipe in recipes:
+        recipe.source_url = url
+        recipe.source_page_start = recipe.source_page_end = number
+    if source_tag.enabled() and result.get("source_tag"):
+        source_tag.add(recipes, result["source_tag"])
+        source_tag.remember("hosts", source_tag.host_of(url), result["source_tag"])
+    job.recipes.extend(recipes)
 
 
 def _classify_upload(filenames: list[str]) -> tuple[str, str]:
@@ -435,7 +605,7 @@ def _classify_upload(filenames: list[str]) -> tuple[str, str]:
 
 @app.post("/api/upload")
 async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool = Form(False),
-                       handwriting: bool = Form(False)):
+                       handwriting: bool = Form(False), batch: bool = Form(False)):
     """single_recipe: the uploaded photos all show one recipe (e.g. across a
     double page) - the AI is told to return exactly one. handwriting: the AI
     reads the photos instead of OCR (handwritten recipe cards)."""
@@ -447,6 +617,7 @@ async def upload_files(files: list[UploadFile] = File(...), single_recipe: bool 
 
     job = jobs.create_job(_display_name(filenames))
     source_paths = await _save_uploads(files, _job_dir(job.id))
+    job.batch = batch  # the import page's "half price" checkbox
     _launch_extraction(job, source_paths, doc_type, single_recipe, handwriting)
     return {"job_id": job.id}
 
@@ -485,7 +656,7 @@ def _launch_extraction(job, source_paths: list[str], doc_type: str, single_recip
 
 
 def _start_url_job(url: str, source: str | None = None, html: str | None = None,
-                   photos: dict[str, bytes] | None = None):
+                   photos: dict[str, bytes] | None = None, batch: bool = False):
     """Raises HTTPException(400) for an invalid address. html: the page as
     the browser has it (bookmark button) - not loaded again then; photos:
     its photos the browser already fetched ({address: bytes})."""
@@ -495,6 +666,7 @@ def _start_url_job(url: str, source: str | None = None, html: str | None = None,
         raise HTTPException(400, str(exc))
     job = jobs.create_job(urlparse(url).netloc or url)
     job.source = source
+    job.batch = batch
     os.makedirs(_job_dir(job.id), exist_ok=True)
     if html:
         with open(os.path.join(_job_dir(job.id), "page.html"), "w", encoding="utf-8") as f:
@@ -532,12 +704,13 @@ def _given_photos(job_id: str) -> dict[str, bytes]:
     return out
 
 
-def _start_text_job(text: str, source: str | None = None):
+def _start_text_job(text: str, source: str | None = None, batch: bool = False):
     text = (text or "").strip()
     if len(text) < 20:
         raise HTTPException(400, "Please paste a recipe text.")
     job = jobs.create_job(title_from_text(text))
     job.source = source
+    job.batch = batch
     os.makedirs(_job_dir(job.id), exist_ok=True)
     path = os.path.join(_job_dir(job.id), "source.txt")
     with open(path, "w", encoding="utf-8") as f:
@@ -616,7 +789,7 @@ async def import_url(body: dict = Body(...)):
     """Imports a single recipe from a web page - same extraction, review
     and import flow as an uploaded document (see url_processor)."""
     _check_budget()
-    return {"job_id": _start_url_job(body.get("url", "")).id}
+    return {"job_id": _start_url_job(body.get("url", ""), batch=bool(body.get("batch"))).id}
 
 
 MAX_PAGE_PHOTOS = 16  # the main photo and the step photos (url_processor.MAX_STEP_IMAGES)
@@ -633,7 +806,8 @@ async def import_page(body: dict = Body(...)):
     if len(html.encode("utf-8", "ignore")) > MAX_PAGE_BYTES:
         raise HTTPException(413, "The page is too large.")
     photos = _page_photos(body.get("photos"))
-    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos).id}
+    return {"job_id": _start_url_job(body.get("url") or "", html=html or None, photos=photos,
+                                     batch=bool(body.get("batch"))).id}
 
 
 @app.post("/api/page-photos")
@@ -671,7 +845,7 @@ async def import_text(body: dict = Body(...)):
     """Pasted recipe text (e.g. from a message or a note) - same extraction,
     review and import flow as a document."""
     _check_budget()
-    return {"job_id": _start_text_job(body.get("text") or "").id}
+    return {"job_id": _start_text_job(body.get("text") or "", batch=bool(body.get("batch"))).id}
 
 
 @app.post("/share")
@@ -738,6 +912,7 @@ async def import_links(body: dict = Body(...)):
     if not urls:
         raise HTTPException(400, "No valid links selected.")
     job = jobs.create_job((body.get("name") or f"{len(urls)} links")[:80])
+    job.batch = bool(body.get("batch"))
     os.makedirs(_job_dir(job.id), exist_ok=True)
     path = os.path.join(_job_dir(job.id), "links.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -1024,6 +1199,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
     if cookbook_name:
         job.cookbook_name = cookbook_name
         jobs.save_job(job)
+        if job.source_tag:  # the cookbook's tag is known (the tile "without source" skips its recipes)
+            source_tag.remember("books", cookbook_name, job.source_tag)
 
     results = []
     cookbook_warning = None
@@ -1072,6 +1249,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 try:
                     tandoor_id = api.create_recipe(client, recipe, step_images=step_images, warnings=warnings)
                     recipe.tandoor_recipe_id = tandoor_id
+                    if recipe.source_url:
+                        source_index.add(recipe.source_url, recipe.title)
 
                     if image_path and os.path.exists(image_path):
                         try:
@@ -1174,6 +1353,8 @@ def _delete_imported(client, recipe) -> None:
     """Undo an import: the recipe - and with Tandoor its step photos, which
     live in Tandoor's file storage on their own."""
     target.client().delete_recipe(client, recipe.tandoor_recipe_id)
+    if recipe.source_url:
+        source_index.remove(recipe.source_url)
     if recipe.step_file_ids and not target.is_mealie():
         tandoor_client.delete_user_files(client, recipe.step_file_ids)
         recipe.step_file_ids = []
@@ -1380,6 +1561,7 @@ _TOOL_SCANS = {
     "tags_simplify": tools_tags.run_simplify_scan,
     "tags_translate": tools_tags.run_translate_scan,
     "tags_season": tools_tags.run_season_scan,
+    "recipes_source": source_tag.run_scan,
     "tags_suggest_more": tools_tags.run_suggest_more_scan,
     "units_review": tools_units.run_scan,
     "recipes_translate": tools_recipes.run_scan,
@@ -1406,6 +1588,7 @@ _TOOL_APPLY = {
     "tags_simplify": tools_tags.apply_suggestion,
     "tags_translate": tools_tags.apply_suggestion,
     "tags_season": tools_tags.apply_suggestion,
+    "recipes_source": source_tag.apply_suggestion,
     "tags_suggest_more": tools_tags.apply_suggestion,
     "units_review": tools_units.apply_suggestion,
     "recipes_translate": tools_recipes.apply_suggestion,
@@ -1482,6 +1665,11 @@ async def start_tags_translate():
 @app.post("/api/tools/tags/season")
 async def start_tags_season():
     return _start_tool_job("tags_season")
+
+
+@app.post("/api/tools/recipes/source")
+async def start_recipes_source():
+    return _start_tool_job("recipes_source")
 
 
 @app.post("/api/tools/tags/suggest-more")
@@ -1602,8 +1790,7 @@ async def cooked_answer(body: dict = Body(...)):
         raise HTTPException(400, f"Missing field {exc}")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, str(exc))
-    health.mark_changed()
-    return {"ok": True}
+    return {"ok": True}  # a rating or cook log changes no tile - no new overview
 
 
 @app.get("/api/tools/meal-plan/options")
@@ -1871,7 +2058,7 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
             suggestion = apply_fn(job_id, suggestion_id)
         if suggestion.status == "applied" and before != "applied":
             _remember_applied(job, suggestion, journal)
-            health.mark_changed()
+            health.settle(job.tool, suggestion)
         return suggestion
     if action == "undo":
         return _undo_suggestion(job, suggestion_id)
@@ -1911,6 +2098,8 @@ def _undo_suggestion(job, suggestion_id):
         raise
     suggestion.status, suggestion.undoable, suggestion.error = "undone", False, None
     tool_jobs.save_tool_job(job)
+    from .tandoor_helpers import drop_recipe_cache
+    drop_recipe_cache()  # an undo can bring back ingredients inside recipes
     health.mark_changed()
     return suggestion
 
@@ -2014,6 +2203,7 @@ async def get_config():
         "voice_available": llm_provider.audio_provider() is not None,
         "migration_source": migration.source_name(),
         "image_gen_available": image_gen.is_configured(),
+        "batch_available": llm_provider.batch_supported(),  # the estimate offers "half price, up to 24 h"
         "version": settings.app_version,
         "auth_enabled": auth.enabled(),
         "notify_channels": notify.channels(),
@@ -2063,6 +2253,9 @@ async def on_startup() -> None:
     loaded = tool_jobs.load_tool_jobs()
     if loaded:
         log.info("Restored %d tool run(s) from disk", loaded)
+    resumed = _resume_batches()
+    if resumed:
+        log.info("Waiting again for the AI batch of %d import(s)", resumed)
     tool_jobs.cleanup_old_tool_jobs(settings.job_retention_hours)
     asyncio.create_task(_cleanup_loop())
     apply_queue.start()

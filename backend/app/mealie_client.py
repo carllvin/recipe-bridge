@@ -21,6 +21,7 @@ import uuid
 
 import httpx
 
+from . import step_amounts
 from .config import settings
 from .schemas import ExtractedRecipe
 from .tandoor_client import TandoorError  # the import catches this error type for any target
@@ -146,7 +147,7 @@ def build_payload(recipe: ExtractedRecipe, lookup: _Lookup) -> dict:
         refs_by_step.setdefault(step, []).append({"referenceId": reference_id})
 
     instructions = [
-        {"id": str(uuid.uuid4()), "title": step.title or "", "summary": "", "text": step.instruction,
+        {"id": str(uuid.uuid4()), "title": step.title or "", "summary": "", "text": step_amounts.plain(step.instruction),
          "ingredientReferences": refs_by_step.get(i, [])}
         for i, step in enumerate(recipe.steps)
     ]

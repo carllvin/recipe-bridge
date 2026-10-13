@@ -48,7 +48,7 @@ With Portainer, Unraid, Synology Container Manager & co., paste
 into its environment / `.env`.
 
 `:latest` follows the main branch; for a fixed version use e.g.
-`image: ghcr.io/carllvin/recipe-bridge:1.1` (see the
+`image: ghcr.io/carllvin/recipe-bridge:1.2` (see the
 [packages page](https://github.com/carllvin/recipe-bridge/pkgs/container/recipe-bridge)
 for the versions).
 

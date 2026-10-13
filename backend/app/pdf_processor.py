@@ -37,6 +37,7 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
     pages = []
     images: dict[str, dict] = {}
     metadata_title = (doc.metadata or {}).get("title", "").strip()
+    metadata_author = ((doc.metadata or {}).get("author") or "").strip()  # source_tag
     ocr_page_count = 0
 
     for page_index in range(len(doc)):
@@ -89,6 +90,7 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
         "images": images,
         "page_count": len(pages),
         "metadata_title": metadata_title,
+        "metadata_author": metadata_author,
         "toc_pages": toc_pages,
     }
 

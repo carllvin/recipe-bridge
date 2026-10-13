@@ -22,7 +22,7 @@ import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from . import video_processor
+from . import source_tag, video_processor
 
 log = logging.getLogger("recipe-bridge")
 
@@ -71,7 +71,8 @@ def links_from_text(text: str) -> list[str]:
     """Every http(s) link in a text file (one per line, or anywhere in the
     text), without duplicates, in their order, at most MAX_LINKS."""
     links = []
-    for match in _URL_RE.findall(text or ""):
+    text = re.sub(r",\s*(?=https?://)", "\n", text or "")  # "https://a.example/x,https://b.example/y"
+    for match in _URL_RE.findall(text):
         url = match.rstrip(".,;:!?")
         if url not in links:
             links.append(url)
@@ -314,7 +315,8 @@ def _process_video(url: str, images_dir: str) -> dict:
             if saved:
                 images[saved.pop("id")] = saved
     return {"pages": [{"page": 1, "text": info["text"]}], "images": images, "page_count": 1,
-            "metadata_title": info.get("title") or "", "toc_pages": []}
+            "metadata_title": info.get("title") or "", "toc_pages": [],
+            "source_tag": source_tag.slug(info.get("author") or "")}  # the channel
 
 
 def _fetch_page(client: httpx.Client, url: str) -> tuple[str, str]:
@@ -431,4 +433,5 @@ def process_url(url: str, images_dir: str, html: str | None = None,
         "page_count": 1,
         "metadata_title": title,
         "toc_pages": [],
+        "source_tag": source_tag.from_page(soup, page_url, recipe or stub),
     }

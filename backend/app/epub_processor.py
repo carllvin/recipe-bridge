@@ -36,6 +36,13 @@ def process_epub(epub_path: str, images_dir: str) -> dict:
             metadata_title = (titles[0][0] or "").strip()
     except Exception:  # noqa: BLE001
         pass
+    metadata_author = ""  # source_tag
+    try:
+        creators = book.get_metadata("DC", "creator")
+        if creators:
+            metadata_author = (creators[0][0] or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
 
     pages = []
     images: dict[str, dict] = {}
@@ -95,6 +102,7 @@ def process_epub(epub_path: str, images_dir: str) -> dict:
         "images": images,
         "page_count": len(pages),
         "metadata_title": metadata_title,
+        "metadata_author": metadata_author,
         "toc_pages": [],
     }
 

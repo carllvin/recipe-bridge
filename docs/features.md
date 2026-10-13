@@ -130,6 +130,9 @@ review covers everything, so nothing has to be checked again afterwards:
   pick or deselect the photo.
 - Each ingredient is assigned to the step that needs it (dropdown on the
   right), so the ingredients show up at the right step.
+- **👁 Preview** (where a recipe opens) shows it as your recipe manager will: with Tandoor
+  every step with its own ingredients next to the text, with Mealie one
+  ingredient list and then the method – photos where they will appear.
 - Ingredients, units and tags are matched against your collection:
   ✓ exists · ↺ matched to an existing entry ("onions" → "Onion") · new. A
   matched entry shows what was read below it ("read as: onions").
@@ -157,7 +160,7 @@ grouped by kind:
   details** (plural, nutrition, supermarket category), **gram conversions**,
   **recipe revisions** (one block of text split into steps, ingredients
   assigned to steps – with a before/after preview), **translations**,
-  **tags & season**, **servings**, **photos**, **amounts in the steps**,
+  **tags & season**, **source tag** (site or cookbook author), **servings**, **photos**, **amounts in the steps**,
   **contradictions** and **unused entries**. (The weekly plan is reviewed
   and added on the 📅 Plan page itself.)
 - When an ingredient like *gemahlene Mandeln* is renamed to or merged into
@@ -373,6 +376,9 @@ Mealie's fixed ones (breakfast, lunch, dinner, …).
 - **Video links**: YouTube, Instagram and TikTok change often and sometimes
   show bots a login or consent page – then only the caption (or nothing) is
   found.
+- **Amounts in the steps** are written while a recipe is read: in the
+  review a step shows `[[i0:Mehl]]` (edit) or "250 g Mehl" (preview) –
+  on import it becomes Tandoor's template.
 - **Amounts in the steps** with Tandoor use its templates; the comment in
   brackets uses `{{ ingredients[n].note }}` – if your Tandoor version shows
   `()` instead, please report it.

@@ -30,10 +30,11 @@ data volume, no restart needed.
 | `OUTPUT_LANGUAGE` | `English` | Language of the recipes **and** of the app's UI (full UI translations: Deutsch, English, Français, Italiano, Español) |
 | `TRANSLATE_RECIPES` | `true` | `false` keeps every recipe in the language it was written in (`OUTPUT_LANGUAGE` then only sets the interface) |
 | `STEP_PHOTOS_AI` | `true` | The review's "place photos into the steps" button may use the image AI; `false` = it only places a recipe page's own step photos (free), the rest by hand |
-| `IMPORT_CONFIRM_TOKENS` | `50000` | An import estimated above this many tokens shows the estimate (and what is left of the monthly budget) and waits for *Start*; `0` = never ask. Imports from the phone or the watched folder don't wait |
+| `SOURCE_TAG` | `true` | A tag with the recipe's source: the website's name (`nytcooking`), the video channel, the cookbook's author (`ottolenghi` – from the book's metadata, else one small AI call); `false` = no such tag |
 | `APP_PASSWORD` | *(empty = none)* | Password for the web interface |
 | `NOTIFY_NTFY_URL` / `NOTIFY_TELEGRAM_TOKEN` + `NOTIFY_TELEGRAM_CHAT_ID` | – | Push notifications via ntfy or Telegram; `APP_URL` makes them link to the app |
 | `WATCH_DIR` | *(empty = off)* | Folder whose files are imported on their own (mount it, see `docker-compose.yml`) |
+| `WATCH_BATCH` | `true` | Imports from the watched folder go to the AI as a batch: half price, done within up to 24 hours (Claude, OpenAI). A restart while waiting (an update) is fine – the import picks up its batch again. Imports started in the app have a checkbox for it |
 | `CONVERT_TO_METRIC` | `true` | Converts cups/oz/lb/°F/inch to g/ml/°C/cm |
 | `CHECK_DUPLICATES` | `true` | Flags recipes whose title already exists |
 | `REUSE_EXISTING_TAGS` | `true` | Asks the AI to prefer your existing tags |

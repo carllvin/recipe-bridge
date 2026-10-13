@@ -45,11 +45,11 @@ class Settings(BaseSettings):
     output_language: str = "English"   # target language for title/description/ingredients/steps AND the UI language
     translate_recipes: bool = True     # true = translate recipes into output_language, false = keep each recipe in its own language
     step_photos_ai: bool = True        # the image AI places a cookbook's photos into the steps; false = only by hand in the review
+    source_tag: bool = True            # a tag with the recipe's source: the cookbook's author, the website, the video channel
     convert_to_metric: bool = True     # convert US/UK units (cups, oz, lb, °F, inch) to metric
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them
     custom_instructions: str = ""      # extra instructions appended to the extraction prompt (see .env.example)
-    import_confirm_tokens: int = 50000  # an import estimated above this many tokens waits for your OK (cost shown); 0 = never ask
     toc_aware_chunking: bool = False   # align chunk boundaries to the PDF's bookmarks/TOC when present (EXPERIMENTAL - has caused some PDFs to yield 0 recipes, off by default until fixed; set true to opt in)
 
     # Housekeeping
@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # Watched folder: files put here are imported on their own and wait in the review inbox; empty = off
     watch_dir: str = ""
     watch_interval_seconds: int = 30
+    watch_batch: bool = True             # imports from the watched folder as an AI batch: half price, done within up to 24 h (Claude, OpenAI)
 
     # Push notifications (see notify.py) - ntfy topic URL (e.g. https://ntfy.sh/my-secret-topic) and/or Telegram bot
     notify_ntfy_url: str = ""

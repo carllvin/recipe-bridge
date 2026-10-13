@@ -84,3 +84,42 @@ def test_each_recipe_only_gets_its_own_page_photo(tmp_path, monkeypatch):
     job = jobs.get_job(job.id)
     assert {r.title: r.candidate_image_ids for r in job.recipes} == {
         "one": ["img-one"], "two": ["img-two"], "three": ["img-three"]}
+
+
+def _links_run(monkeypatch):
+    seen = []
+    monkeypatch.setattr(main, "_run_link_list", lambda job, links, images_dir: seen.append(links))
+    return seen
+
+
+def test_rtf_with_links_is_a_link_list(tmp_path, monkeypatch):
+    """Reported: links saved in TextEdit (.rtf) came back as empty recipes."""
+    pytest = __import__("pytest")
+    pytest.importorskip("striprtf")
+    seen = _links_run(monkeypatch)
+    rtf = tmp_path / "Ohne Titel.rtf"
+    rtf.write_text("{\\rtf1\\ansi{\\fonttbl\\f0\\fswiss Helvetica;}\\f0\\fs24 "
+                   "https://cooking.example/recipes/1-mushroom-bourguignon\\\nhttps://cooking.example/recipes/2-noodles}")
+    main._run_extraction(jobs.create_job("Ohne Titel.rtf").id, [str(rtf)], "rtf")
+    assert seen == [["https://cooking.example/recipes/1-mushroom-bourguignon", "https://cooking.example/recipes/2-noodles"]]
+
+
+def test_pasted_links_are_a_link_list(tmp_path, monkeypatch):
+    seen = _links_run(monkeypatch)
+    text = tmp_path / "source.txt"
+    text.write_text("https://a.example/soup\nhttps://b.example/cake\n")
+    main._run_extraction(jobs.create_job("pasted").id, [str(text)], "text")
+    assert seen == [["https://a.example/soup", "https://b.example/cake"]]
+
+
+def test_a_title_without_ingredients_or_steps_is_no_recipe():
+    from app import ai_extractor
+    recipes = ai_extractor._dedupe_recipes([{"title": "Mushroom bourguignon"},
+                                            {"title": "Soup", "steps": [{"instruction": "Cook."}]}])
+    assert [r.title for r in recipes] == ["Soup"]
+
+
+def test_links_separated_by_commas():
+    text = "https://a.example/soup,https://b.example/cake, https://c.example/x?id=3,"
+    assert url_processor.links_from_text(text) == ["https://a.example/soup", "https://b.example/cake",
+                                                   "https://c.example/x?id=3"]
