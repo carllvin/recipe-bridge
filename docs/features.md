@@ -130,7 +130,7 @@ review covers everything, so nothing has to be checked again afterwards:
   pick or deselect the photo.
 - Each ingredient is assigned to the step that needs it (dropdown on the
   right), so the ingredients show up at the right step.
-- **👁 Preview** shows the recipe as your recipe manager will: with Tandoor
+- **👁 Preview** (where a recipe opens) shows it as your recipe manager will: with Tandoor
   every step with its own ingredients next to the text, with Mealie one
   ingredient list and then the method – photos where they will appear.
 - Ingredients, units and tags are matched against your collection:

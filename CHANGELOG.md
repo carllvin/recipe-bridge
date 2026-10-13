@@ -3,7 +3,7 @@
 ## Unreleased
 
 **Import**
-- Review: **Edit | Preview** – the preview shows the recipe as Tandoor
+- Review: **Preview | Edit** – a recipe opens in the preview, as Tandoor
   (every step with its ingredients) or Mealie will, with the step photos
 - A large import (a whole cookbook) first shows its estimated tokens and
   what is left of the monthly budget, and waits for **Start** or

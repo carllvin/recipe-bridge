@@ -1205,8 +1205,8 @@ function renderDetail(r) {
     ${duplicateNotice}
     ${importedNotice}`;
   const viewSwitch = `<div class="view-switch" role="tablist">
-      <button type="button" data-view="edit" class="${reviewView() === 'edit' ? 'active' : ''}">✏️ ${t('reviewEdit')}</button>
       <button type="button" data-view="preview" class="${reviewView() === 'preview' ? 'active' : ''}">👁 ${t('reviewPreview')}</button>
+      <button type="button" data-view="edit" class="${reviewView() === 'edit' ? 'active' : ''}">✏️ ${t('reviewEdit')}</button>
     </div>`;
   const bindViewSwitch = () => detail.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => {
     setReviewView(b.dataset.view);
@@ -1493,9 +1493,10 @@ async function undoImport(r) {
   }
 }
 
-// Review: edit the recipe, or see it as the recipe manager will show it.
+// Review: see the recipe as the recipe manager will show it (the default),
+// or edit it - the last choice is kept.
 function reviewView() {
-  try { return localStorage.getItem('reviewView') === 'preview' ? 'preview' : 'edit'; } catch (e) { return 'edit'; }
+  try { return localStorage.getItem('reviewView') === 'edit' ? 'edit' : 'preview'; } catch (e) { return 'preview'; }
 }
 
 function setReviewView(view) {
