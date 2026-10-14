@@ -87,7 +87,9 @@ review.
   into the cookbooks they were in before.
 
 Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
-**converted to metric** on the way.
+**converted to metric** on the way. Ingredient names stay simple: the
+preparation ("finely chopped") and alternatives ("or margarine") go into
+the ingredient's note.
 
 With `TRANSLATE_RECIPES=false` recipes **keep the language they were written
 in** instead – the tools that improve recipes (amounts in the steps,

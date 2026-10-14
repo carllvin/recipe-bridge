@@ -9,6 +9,9 @@
 - **Pinterest pins** lead to the recipe page they were saved from, short
   links (bit.ly, pin.it …) are followed – the recipe keeps the page's
   address as its source
+- Alternatives in an ingredient ("butter or margarine", "lemon, lime or
+  orange"): only the first becomes the ingredient, the others go into its
+  note ("or margarine")
 - Docs: a short `.env.example` with what's needed to start;
   `docs/configuration.md` lists every setting
 

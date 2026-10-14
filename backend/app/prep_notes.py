@@ -60,3 +60,24 @@ def with_note(existing: str | None, note: str) -> str:
     if note.casefold() in existing.casefold():
         return existing
     return f"{note}, {existing}" if existing else note
+
+
+# "Butter oder Margarine", "Zitrone, Limette or Orange": the first one is the
+# ingredient, the others go into the note ("oder Margarine") - the
+# extraction asks the AI for that, this catches what slips through
+_ALTERNATIVE = re.compile(r"\s+(or|oder|ou|o|oppure)\s+", re.IGNORECASE)
+
+
+def split_alternatives(name: str) -> tuple[str, str | None]:
+    """(the first ingredient, "or the others") - (name, None) when there are
+    no alternatives."""
+    name = (name or "").strip()
+    match = _ALTERNATIVE.search(name)
+    if not match:
+        return name, None
+    word = match.group(1)
+    parts = [p.strip() for p in re.split(r"\s*,\s*|" + _ALTERNATIVE.pattern, name, flags=re.IGNORECASE)
+             if p and p.strip() and p.strip().casefold() not in ("or", "oder", "ou", "o", "oppure")]
+    if len(parts) < 2:
+        return name, None
+    return parts[0], f"{word.lower()} {', '.join(parts[1:])}"
