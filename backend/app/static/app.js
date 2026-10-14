@@ -811,7 +811,9 @@ function renderBookPick() {
     group = e.group;
     const pages = e.start === e.end ? tf('bookPickPage', { n: e.start }) : tf('bookPickPages', { from: e.start, to: e.end });
     const badge = e.existing ? `<span class="pick-badge">${escapeHtml(t('bookPickExisting'))}</span>` : '';
+    const thumb = `/api/jobs/${encodeURIComponent(state.jobId)}/pick-thumb/${encodeURIComponent(e.id)}`;
     return `${head}<label class="pick-row${e.existing ? ' is-existing' : ''}"><input type="checkbox" data-id="${escapeHtml(e.id)}"${bookPick.picked.has(e.id) ? ' checked' : ''} />
+      <img src="${thumb}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'), { className: 'pick-noimg' }))">
       <div class="pick-main"><div class="pick-name">${escapeHtml(e.title)}${badge}</div><div class="pick-meta">${escapeHtml(pages)}</div></div></label>`;
   }).join('');
   el('book-pick-all').checked = visible.length > 0 && visible.every((e) => bookPick.picked.has(e.id));

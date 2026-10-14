@@ -157,3 +157,24 @@ def test_picked_recipes_are_never_read_twice():
     chunks = [[p["page"] for p in c] for c in _chunk_pages(pages, units=units)]
     assert sum(len(c) for c in chunks) == 30  # no page twice
     assert all(c[0] in units for c in chunks) and all(len(c) <= 12 for c in chunks)
+
+
+def test_the_largest_photo_on_its_pages_is_the_preview():
+    found = [{"id": "e0", "start": 4, "end": 5}, {"id": "e1", "start": 6, "end": 6}, {"id": "e2", "start": 7, "end": 7}]
+    images = {"small": {"page": 4, "width": 300, "height": 200}, "big": {"page": 5, "width": 900, "height": 600},
+              "other": {"page": 6, "width": 400, "height": 400}}
+    assert recipe_picker.best_photos(found, images) == {"e0": "big", "e1": "other"}  # e2: its page instead
+
+
+def test_pick_thumb_renders_the_page_without_a_photo(tmp_path, monkeypatch):
+    cookbook(tmp_path / "t.pdf")
+    monkeypatch.setattr(main, "_fetch_existing_tags", lambda: [])
+    api = TestClient(main.app)
+    with open(tmp_path / "t.pdf", "rb") as f:
+        job_id = api.post("/api/upload", files=[("files", ("buch.pdf", f.read(), "application/pdf"))]).json()["job_id"]
+    job = _wait(api, job_id, "pick")
+    entry = job["pick"]["entries"][1]
+    resp = api.get(f"/api/jobs/{job_id}/pick-thumb/{entry['id']}")
+    assert resp.status_code == 200 and resp.headers["content-type"] == "image/jpeg" and resp.content[:2] == b"\xff\xd8"
+    assert api.get(f"/api/jobs/{job_id}/pick-thumb/nope").status_code == 404
+    api.post(f"/api/jobs/{job_id}/pick", json={"cancel": True})

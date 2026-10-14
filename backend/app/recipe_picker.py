@@ -135,6 +135,23 @@ ONLY_COMPLETES = ("[This page is only here to complete a recipe from the page be
                   "Do not extract a recipe that starts on this page.]\n")
 
 
+def best_photos(found: list[dict], images: dict) -> dict[str, str]:
+    """entry id -> the largest photo on its pages (image id) - its preview
+    in the list. Entries without one get a picture of their first page."""
+    by_page = {}
+    for image_id, info in (images or {}).items():
+        size = (info.get("width") or 0) * (info.get("height") or 0)
+        page = info.get("page")
+        if page is not None and size > by_page.get(page, ("", -1))[1]:
+            by_page[page] = (image_id, size)
+    out = {}
+    for entry in found:
+        candidates = [by_page[n] for n in range(entry["start"], entry["end"] + 1) if n in by_page]
+        if candidates:
+            out[entry["id"]] = max(candidates, key=lambda c: c[1])[0]
+    return out
+
+
 def units_of(found: list[dict], ids, picked: list[dict]) -> list[int]:
     """Where in the picked pages each picked recipe starts (1-based) - the
     AI calls are cut there (ai_extractor._chunk_pages units)."""

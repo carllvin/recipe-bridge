@@ -456,7 +456,9 @@ def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple | bo
     except Exception as exc:  # noqa: BLE001 - the list just has no "in your collection" marks then
         log.info("Recipe names for the pick list not loaded: %s", exc)
         existing = []
-    job.pick = {"source": source, "entries": recipe_picker.with_tokens(found, result["pages"], existing),
+    photos = recipe_picker.best_photos(found, result.get("images"))
+    job.pick = {"source": source, "photos": photos,
+                "entries": recipe_picker.with_tokens(found, result["pages"], existing),
                 **recipe_picker.estimate_basis(result["pages"], existing_tags),
                 "page_count": len(result["pages"]),
                 "whole_total": estimate_tokens(result["pages"], existing_tags=existing_tags)["total"]}
@@ -479,6 +481,53 @@ def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple | bo
     log.info("Import %s: %d of %d recipe(s) picked - %d of %d page(s) go to the AI", job.id, len(job.picked),
              len(entries), len(pages), len(result["pages"]))
     return pages, starts, units
+
+
+PICK_THUMB_PX = 240
+
+
+@app.get("/api/jobs/{job_id}/pick-thumb/{entry_id}")
+async def pick_thumb(job_id: str, entry_id: str):
+    """A small preview for an entry of a cookbook's pick list, without AI:
+    the largest photo on its pages, else (PDF) its first page."""
+    job = jobs.get_job(job_id)
+    entry = next((e for e in ((job.pick or {}).get("entries") or []) if e["id"] == entry_id), None) if job else None
+    if entry is None:
+        raise HTTPException(404, "No such entry.")
+    thumbs = os.path.join(_job_dir(job_id), "thumbs")
+    path = os.path.join(thumbs, f"{entry_id}.jpg")
+    if not os.path.exists(path):
+        photo = job.pick.get("photos", {}).get(entry_id)
+        made = await asyncio.to_thread(_make_thumb, job_id, photo, entry["start"], path)
+        if not made:
+            raise HTTPException(404, "No preview.")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+
+
+def _make_thumb(job_id: str, photo: str | None, page: int, path: str) -> bool:
+    from PIL import Image
+    job = jobs.get_job(job_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        if photo and photo in job.images:
+            image = Image.open(os.path.join(_job_dir(job_id), "images", job.images[photo]["filename"]))
+        else:
+            pdf = next((os.path.join(_job_dir(job_id), f) for f in sorted(os.listdir(_job_dir(job_id)))
+                        if f.lower().endswith(".pdf")), None)
+            if pdf is None:
+                return False
+            import fitz
+            with fitz.open(pdf) as doc:
+                rect = doc[page - 1].rect  # the top of the page: the title and how the recipe begins
+                pix = doc[page - 1].get_pixmap(dpi=72, clip=fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + rect.height * 0.4))
+                image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        image = image.convert("RGB")
+        image.thumbnail((PICK_THUMB_PX, PICK_THUMB_PX))
+        image.save(path, "JPEG", quality=80)
+        return True
+    except Exception as exc:  # noqa: BLE001 - the list just shows no preview then
+        log.info("No preview for %s page %s: %s", job_id, page, exc)
+        return False
 
 
 @app.post("/api/jobs/{job_id}/pick")
