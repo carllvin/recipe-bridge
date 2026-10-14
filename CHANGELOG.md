@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Pick a cookbook's recipes before the AI reads it**: a PDF (from 15
+  pages) or EPUB shows its recipes – from its bookmarks or table of
+  contents, otherwise the pages that look like a recipe – and only the
+  picked pages go to the AI, with a live token estimate. Recipes already in
+  the collection, the foreword and the index start unticked
 - Half price with **Gemini** too: imports go to its Batch Mode like with
   Claude and OpenAI
 - A notification (ntfy, Telegram) also when a half-price import started in

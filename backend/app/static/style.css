@@ -1131,6 +1131,9 @@ a { color: inherit; }
 .pick-badge { font-size: 0.7rem; color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 999px; padding: 0 6px; margin-left: 6px; white-space: nowrap; }
 .pick-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 10px; }
 .pick-foot .settings-hint { flex: 1; margin: 0; }
+.book-pick .pick-foot { flex-wrap: wrap; }
+.book-pick .pick-group { font-size: 0.78rem; color: var(--gold); text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 4px 2px; }
+.book-pick .pick-row.is-existing .pick-name { opacity: 0.6; }
 .season-now { font-size: 0.85rem; color: #8fb996; margin: -8px 0 18px; line-height: 1.5; }
 .season-now button { background: none; border: 1px solid #3a4a3c; border-radius: 999px; color: inherit; font: inherit;
   font-size: 0.78rem; padding: 0 8px; margin-left: 4px; cursor: pointer; }

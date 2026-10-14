@@ -714,6 +714,7 @@ function pollJob() {
         return;
       }
 
+      if (job.status === 'pick') { showBookPick(job); return; }
       if (job.status === 'confirm') { showImportEstimate(job); return; }
       if (job.status === 'cancelled') { leaveCancelledImport(); return; }
       updateProgressUI(job);
@@ -775,6 +776,100 @@ async function answerImportEstimate(start, batch = false) {
 el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
 el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
 el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
+
+// A cookbook: its recipes (bookmarks, table of contents or pages that look
+// like a recipe - found without AI) to pick before the AI reads it; only the
+// picked pages are sent. Ticked at first: entries whose pages look like a
+// recipe (not the foreword or index) and that aren't in the collection yet.
+const bookPick = { entries: [], picked: new Set(), info: null };
+
+function showBookPick(job) {
+  const info = job.pick || {};
+  bookPick.info = info;
+  bookPick.entries = info.entries || [];
+  bookPick.picked = new Set(bookPick.entries.filter((e) => e.recipe && !e.existing).map((e) => e.id));
+  el('processing-screen').querySelector('.spinner').classList.add('hidden');
+  el('processing-text').classList.add('hidden');
+  el('progress-track').classList.add('hidden');
+  const intro = { bookmarks: 'bookPickFromBookmarks', contents: 'bookPickFromContents' }[info.source] || 'bookPickFromPages';
+  el('book-pick-intro').textContent = tf(intro, { n: bookPick.entries.length, pages: info.page_count || job.page_count });
+  el('book-pick-filter').value = '';
+  renderBookPick();
+  el('book-pick').classList.remove('hidden');
+}
+
+function bookPickVisible() {
+  const q = el('book-pick-filter').value.trim().toLowerCase();
+  return bookPick.entries.filter((e) => !q || `${e.title} ${e.group || ''}`.toLowerCase().includes(q));
+}
+
+function renderBookPick() {
+  const visible = bookPickVisible();
+  let group = null;
+  el('book-pick-list').innerHTML = visible.map((e) => {
+    const head = e.group && e.group !== group ? `<div class="pick-group">${escapeHtml(e.group)}</div>` : '';
+    group = e.group;
+    const pages = e.start === e.end ? tf('bookPickPage', { n: e.start }) : tf('bookPickPages', { from: e.start, to: e.end });
+    const badge = e.existing ? `<span class="pick-badge">${escapeHtml(t('bookPickExisting'))}</span>` : '';
+    return `${head}<label class="pick-row${e.existing ? ' is-existing' : ''}"><input type="checkbox" data-id="${escapeHtml(e.id)}"${bookPick.picked.has(e.id) ? ' checked' : ''} />
+      <div class="pick-main"><div class="pick-name">${escapeHtml(e.title)}${badge}</div><div class="pick-meta">${escapeHtml(pages)}</div></div></label>`;
+  }).join('');
+  el('book-pick-all').checked = visible.length > 0 && visible.every((e) => bookPick.picked.has(e.id));
+  updateBookPickHint();
+}
+
+// Roughly what the picked recipes cost, counted like the "large import"
+// estimate: the picked pages (each with the page after it) once, the
+// answers as a share of them, the instructions once per AI call.
+function updateBookPickHint() {
+  const info = bookPick.info || {};
+  const chosen = bookPick.entries.filter((e) => bookPick.picked.has(e.id));
+  const pages = new Set();
+  chosen.forEach((e) => { for (let n = e.start; n <= e.end + 1; n += 1) pages.add(String(n)); });
+  const text = [...pages].reduce((sum, n) => sum + ((info.page_tokens || {})[n] || 0), 0);
+  const calls = pages.size ? Math.ceil(pages.size / (info.pages_per_call || 10)) : 0;
+  const prompt = calls ? (info.prompt_first || 0) + (calls - 1) * (info.prompt_next || 0) : 0;
+  const total = Math.round(text * (1 + (info.output_share || 0.6)) + prompt);
+  const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
+  el('book-pick-hint').textContent = chosen.length
+    ? tf('bookPickEstimate', { total: fmt(total), whole: fmt(info.whole_total) }) : '';
+  el('book-pick-start').disabled = !chosen.length;
+  el('book-pick-start').textContent = tf('bookPickStart', { n: chosen.length });
+}
+
+el('book-pick-list').addEventListener('change', (ev) => {
+  const box = ev.target.closest('input[data-id]');
+  if (!box) return;
+  if (box.checked) bookPick.picked.add(box.dataset.id); else bookPick.picked.delete(box.dataset.id);
+  el('book-pick-all').checked = bookPickVisible().every((e) => bookPick.picked.has(e.id));
+  updateBookPickHint();
+});
+el('book-pick-filter').addEventListener('input', renderBookPick);
+el('book-pick-all').addEventListener('change', () => {
+  const on = el('book-pick-all').checked;
+  bookPickVisible().forEach((e) => (on ? bookPick.picked.add(e.id) : bookPick.picked.delete(e.id)));
+  renderBookPick();
+});
+
+async function answerBookPick(body) {
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/pick`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  } catch (e) {
+    el('book-pick-hint').textContent = `⚠️ ${e.message}`;
+    return;
+  }
+  el('book-pick').classList.add('hidden');
+  if (body.cancel) { leaveCancelledImport(); return; }
+  el('processing-screen').querySelector('.spinner').classList.remove('hidden');
+  el('processing-text').classList.remove('hidden');
+  pollJob();
+}
+el('book-pick-start').addEventListener('click', () => answerBookPick({ ids: [...bookPick.picked] }));
+el('book-pick-whole').addEventListener('click', () => answerBookPick({ all: true }));
+el('book-pick-cancel').addEventListener('click', () => answerBookPick({ cancel: true }));
 
 function leaveCancelledImport() {
   clearTimeout(state.pollTimer);
@@ -1982,7 +2077,7 @@ async function loadRecentImports() {
     if (!items.length) { box.classList.add('hidden'); return; }
     el('recent-imports-list').innerHTML = items.map((j) => {
       const status = j.status === 'processing' ? t('recentImportRunning')
-        : j.status === 'confirm' ? t('recentImportConfirm')
+        : j.status === 'confirm' || j.status === 'pick' ? t('recentImportConfirm')
         : j.status === 'error' ? t('recentImportError')
         : tf('recentImportLine', { recipes: j.recipes, imported: j.imported });
       return `<div class="new-recipes-open-job"><span><strong>${escapeHtml(j.filename)}</strong> · ${escapeHtml(status)} · ${escapeHtml(shortWhen(j.created_at))}</span>

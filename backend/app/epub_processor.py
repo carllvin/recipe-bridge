@@ -104,6 +104,8 @@ def process_epub(epub_path: str, images_dir: str) -> dict:
         "metadata_title": metadata_title,
         "metadata_author": metadata_author,
         "toc_pages": [],
+        "toc": _toc_entries(book, ordered_docs),  # the recipe list to pick from (recipe_picker.py)
+        "kind": "epub",
     }
 
 
@@ -126,3 +128,35 @@ def _image_dimensions(content: bytes) -> tuple[int, int]:
             return img.width, img.height
     except Exception:  # noqa: BLE001
         return 0, 0
+
+
+def _toc_entries(book, ordered_docs) -> list[dict]:
+    """[{"title", "page", "level"}] from the EPUB's table of contents - page
+    is the number of the chapter file the entry points to."""
+    number = {doc.get_name(): i for i, doc in enumerate(ordered_docs, start=1)}
+    out = []
+
+    def walk(items, level, group=None):
+        for item in items or []:
+            if isinstance(item, (tuple, list)) and len(item) == 2:  # (Section, [children])
+                section, children = item
+                if add(section, level, group):
+                    walk(children, level + 1)
+                else:  # a heading without a page of its own: only the label of what follows
+                    walk(children, level, (getattr(section, "title", "") or "").strip() or group)
+            else:
+                add(item, level, group)
+
+    def add(link, level, group):
+        href = (getattr(link, "href", "") or "").split("#")[0]
+        title = (getattr(link, "title", "") or "").strip()
+        page = number.get(href) or next((n for name, n in number.items() if href and name.endswith(href)), None)
+        if title and page:
+            out.append({"title": title, "page": page, "level": level, **({"group": group} if group else {})})
+            return True
+        return False
+    try:
+        walk(book.toc, 1)
+    except Exception:  # noqa: BLE001 - an odd table of contents: the list is found from the pages instead
+        return []
+    return out

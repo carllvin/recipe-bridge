@@ -18,6 +18,14 @@ recipe manager – "Tandoor" or "Mealie".
   overlapping chunks, so books with hundreds of pages work), finds each
   recipe with its page range, ingredients, steps, times, servings, tags and
   photo. Pictures embedded in a Word document become photo candidates.
+- **Pick the recipes first** – before the AI reads a cookbook (PDF from 15
+  pages, EPUB), the app lists its recipes **without AI**: from the PDF's
+  bookmarks or the EPUB's table of contents, otherwise the pages that look
+  like a recipe (lines like "200 g Mehl"). Only the picked recipes' pages go
+  to the AI, with a live estimate of the tokens next to the whole book's.
+  Ticked at first are the entries that look like a recipe and aren't in your
+  collection yet – not the foreword or the index. *Whole book* reads
+  everything as before; the watched folder always does.
 - **Photos of cookbook pages** – drop them in or, on the phone, take them one
   by one with the camera. They are collected first, can be reordered and
   removed, and are imported together; tick *"all photos show one single
