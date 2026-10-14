@@ -4,7 +4,7 @@
 # To build the image yourself from a clone instead, see docker-compose.build.yml.
 services:
   recipe-bridge:
-    image: ghcr.io/carllvin/recipe-bridge:latest   # or a fixed version, e.g. :1.2
+    image: ghcr.io/carllvin/recipe-bridge:latest   # or a fixed version, e.g. :1.3
     container_name: recipe-bridge
     restart: unless-stopped
     ports:

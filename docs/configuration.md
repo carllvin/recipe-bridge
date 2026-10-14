@@ -53,7 +53,6 @@ app actually uses.
 | `CHECK_DUPLICATES` | `true` | Flags recipes already in the collection (by title and by address) |
 | `REUSE_EXISTING_TAGS` | `true` | The AI prefers your existing tags |
 | `CUSTOM_INSTRUCTIONS` | – | Your own rules for the extraction, see [below](#custom-instructions) |
-| `TOC_AWARE_CHUNKING` | `false` | Experimental: split PDFs along their bookmarks – has made some PDFs yield no recipes |
 
 ### Import
 

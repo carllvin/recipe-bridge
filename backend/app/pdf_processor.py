@@ -19,9 +19,8 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
     Reads a PDF and returns:
       - pages: list of {"page": n, "text": "..."}
       - images: dict image_id -> {"page": n, "path": "...", "width": w, "height": h}
-      - toc_pages: sorted list of page numbers where a bookmark/table-of-contents
-        entry starts (empty if the PDF has no bookmarks). Used to align chunk
-        boundaries with chapter/recipe boundaries instead of cutting mid-recipe.
+      - toc: the bookmarks [{"title", "page", "level"}] - the recipe list to
+        pick from before the AI reads the book (recipe_picker.py)
       - metadata_title: the PDF's embedded title metadata, if any (used as a
         cookbook-name hint).
     Images are saved as JPEG/PNG files under images_dir. Pages with little to no
@@ -79,7 +78,6 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
                 "height": height,
             }
 
-    toc_pages = _extract_toc_pages(doc)
     toc = _toc_entries(doc)
     doc.close()
 
@@ -92,7 +90,6 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
         "page_count": len(pages),
         "metadata_title": metadata_title,
         "metadata_author": metadata_author,
-        "toc_pages": toc_pages,
         "toc": toc,  # the bookmarks with their titles - the recipe list to pick from (recipe_picker.py)
         "kind": "pdf",
     }
@@ -107,20 +104,6 @@ def _ocr_page(page: "fitz.Page", page_number: int) -> str:
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not rasterize page %d for OCR: %s", page_number, exc)
         return ""
-
-
-def _extract_toc_pages(doc: "fitz.Document") -> list[int]:
-    """Returns the sorted, de-duplicated list of page numbers where a bookmark
-    (table-of-contents entry) starts. Many cookbook PDFs have one bookmark per
-    recipe or chapter; the extraction step uses these as natural chunk
-    boundaries so a recipe is far less likely to be split across two chunks."""
-    try:
-        toc = doc.get_toc(simple=True)  # list of [level, title, page] (1-indexed)
-    except Exception:
-        return []
-
-    pages = {entry[2] for entry in toc if len(entry) >= 3 and entry[2] >= 1}
-    return sorted(pages)
 
 
 def _toc_entries(doc: "fitz.Document") -> list[dict]:

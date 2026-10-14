@@ -1,38 +1,68 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
 
-- Chat: sort tags into a tag group – named ones or every tag without a
-  group ("all tags without a group into the group Quelle"); Tandoor only
-- **Pick a cookbook's recipes before the AI reads it**: a PDF (from 15
-  pages) or EPUB shows its recipes – from its bookmarks or table of
-  contents, otherwise the pages that look like a recipe – and only the
-  picked pages go to the AI, with a live token estimate. Recipes already in
-  the collection, the foreword and the index start unticked
-- Half price with **Gemini** too: imports go to its Batch Mode like with
-  Claude and OpenAI
+Docker image `ghcr.io/carllvin/recipe-bridge:1.3.1` (or `:1.3`). No changes
+to the configuration are needed; `TOC_AWARE_CHUNKING` is gone and is simply
+ignored if it's still in your `.env`.
+
+**Import**
+- Cookbooks: no more recipes shown twice in the review
+  - picked recipes go to the AI cut between the recipes, without
+    overlapping parts – none is read twice (and fewer tokens)
+  - with *Whole book*, a recipe read twice by overlapping parts – with a
+    slightly different title or page number – is recognised by its
+    ingredients and method and shows only once; neighbouring variants
+    ("Pfannkuchen" / "Apfelpfannkuchen") stay apart
+- Ingredient names are always written out: a shortened compound like
+  "Romano- oder Wachsbohnen" becomes "Romanobohnen" with the note "oder
+  Wachsbohnen" – never "Romano-"
+- Removed: `TOC_AWARE_CHUNKING` – picking the recipes does the same, better
+
+## 1.3.0
+
+Docker image `ghcr.io/carllvin/recipe-bridge:1.3.0` (or `:1.3`). No changes
+to the configuration are needed. Worth knowing:
+
+- A cookbook PDF (from 15 pages) or EPUB now first shows its recipes to
+  **pick** – only the picked ones go to the AI.
+- The tile **Contradictions** is gone – it flagged too many recipes that
+  were fine.
+- `.env.example` is short now; every setting is in
+  [docs/configuration.md](docs/configuration.md).
+
+**Costs**
+- **Pick a cookbook's recipes before the AI reads it**: from its bookmarks
+  or table of contents, otherwise the pages that look like a recipe, with a
+  live token estimate next to the whole book's. The foreword, the index and
+  recipes already in the collection start unticked; *Whole book* reads
+  everything as before, the watched folder always does
+- Half price with **Gemini** too (Batch Mode), like with Claude and OpenAI
 - A notification (ntfy, Telegram) also when a half-price import started in
   the app is ready
+
+**Import**
 - **Pinterest pins** lead to the recipe page they were saved from, short
   links (bit.ly, pin.it …) are followed – the recipe keeps the page's
   address as its source
 - Alternatives in an ingredient ("butter or margarine", "lemon, lime or
   orange"): only the first becomes the ingredient, the others go into its
   note ("or margarine")
-- Collection overview (Tandoor) faster: every list is read once instead of
-  up to three times, the lists at the same time, new photos checked six at
-  a time; the log shows how long each part took
-- After applying a change to ingredients, units or tags only the recipes
-  using them are read again – not the whole collection
-- Mealie: the overview reads only recipes changed since its last read, the
-  lists at the same time
+
+**Maintain**
+- The collection overview is much faster: every list is read once and the
+  lists at the same time, Tandoor's long lists several pages at a time,
+  new photos six at a time; only recipes changed since the last read are
+  read again – also with Mealie – and after applying a change to
+  ingredients, units or tags only the recipes using them. The log shows how
+  long each part took
+- Chat: sort tags into a tag group – named ones or every tag without a
+  group ("all tags without a group into the group Quelle"); Tandoor only
+- Removed: the tile **Contradictions** (recipe doctor)
+
+**Also**
 - Background checks (recipe manager reachable, review counter) pause while
   the app isn't visible
-- Tandoor's long lists (ingredients, conversions) and the cookbooks are
-  read several pages at a time; the kept copy of the recipes is refreshed
-  in full once a week instead of daily
-- Removed: the tile **Contradictions** (recipe doctor) – it flagged too
-  many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;
   `docs/configuration.md` lists every setting
 

@@ -125,7 +125,7 @@ def estimate_basis(pages: list[dict], existing_tags) -> dict:
     prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // PER_TOKEN
     cached = llm_provider._active_provider() == "anthropic"
     return {"page_tokens": {str(p["page"]): (len(p.get("text") or "") + 30) // PER_TOKEN for p in pages},
-            "pages_per_call": 10,  # 12 per chunk, 2 of them shared with the next
+            "pages_per_call": 12,  # picked recipes are cut between, without overlap
             "prompt_first": round(prompt * 1.25) if cached else prompt,
             "prompt_next": round(prompt * 0.1) if cached else prompt,
             "output_share": OUTPUT_SHARE}
@@ -133,6 +133,13 @@ def estimate_basis(pages: list[dict], existing_tags) -> dict:
 
 ONLY_COMPLETES = ("[This page is only here to complete a recipe from the page before. "
                   "Do not extract a recipe that starts on this page.]\n")
+
+
+def units_of(found: list[dict], ids, picked: list[dict]) -> list[int]:
+    """Where in the picked pages each picked recipe starts (1-based) - the
+    AI calls are cut there (ai_extractor._chunk_pages units)."""
+    position = {p["page"]: i for i, p in enumerate(picked, start=1)}
+    return sorted({position[e["start"]] for e in found if e["id"] in ids and e["start"] in position})
 
 
 def picked_pages(found: list[dict], ids, pages: list[dict]) -> tuple[list[dict], set[int]]:

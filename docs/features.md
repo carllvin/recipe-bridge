@@ -404,5 +404,3 @@ Mealie's fixed ones (breakfast, lunch, dinner, …).
 - Imports that haven't been sent to your recipe manager yet are lost when
   the container restarts (open suggestions, the queue and the undo history
   are kept).
-- `TOC_AWARE_CHUNKING` (aligning chunks to a PDF's table of contents) is
-  experimental and off by default – it has made some PDFs yield no recipes.

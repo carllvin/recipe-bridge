@@ -156,6 +156,9 @@ ingredient "potatoes" with different notes).
 IMPORTANT - Alternatives: when the text offers a choice ("butter or margarine", \
 "lemon, lime or orange juice"), only the first is the ingredient ("name": \
 "butter"); the others go into its "note", e.g. "or margarine" (in {language}).
+Every word is written out in full: a shortened compound like "Romano- oder \
+Wachsbohnen" becomes "Romanobohnen" with the note "oder Wachsbohnen" - a name \
+never ends with a hyphen.
 
 IMPORTANT - Missing units: if a countable ingredient has no explicit unit in the \
 text (e.g. "2 onions", "3 eggs"), set "unit" to the word for "piece(s)" in \
@@ -376,24 +379,21 @@ def _chunk_pages(
     pages: list[dict],
     pages_per_chunk: int = 12,
     overlap: int = 2,
-    toc_pages: Optional[list[int]] = None,
+    units: Optional[list[int]] = None,
 ):
-    """Splits pages into chunks for the AI calls. When toc_pages (bookmark/TOC page
-    numbers) are available, chunk boundaries are aligned to them - consecutive
-    chapters/recipes are grouped together up to roughly pages_per_chunk, but a
-    chunk never cuts a chapter in half unless a single chapter alone exceeds
-    pages_per_chunk (then it falls back to the sliding-window approach for that
-    chapter only). Without usable TOC data, falls back to plain fixed-size,
-    overlapping windows. Either way, every chunk after the first shares an
-    `overlap`-page margin with its predecessor."""
+    """Splits pages into chunks for the AI calls: fixed-size windows, each
+    sharing `overlap` pages with the one before, so a recipe cut at one
+    window's edge is whole in the next (the second reading is merged,
+    _same_recipe). units: picked recipes (recipe_picker.py) - the positions
+    where each starts; each is whole already (with the page after it), so
+    they're grouped up to pages_per_chunk without overlap and never cut - no
+    recipe is read twice."""
     n = len(pages)
     if n == 0:
         return
 
-    toc_pages = sorted(set(p for p in (toc_pages or []) if 1 <= p <= n))
-
-    if len(toc_pages) >= 2:
-        ranges = _toc_chunk_ranges(n, toc_pages, pages_per_chunk, overlap)
+    if units:
+        ranges = _unit_ranges(n, units, pages_per_chunk)
     else:
         ranges = list(_sliding_windows(1, n, pages_per_chunk, overlap))
 
@@ -401,75 +401,15 @@ def _chunk_pages(
         yield pages[start - 1:end]
 
 
-def _toc_chunk_ranges(
-    n: int, toc_pages: list[int], pages_per_chunk: int, overlap: int
-) -> list[tuple[int, int]]:
-    """Builds chapter-aligned (start, end) ranges: consecutive short chapters are
-    grouped together up to ~pages_per_chunk; a single chapter longer than that is
-    split on its own via the sliding window (which already overlaps its own
-    sub-ranges correctly). Every NEW unit's start (a freshly flushed buffer, or
-    the first sub-range of an oversized chapter) is additionally nudged
-    backward - via `_start_with_overlap` - so it shares `overlap` pages with
-    whatever was yielded immediately before it. This is the piece a plain
-    per-range "extend every start backward" pass would get wrong: it would
-    also stretch the *internal* boundaries between an oversized chapter's own
-    sliding-window sub-ranges, which are already correctly overlapping and
-    don't need (or want) any further adjustment."""
-    boundaries = sorted(set([1] + toc_pages + [n + 1]))
-    segments = [
-        (boundaries[i], boundaries[i + 1] - 1)
-        for i in range(len(boundaries) - 1)
-        if boundaries[i] <= n
-    ]
-
-    result: list[tuple[int, int]] = []
-
-    def append_new_unit(start: int, end: int) -> None:
-        if result:
-            start = _start_with_overlap(start, result[-1][1], overlap)
-        result.append((start, end))
-
-    buffer_start = None
-    buffer_end = None
-
-    for seg_start, seg_end in segments:
-        seg_len = seg_end - seg_start + 1
-
-        if seg_len > pages_per_chunk:
-            # A single chapter is too long on its own - flush whatever is
-            # buffered, then split this chapter with the sliding window.
-            if buffer_start is not None:
-                append_new_unit(buffer_start, buffer_end)
-                buffer_start = None
-            sub_ranges = list(_sliding_windows(seg_start, seg_end, pages_per_chunk, overlap))
-            for i, (sub_start, sub_end) in enumerate(sub_ranges):
-                if i == 0:
-                    append_new_unit(sub_start, sub_end)
-                else:
-                    result.append((sub_start, sub_end))  # already correctly overlapping internally
-            continue
-
-        if buffer_start is None:
-            buffer_start, buffer_end = seg_start, seg_end
-        elif (seg_end - buffer_start + 1) <= pages_per_chunk:
-            buffer_end = seg_end
+def _unit_ranges(n: int, units: list[int], pages_per_chunk: int) -> list[tuple[int, int]]:
+    bounds = sorted(set([1] + [u for u in units if 1 <= u <= n] + [n + 1]))
+    ranges: list[tuple[int, int]] = []
+    for start, end in ((bounds[i], bounds[i + 1] - 1) for i in range(len(bounds) - 1)):
+        if ranges and end - ranges[-1][0] + 1 <= pages_per_chunk:
+            ranges[-1] = (ranges[-1][0], end)
         else:
-            append_new_unit(buffer_start, buffer_end)
-            buffer_start, buffer_end = seg_start, seg_end
-
-    if buffer_start is not None:
-        append_new_unit(buffer_start, buffer_end)
-
-    return result
-
-
-def _start_with_overlap(start: int, prev_end: int, overlap: int) -> int:
-    """Nudges `start` backward just enough to share `overlap` pages with a
-    previous range ending at `prev_end`, but never extends it forward (if
-    there's already at least that much overlap, or even a full containment,
-    `start` is left untouched) and never below page 1."""
-    target = max(1, prev_end - overlap + 1)
-    return min(start, target)
+            ranges.append((start, end))
+    return ranges
 
 
 def _sliding_windows(start: int, end: int, size: int, overlap: int):
@@ -492,15 +432,16 @@ OUTPUT_SHARE = 0.6       # the recipes' JSON is about this share of the text it 
 MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
 
 
-def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
-                    existing_tags: Optional[list[str]] = None) -> dict:
+def estimate_tokens(pages: list[dict], existing_tags: Optional[list[str]] = None,
+                    units: Optional[list[int]] = None) -> dict:
     """{"chunks", "input", "output", "total"} - roughly what the extraction
     of these pages will use, without asking the AI: the chunks' text (with
     the overlapping pages counted twice) plus the instructions per chunk
     (with Claude cached after the first), and the answers as a share of the
     text."""
     prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
-    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
+    chunks = [c for c in _chunk_pages(pages, units=units)
+              if any((p.get("text") or "").strip() for p in c)]
     texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
     if len(chunks) > 1 and llm_provider._active_provider() == "anthropic":
         # cached after the first chunk (complete_text cache=True): written once at 1.25x, then read at a tenth
@@ -558,12 +499,12 @@ def extract_each_as_batch(page_sets: list[list[dict]], existing_tags: Optional[l
 def extract_recipes_from_pages(
     pages: list[dict],
     on_progress: Optional[ProgressCallback] = None,
-    toc_pages: Optional[list[int]] = None,
     existing_tags: Optional[list[str]] = None,
     batch: bool = False,
     on_wait=None,
     on_submit=None,
     batch_ref: Optional[dict] = None,
+    units: Optional[list[int]] = None,
 ) -> tuple[list[ExtractedRecipe], TokenUsage]:
     """batch=True (the import page's checkbox, WATCH_BATCH): all chunks as
     one batch at half price - on_wait(done, total) while it runs; falls
@@ -575,14 +516,14 @@ def extract_recipes_from_pages(
         raise RuntimeError(llm_provider.missing_key_hint())
     system_prompt = _system_prompt_for(pages, existing_tags)
 
-    chunks = list(_chunk_pages(pages, toc_pages=toc_pages))
+    chunks = list(_chunk_pages(pages, units=units))
     total_chunks = len(chunks) or 1
     raw_recipes: list[dict] = []
     total_usage = TokenUsage()
 
     log.info(
-        "Extraction starting: %d page(s) split into %d chunk(s) (toc_pages=%s)",
-        len(pages), total_chunks, toc_pages or "none",
+        "Extraction starting: %d page(s) split into %d chunk(s)%s",
+        len(pages), total_chunks, " at the picked recipes" if units else "",
     )
 
     texts = [_page_text(chunk) for chunk in chunks]
@@ -654,12 +595,55 @@ def _titles_likely_same(a: str, b: str, threshold: float = 0.78) -> bool:
     return difflib.SequenceMatcher(None, a_norm, b_norm).ratio() >= threshold
 
 
-def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
-    """Removes duplicates caused by overlapping chunks (similar title + overlapping page range)."""
-    results: list[ExtractedRecipe] = []
+PAGE_SLIP = 3      # a chunk may name a recipe's pages slightly off (printed vs. PDF page numbers)
+NEAR_PAGES = 12    # the same recipe read twice lies within one chunk's reach
+SAME_METHOD = 0.6  # share of the shorter method found in the other one
 
-    def overlaps(a_start, a_end, b_start, b_end) -> bool:
-        return a_start <= b_end and b_start <= a_end
+
+def _ingredient_names(recipe: ExtractedRecipe) -> set[str]:
+    return {re.sub(r"\s+", " ", (i.name or "").strip().casefold()) for i in recipe.ingredients if (i.name or "").strip()}
+
+
+def _contained(small: set, large: set) -> float:
+    return len(small & large) / min(len(small), len(large)) if small and large else 0.0
+
+
+def _method_overlap(a: ExtractedRecipe, b: ExtractedRecipe) -> float:
+    """How much of the shorter method text is found in the other one - a
+    partial reading (cut at a chunk edge) is contained in the full one, a
+    variant ("Apfelpfannkuchen") is written differently."""
+    texts = sorted((" ".join(s.instruction or "" for s in r.steps).casefold()[:2000] for r in (a, b)), key=len)
+    short, long = texts
+    if len(short) < 40:
+        return 0.0
+    matcher = difflib.SequenceMatcher(None, short, long, autojunk=False)
+    return sum(block.size for block in matcher.get_matching_blocks()) / len(short)
+
+
+def _same_recipe(a: ExtractedRecipe, b: ExtractedRecipe) -> bool:
+    """Two readings of one recipe from overlapping chunks. The titles may
+    drift a little ("mit Feta" / "mit Schafskäse") and so may the pages a
+    chunk names (printed page numbers); the ingredients and the method tell
+    a second reading from a neighbouring variant."""
+    gap = max(a.source_page_start, b.source_page_start) - min(a.source_page_end, b.source_page_end)
+    if gap > NEAR_PAGES:
+        return False
+    names_a, names_b = _ingredient_names(a), _ingredient_names(b)
+    if _titles_likely_same(a.title, b.title) and gap <= PAGE_SLIP:
+        # the same title close by - unless the ingredients clearly differ (two "Dressing"s);
+        # on pages that don't overlap the method has to match too ("Pfannkuchen" / "Apfelpfannkuchen")
+        if names_a and names_b and _contained(names_a, names_b) < 0.5:
+            return False
+        return gap <= 0 or _method_overlap(a, b) >= SAME_METHOD
+    if min(len(names_a), len(names_b)) < 2 or _contained(names_a, names_b) < 0.7:
+        return False
+    return _method_overlap(a, b) >= SAME_METHOD
+
+
+def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
+    """Removes duplicates caused by overlapping chunks (_same_recipe), keeping
+    the reading with more detail."""
+    results: list[ExtractedRecipe] = []
 
     from . import step_amounts
     for item in raw_recipes:
@@ -690,12 +674,7 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
 
         is_duplicate = False
         for existing in results:
-            same_title = _titles_likely_same(existing.title, recipe.title)
-            pages_overlap = overlaps(
-                existing.source_page_start, existing.source_page_end,
-                recipe.source_page_start, recipe.source_page_end,
-            )
-            if same_title and pages_overlap:
+            if _same_recipe(existing, recipe):
                 # Keep whichever version has more detail (more ingredients/steps),
                 # and prefer the wider page range either way (a chunk that only
                 # saw part of the recipe reports a narrower range than one that
@@ -723,9 +702,18 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
 def _first_alternative(ingredients) -> None:
     """"Butter oder Margarine" -> "Butter", note "oder Margarine" - for
     what slips past the prompt's rule."""
-    from .prep_notes import split_alternatives, with_note
+    from .prep_notes import _compound_end, complete_compounds, split_alternatives, with_note
     for ing in ingredients or []:
         if not isinstance(ing, dict) or not isinstance(ing.get("name"), str):
+            continue
+        if ing["name"].rstrip().endswith("-"):  # "frische Romano-" + note "oder Wachs-, grüne Bohnen"
+            rest = ing.get("note") or ""
+            end = _compound_end(rest)
+            if end:
+                ing["name"] = ing["name"].rstrip()[:-1] + end
+                ing["note"] = complete_compounds(rest, end)
+            else:  # can't tell: keep it readable as one
+                ing["name"], ing["note"] = f"{ing['name'].rstrip()} {rest}".strip(), None
             continue
         name, note = split_alternatives(ing["name"])
         if note:

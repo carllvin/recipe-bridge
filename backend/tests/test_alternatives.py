@@ -21,3 +21,19 @@ def test_extraction_keeps_only_the_first():
     first = recipe.ingredients[0]
     assert (first.name, first.note) == ("Butter", "oder Margarine, weich")
     assert recipe.ingredients[1].name == "Mehl" and not recipe.ingredients[1].note
+
+
+def test_shortened_compounds_are_written_out():
+    assert split_alternatives("frische Romano- oder Wachs-, grüne Bohnen") == (
+        "frische Romanobohnen", "oder Wachsbohnen, grüne Bohnen")
+    assert split_alternatives("Zitronen- oder Orangensaft") == ("Zitronensaft", "oder Orangensaft")
+    assert split_alternatives("Hokkaido- oder Butternusskürbis") == ("Hokkaidokürbis", "oder Butternusskürbis")
+    name, note = split_alternatives("Quitten- oder Xyzgelee")  # unknown end: kept whole, never "Quitten-"
+    assert note is None and not name.endswith("-")
+
+
+def test_a_name_the_ai_left_cut_off_is_completed():
+    raw = [{"title": "Bohnensalat", "steps": [{"instruction": "Mischen."}], "ingredients": [
+        {"amount": 400, "unit": "g", "name": "frische Romano-", "note": "oder Wachs-, grüne Bohnen", "step_index": 0}]}]
+    ing = ai_extractor._dedupe_recipes(raw)[0].ingredients[0]
+    assert (ing.name, ing.note) == ("frische Romanobohnen", "oder Wachsbohnen, grüne Bohnen")

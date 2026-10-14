@@ -315,7 +315,7 @@ def _process_video(url: str, images_dir: str) -> dict:
             if saved:
                 images[saved.pop("id")] = saved
     return {"pages": [{"page": 1, "text": info["text"]}], "images": images, "page_count": 1,
-            "metadata_title": info.get("title") or "", "toc_pages": [],
+            "metadata_title": info.get("title") or "",
             "source_tag": source_tag.slug(info.get("author") or "")}  # the channel
 
 
@@ -510,7 +510,6 @@ def process_url(url: str, images_dir: str, html: str | None = None,
         "images": images,
         "page_count": 1,
         "metadata_title": title,
-        "toc_pages": [],
-        "source_tag": source_tag.from_page(soup, page_url, recipe or stub),
+                "source_tag": source_tag.from_page(soup, page_url, recipe or stub),
         "url": url,  # the recipe page - also when a short link or a Pinterest pin led there
     }

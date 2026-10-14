@@ -67,6 +67,7 @@ def test_only_the_picked_pages_go_to_the_ai(tmp_path, monkeypatch):
 
     def extract(pages, **kw):
         seen["pages"] = [p["page"] for p in pages]
+        seen["units"] = kw.get("units")
         seen["marked"] = [p["page"] for p in pages if p["text"].startswith(recipe_picker.ONLY_COMPLETES)]
         return [ExtractedRecipe(id=f"r{n}", title=f"Rezept {n}", source_page_start=n, source_page_end=n)
                 for n in (6, 8, 20, 22)], TokenUsage()  # 8 and 22 start on a page sent only to complete
@@ -92,6 +93,7 @@ def test_only_the_picked_pages_go_to_the_ai(tmp_path, monkeypatch):
     job = _wait(api, job_id, "ready")
     assert seen["pages"] == [6, 7, 8, 20, 21, 22]  # each with the page after it
     assert seen["marked"] == [8, 22]
+    assert seen["units"] == [1, 4]  # the AI calls are cut where each picked recipe starts
     assert [r["title"] for r in job["recipes"]] == ["Rezept 6", "Rezept 20"]
 
 
@@ -146,3 +148,12 @@ def test_epub_table_of_contents(tmp_path):
     entries = recipe_picker.with_tokens(found, result["pages"], [])
     assert [e["recipe"] for e in entries] == [False, True, True, True, True, True]
     assert recipe_picker.worth_asking("epub", result, found)
+
+
+def test_picked_recipes_are_never_read_twice():
+    from app.ai_extractor import _chunk_pages
+    pages = [{"page": n, "text": "x"} for n in range(1, 31)]
+    units = list(range(1, 31, 3))  # ten recipes of three pages each
+    chunks = [[p["page"] for p in c] for c in _chunk_pages(pages, units=units)]
+    assert sum(len(c) for c in chunks) == 30  # no page twice
+    assert all(c[0] in units for c in chunks) and all(len(c) <= 12 for c in chunks)

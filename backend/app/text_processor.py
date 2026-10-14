@@ -43,7 +43,7 @@ def process_text(text: str) -> dict:
     pages = split_pages(text)
     if not pages:
         raise ValueError("The text is empty.")
-    return {"pages": pages, "images": {}, "page_count": len(pages), "metadata_title": "", "toc_pages": []}
+    return {"pages": pages, "images": {}, "page_count": len(pages), "metadata_title": ""}
 
 
 def rtf_to_text(path: str) -> str:
