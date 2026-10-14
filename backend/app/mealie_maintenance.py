@@ -39,16 +39,21 @@ DUPLICATE_TOOLS = {"ingredients_review": ("food", "foods_duplicates"), "units_re
 # ---------- reading ----------
 
 def fetch_recipes_full(client) -> list[dict]:
-    """Every recipe in full - several requests at a time."""
+    """Every recipe in full - several requests at a time; the ones Mealie
+    reports unchanged (updatedAt) come from the last read (recipe_cache.py)."""
     from concurrent.futures import ThreadPoolExecutor
+    from . import recipe_cache
     from .tandoor_helpers import PARALLEL_READS
 
     def one(slug):
         resp = client.get(f"/recipes/{slug}")
         return resp.json() if resp.status_code == 200 else None
-    slugs = [item["slug"] for item in mealie_client._paged(client, "/recipes")]
-    with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
-        return [r for r in pool.map(one, slugs) if r is not None]
+
+    def fetch(todo):
+        with ThreadPoolExecutor(max_workers=PARALLEL_READS) as pool:
+            return [r for r in pool.map(one, [item["slug"] for item in todo]) if r is not None]
+    overview = [item for item in mealie_client._paged(client, "/recipes") if item.get("slug")]
+    return recipe_cache.read("mealie", overview, key=lambda r: r["slug"], version=version_of, fetch=fetch)
 
 
 def used_ids(recipes) -> dict[str, dict]:
@@ -96,7 +101,15 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
     """compute() plus what lets the tools read less later (like health.py
     for Tandoor): each recipe's version (updatedAt) and how many recipes use
     each ingredient, unit and tag."""
-    recipes = fetch_recipes_full(client)
+    import time
+    from .health import _read_parallel
+    started, timings = time.monotonic(), {}
+    read = _read_parallel(timings, {
+        "recipes": lambda: fetch_recipes_full(client),
+        **{entity: (lambda e=entity: mealie_client.fetch_all_items(client, e)) for entity in ENTITY_PATHS},
+    })
+    recipes = read["recipes"]
+    lists = {entity: read[entity] for entity in ENTITY_PATHS}
     from . import source_index
     source_index.rebuild((r.get("orgURL"), r.get("name", "")) for r in recipes)  # duplicates by address
     try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
@@ -104,10 +117,11 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
         cook_today.save_index([mealie_plan.as_tandoor(r) for r in recipes])
     except Exception:  # noqa: BLE001
         log.exception("Saving the recipe index failed")
-    lists = {entity: mealie_client.fetch_all_items(client, entity) for entity in ENTITY_PATHS}
     used = used_ids(recipes)
+    began = time.monotonic()
     weak = photo_quality.problems_of({r["slug"]: photo_quality.mealie_address(r) for r in recipes
                                       if photo_quality.mealie_address(r)}, photo_quality.fetcher(client))
+    timings["photos"] = time.monotonic() - began
 
     def recipe_items(matches):
         return [{"key": r["slug"], "name": r.get("name", ""), "recipe_id": r["slug"]}
@@ -126,6 +140,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
         **mealie_tools.metric_items(recipes, lists["food"]),
     }
     versions = {r["slug"]: version_of(r) for r in recipes}
+    log.info("Collection overview (Mealie): %s, total %.1f s",
+             ", ".join(f"{name} {seconds:.1f} s" for name, seconds in timings.items()), time.monotonic() - started)
     return {"recipes_total": len(recipes), "foods_used": len(used["food"])}, items, versions, {"usage": used}
 
 

@@ -4039,7 +4039,14 @@ if ('serviceWorker' in navigator) {
   el('more-way-folder').textContent = APP_CONFIG.watch_dir
     ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();
-  setInterval(checkTandoor, 15000);
+  whileVisible(checkTandoor, 15000);
   updateInboxBadge();
-  setInterval(updateInboxBadge, 20000);
+  whileVisible(updateInboxBadge, 20000);
 })();
+
+// Regular checks pause while the page isn't visible (background tab, locked
+// phone) and run once right away when it is shown again.
+function whileVisible(fn, ms) {
+  setInterval(() => { if (!document.hidden) fn(); }, ms);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) fn(); });
+}

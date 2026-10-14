@@ -15,6 +15,12 @@
 - Collection overview (Tandoor) faster: every list is read once instead of
   up to three times, the lists at the same time, new photos checked six at
   a time; the log shows how long each part took
+- After applying a change to ingredients, units or tags only the recipes
+  using them are read again – not the whole collection
+- Mealie: the overview reads only recipes changed since its last read, the
+  lists at the same time
+- Background checks (recipe manager reachable, review counter) pause while
+  the app isn't visible
 - Removed: the tile **Contradictions** (recipe doctor) – it flagged too
   many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;

@@ -52,76 +52,22 @@ def fetch_recipes_full(client: httpx.Client, ids) -> list[dict]:
     return [r for r in found if r is not None]
 
 
-# ---------- the collection read once, then only what changed ----------
-#
-# Every full read of the collection (the Maintain overview, tools without an
-# overview) used to fetch every recipe again. Full recipes are kept in the
-# data folder with their "updated_at"; a recipe Tandoor reports unchanged is
-# taken from there. Changes Tandoor doesn't stamp on the recipe (an
-# ingredient renamed or merged) are why the copy is dropped after an applied
-# change to ingredients, units or tags, and why once a day everything is read
-# fresh.
-
-CACHE_MAX_AGE = 24 * 3600
-_cache_lock = __import__("threading").Lock()
-
-
-def _cache_path() -> str:
-    import os
-    from .config import settings
-    return os.path.join(settings.data_dir, "recipe_cache.json")
-
+# ---------- the collection read once, then only what changed (recipe_cache.py) ----------
 
 def drop_recipe_cache() -> None:
-    import os
-    with _cache_lock:
-        try:
-            os.remove(_cache_path())
-        except OSError:
-            pass
-
-
-def _load_cache() -> dict:
-    import json
-    import time
-    try:
-        with open(_cache_path(), encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if time.time() - (data.get("created_at") or 0) > CACHE_MAX_AGE:
-        return {}
-    return data
-
-
-def _save_cache(recipes: list[dict], created_at: float) -> None:
-    import json
-    import os
-    with _cache_lock:
-        tmp = _cache_path() + ".tmp"
-        os.makedirs(os.path.dirname(tmp), exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"created_at": created_at, "recipes": {str(r["id"]): r for r in recipes}}, f, ensure_ascii=False)
-        os.replace(tmp, _cache_path())
+    from . import recipe_cache
+    recipe_cache.drop()
 
 
 def fetch_all_recipes_full(client: httpx.Client, max_recipes: int | None = None) -> list[dict]:
     """Every recipe's full detail (steps + ingredients + keywords) - the
     ones unchanged since the last full read come from its copy."""
-    import time
+    from . import recipe_cache
     overview = fetch_recipe_overview(client, max_recipes)
     if max_recipes:
         return fetch_recipes_full(client, [item["id"] for item in overview])
-    cache = _load_cache()
-    kept = cache.get("recipes") or {}
-    fresh_ids = [item["id"] for item in overview
-                 if not item.get("updated_at") or (kept.get(str(item["id"])) or {}).get("updated_at") != item["updated_at"]]
-    fresh = {str(r["id"]): r for r in fetch_recipes_full(client, fresh_ids)}
-    recipes = [fresh.get(str(item["id"])) or kept.get(str(item["id"])) for item in overview]
-    recipes = [r for r in recipes if r is not None]
-    log.info("Collection read: %d recipe(s) fetched, %d unchanged from the last read", len(fresh), len(recipes) - len(fresh))
-    _save_cache(recipes, cache.get("created_at") or time.time())
-    return recipes
+    return recipe_cache.read("tandoor", overview, key=lambda r: r["id"], version=lambda r: r.get("updated_at"),
+                             fetch=lambda todo: fetch_recipes_full(client, [item["id"] for item in todo]))
 
 
 def compute_usage_maps(recipes_full: list[dict]) -> dict[str, dict[int, int]]:
