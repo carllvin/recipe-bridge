@@ -149,3 +149,34 @@ def test_mealie(monkeypatch):
     assert [t["name"] for t in soup["tags"]] == ["Fisch"]
     assert fake.recipes["brot"]["recipeServings"] == 8
     assert all([c["name"] for c in r["recipeCategory"]] == ["Alltag"] for r in fake.recipes.values())
+
+
+def test_ungrouped_tags_into_a_group(kitchen, monkeypatch):
+    kitchen.add("keyword", {"id": 40, "name": "Quelle", "numchild": 1})
+    kitchen.add("keyword", {"id": 41, "name": "nytcooking", "parent": 40})
+    kitchen.add("keyword", {"id": 42, "name": "einfachkochen"})
+    kitchen.add("keyword", {"id": 43, "name": "emmikochteinfach"})
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "group_tags", "tags": "ungrouped", "group": "Quelle"}]
+    turn = say("Füge alle Tags ohne Gruppe der Gruppe Quelle hinzu")
+    assert ai.seen[0]["tag_groups"] == ["Quelle"]
+    (s,) = turn["suggestions"]
+    # Fisch, Test and the two new ones - not Quelle itself, not nytcooking (in it already)
+    assert {t["name"] for t in s["detail"]["tags"]} == {"einfachkochen", "emmikochteinfach", "Fisch", "Test"}
+    assert s["summary"] == "tags: 4 into the group 'Quelle'"
+    assert apply(turn).status == "applied"
+    assert {kitchen.db["keyword"][k].get("parent") for k in (20, 21, 42, 43)} == {40}
+
+
+def test_named_tags_into_a_new_group(kitchen, monkeypatch):
+    kitchen.add("keyword", {"id": 42, "name": "einfachkochen"})
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "group_tags", "tags": ["einfachkochen", "Gibtsnicht"], "group": "Quelle"},
+                  {"type": "group_tags", "tags": ["einfachkochen"], "group": "Quelle"}]
+    turn = say("einfachkochen in die Gruppe Quelle")
+    assert turn["problems"] == ["no tag called 'Gibtsnicht'"]
+    (s,) = turn["suggestions"]
+    assert s["summary"] == "tags: 1 into the group 'Quelle' (new)"
+    assert apply(turn).status == "applied"
+    group = next(k for k in kitchen.db["keyword"].values() if k["name"] == "Quelle")
+    assert kitchen.db["keyword"][42]["parent"] == group["id"]

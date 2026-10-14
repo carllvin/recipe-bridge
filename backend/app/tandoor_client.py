@@ -473,6 +473,46 @@ def fetch_all_keyword_names(client: httpx.Client, max_pages: int = 10) -> list[s
 
 # ---------- Duplicate-name diagnostics (food/unit/keyword) ----------
 
+PARALLEL_PAGES = 4  # pages of a long list read at the same time
+MAX_LIST_PAGES = 200
+
+
+def fetch_pages(client: httpx.Client, path: str, params: dict | None = None) -> list[dict]:
+    """Every entry of a paged Tandoor list. The first page tells how many
+    there are; the other pages are then read several at a time instead of
+    one after the other (Tandoor's ingredient and conversion lists are slow
+    per page)."""
+    from concurrent.futures import ThreadPoolExecutor
+    params = {"page_size": 200, **(params or {})}
+
+    def page(number=None):
+        resp = client.get(path, params={**params, "page": number} if number else params)
+        resp.raise_for_status()
+        return resp.json()
+    data = page()
+    if not isinstance(data, dict):
+        return data
+    items = list(data.get("results") or [])
+    if not data.get("next") or not items:
+        return items
+    pages = min(-(-(data.get("count") or 0) // len(items)), MAX_LIST_PAGES)
+    if pages < 2:  # no count - follow the links
+        url = data["next"]
+        for _ in range(MAX_LIST_PAGES):
+            resp = client.get(url)
+            resp.raise_for_status()
+            more = resp.json()
+            items.extend(more.get("results") or [])
+            url = more.get("next")
+            if not url:
+                break
+        return items
+    with ThreadPoolExecutor(max_workers=PARALLEL_PAGES) as pool:
+        for more in pool.map(page, range(2, pages + 1)):
+            items.extend(more.get("results") or [])
+    return items
+
+
 def fetch_all_items(client: httpx.Client, endpoint: str, max_pages: int = 30) -> list[dict]:
     """Loads (paginated) all {"id", "name"} objects from a Tandoor list endpoint
     (e.g. 'food', 'unit', 'keyword'). Generic version of fetch_all_recipe_names /

@@ -22,6 +22,7 @@ from .config import settings
 log = logging.getLogger("recipe-bridge")
 
 MAX_NEW_PER_RUN = 200
+PARALLEL_PHOTOS = 6
 MEASURE_SIDE = 512
 # Thresholds (0-255 grey values); deliberately conservative - only clear cases.
 DARK_BELOW = 60
@@ -92,18 +93,20 @@ def problems_of(photos: dict, fetch) -> dict:
     """photos: {key: photo address}; fetch(address) -> bytes. Returns
     {key: [problems]} for the measured photos with problems - from the cache,
     measuring up to MAX_NEW_PER_RUN new ones."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def problems(address):
+        try:
+            return measure(fetch(address))["problems"]
+        except Exception as exc:  # noqa: BLE001 - a photo that can't be read is just skipped
+            log.info("Photo %s not measured: %s", address, exc)
+            return []
     with _lock:
         cache = _load()
-        new = 0
-        for address in photos.values():
-            if address in cache or new >= MAX_NEW_PER_RUN:
-                continue
-            new += 1
-            try:
-                cache[address] = measure(fetch(address))["problems"]
-            except Exception as exc:  # noqa: BLE001 - a photo that can't be read is just skipped
-                log.info("Photo %s not measured: %s", address, exc)
-                cache[address] = []
+        todo = list(dict.fromkeys(a for a in photos.values() if a not in cache))[:MAX_NEW_PER_RUN]
+        new = len(todo)
+        with ThreadPoolExecutor(max_workers=PARALLEL_PHOTOS) as pool:  # loading is the slow part
+            cache.update(zip(todo, pool.map(problems, todo)))
         if new:
             # forget photos that are gone (replaced or deleted)
             current = set(photos.values())

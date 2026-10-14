@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, recipe_doctor, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
+from . import recipe_picker, app_settings, apply_queue, diagnostics, source_index, source_tag, image_steps, auth, target, cook_feedback, cook_today, db_chat, guest_menu, meal_prep, seasonal, site_scan, tools_recipe_details, health, maintenance, undo, ignored, image_gen, import_matching, jobs, llm_provider, mealie_maintenance, migration, recipe_amounts, shopping_text, notify, usage_log, watcher, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_meal_plan, tools_ingredients, tools_new_recipes, tools_recipes, tools_tag_groups, tools_tags, tools_units, tools_unused
 from .ai_extractor import estimate_tokens, extract_each_as_batch, extract_recipes_from_pages, guess_cookbook_title
 from .config import settings, get_ui_language_code
 from .epub_processor import SUPPORTED_EPUB_EXTENSIONS, process_epub
@@ -244,6 +244,17 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             jobs.save_job(job)
 
         existing_tags = _fetch_existing_tags()
+        pick_starts = None  # the pages a picked recipe starts on
+        if resume is None and not job.source and not single_recipe:
+            picked = _pick_recipes(job, doc_type, result, existing_tags)
+            if picked is False:
+                return
+            if picked is not None:
+                picked_pages, pick_starts = picked
+                result = {**result, "pages": picked_pages, "toc_pages": []}
+                kept = {p["page"] for p in picked_pages}
+                job.images = {iid: info for iid, info in job.images.items() if info.get("page") in kept}
+                jobs.save_job(job)
         toc_pages = result.get("toc_pages") if settings.toc_aware_chunking else None
         if single_recipe and result["pages"]:
             first = result["pages"][0]
@@ -270,6 +281,11 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
                                                   result=_keepable(result)),
             batch_ref=(resume or {}).get("ref"),
         )
+        if pick_starts:  # a recipe starting on a page sent only to complete the one before wasn't picked
+            dropped = [r.title for r in recipes if r.source_page_start not in pick_starts]
+            recipes = [r for r in recipes if r.source_page_start in pick_starts]
+            if dropped:
+                log.info("Import %s: left out (not picked): %s", job.id, ", ".join(dropped))
         if doc_type == "url":
             for recipe in recipes:  # the recipe page, also behind a short link or a Pinterest pin
                 recipe.source_url = result.get("url") or source_paths[0]
@@ -420,6 +436,69 @@ def _go_ahead(job, estimate: dict) -> bool:
     if job.status == "confirm":
         job.status = "cancelled"
     return False
+
+
+PICK_WAIT_SECONDS = 24 * 3600
+
+
+def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple[list[dict], set[int]] | bool | None:
+    """A cookbook's recipes to pick before the AI reads it (recipe_picker.py):
+    waits for POST /api/jobs/{id}/pick. (The picked pages, the pages their
+    recipes start on) - None for the whole book (nothing to pick, or "all"),
+    False when cancelled."""
+    found, source = recipe_picker.entries(result)
+    if not recipe_picker.worth_asking(doc_type, result, found):
+        return None
+    try:
+        with target.client().get_client() as client:
+            existing = target.client().fetch_all_recipe_names(client)
+    except Exception as exc:  # noqa: BLE001 - the list just has no "in your collection" marks then
+        log.info("Recipe names for the pick list not loaded: %s", exc)
+        existing = []
+    job.pick = {"source": source, "entries": recipe_picker.with_tokens(found, result["pages"], existing),
+                **recipe_picker.estimate_basis(result["pages"], existing_tags),
+                "page_count": len(result["pages"]),
+                "whole_total": estimate_tokens(result["pages"], existing_tags=existing_tags)["total"]}
+    job.status = "pick"
+    job.progress_label = None
+    jobs.save_job(job)
+    log.info("Import %s: %d recipe(s) to pick from (%s)", job.id, len(found), source)
+    until = time.monotonic() + PICK_WAIT_SECONDS
+    while job.status == "pick" and time.monotonic() < until:
+        time.sleep(0.5)
+    if job.status == "pick":
+        job.status = "cancelled"
+    if job.status != "processing":
+        return False
+    entries, job.pick = job.pick["entries"], None
+    if job.picked is None:
+        return None
+    pages, starts = recipe_picker.picked_pages(entries, set(job.picked), result["pages"])
+    log.info("Import %s: %d of %d recipe(s) picked - %d of %d page(s) go to the AI", job.id, len(job.picked),
+             len(entries), len(pages), len(result["pages"]))
+    return pages, starts
+
+
+@app.post("/api/jobs/{job_id}/pick")
+async def pick_recipes(job_id: str, body: dict = Body(...)):
+    """{"ids": [...]} the entries to read, {"all": true} the whole book, or
+    {"cancel": true} - the answer to a cookbook's pick list."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.status != "pick":
+        raise HTTPException(409, "This import isn't waiting for a pick.")
+    if body.get("cancel"):
+        job.status = "cancelled"
+    else:
+        ids = None if body.get("all") else [str(i) for i in body.get("ids") or []]
+        if ids is not None and not ids:
+            raise HTTPException(400, "Pick at least one recipe.")
+        job.picked = ids
+        job.status = "processing"
+        job.progress_label = "Reading the picked recipes …"
+    jobs.save_job(job)
+    return {"status": job.status}
 
 
 @app.post("/api/jobs/{job_id}/confirm")
@@ -1570,7 +1649,6 @@ _TOOL_SCANS = {
     "conversions": tools_conversions.run_scan,
     "recipes_restructure": recipe_restructure.run_scan,
     "recipes_amounts": recipe_amounts.run_scan,
-    "recipes_doctor": recipe_doctor.run_scan,
     "meal_plan": tools_meal_plan.run_scan,
     "recipes_servings": tools_recipe_details.run_servings_scan,
     "recipes_images": tools_recipe_details.run_images_scan,
@@ -1597,7 +1675,6 @@ _TOOL_APPLY = {
     "conversions": tools_conversions.apply_suggestion,
     "recipes_restructure": recipe_restructure.apply_suggestion,
     "recipes_amounts": recipe_amounts.apply_suggestion,
-    "recipes_doctor": recipe_doctor.apply_suggestion,
     "db_chat": db_chat.apply_suggestion,
     "meal_plan": tools_meal_plan.apply_suggestion,
     "recipes_servings": tools_recipe_details.apply_servings_suggestion,
@@ -1949,11 +2026,6 @@ async def db_chat_message(body: dict = Body(...)):
 @app.post("/api/tools/recipes/photos")
 async def start_recipes_photos():
     return _start_tool_job("recipes_photos")
-
-
-@app.post("/api/tools/recipes/doctor")
-async def start_recipes_doctor():
-    return _start_tool_job("recipes_doctor")
 
 
 @app.post("/api/tools/recipes/amounts")

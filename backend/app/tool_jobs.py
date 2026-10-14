@@ -41,6 +41,9 @@ def _write(job: ToolJob) -> None:
         log.warning("Could not persist tool job %s: %s", job.id, exc)
 
 
+REMOVED_TOOLS = {"recipes_doctor"}
+
+
 def load_tool_jobs() -> int:
     """Called once at startup. A run that was still scanning when the app
     stopped can't continue (its thread is gone) - it's marked cancelled, so
@@ -56,6 +59,9 @@ def load_tool_jobs() -> int:
                 job = ToolJob.model_validate_json(f.read())
         except Exception as exc:  # noqa: BLE001
             log.warning("Skipping unreadable tool job file %s: %s", name, exc)
+            continue
+        if job.tool in REMOVED_TOOLS:  # its suggestions can't be applied any more
+            os.remove(os.path.join(_dir(), name))
             continue
         if job.status == "scanning":
             job.status = "cancelled"

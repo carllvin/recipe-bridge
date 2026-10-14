@@ -159,4 +159,5 @@ pages and the fridge photo the model must read images (e.g. `qwen2.5vl`,
 - The top bar shows what the current import costs, Maintain the usage of
   the last 30 days per tool; a **monthly budget** there stops automatic
   runs when it's used up.
-- Only upload the pages that contain recipes rather than a whole book.
+- With a cookbook, pick only the recipes you want before the AI reads it –
+  the pages of the others aren't sent.

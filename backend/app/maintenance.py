@@ -29,7 +29,6 @@ METRIC_TOOLS = {
     "recipes_not_translated": ("recipes_translate", {}),
     "recipes_need_restructure": ("recipes_restructure", {}),
     "recipes_amounts_missing": ("recipes_amounts", {}),
-    "recipes_inconsistent": ("recipes_doctor", {}),
     "recipes_without_season": ("tags_season", {}),
     "recipes_without_source": ("recipes_source", {}),
     "recipes_few_tags": ("tags_suggest_more", {}),

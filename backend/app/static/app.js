@@ -714,6 +714,7 @@ function pollJob() {
         return;
       }
 
+      if (job.status === 'pick') { showBookPick(job); return; }
       if (job.status === 'confirm') { showImportEstimate(job); return; }
       if (job.status === 'cancelled') { leaveCancelledImport(); return; }
       updateProgressUI(job);
@@ -775,6 +776,100 @@ async function answerImportEstimate(start, batch = false) {
 el('confirm-batch').addEventListener('click', () => answerImportEstimate(true, true));
 el('confirm-start').addEventListener('click', () => answerImportEstimate(true));
 el('confirm-cancel').addEventListener('click', () => answerImportEstimate(false));
+
+// A cookbook: its recipes (bookmarks, table of contents or pages that look
+// like a recipe - found without AI) to pick before the AI reads it; only the
+// picked pages are sent. Ticked at first: entries whose pages look like a
+// recipe (not the foreword or index) and that aren't in the collection yet.
+const bookPick = { entries: [], picked: new Set(), info: null };
+
+function showBookPick(job) {
+  const info = job.pick || {};
+  bookPick.info = info;
+  bookPick.entries = info.entries || [];
+  bookPick.picked = new Set(bookPick.entries.filter((e) => e.recipe && !e.existing).map((e) => e.id));
+  el('processing-screen').querySelector('.spinner').classList.add('hidden');
+  el('processing-text').classList.add('hidden');
+  el('progress-track').classList.add('hidden');
+  const intro = { bookmarks: 'bookPickFromBookmarks', contents: 'bookPickFromContents' }[info.source] || 'bookPickFromPages';
+  el('book-pick-intro').textContent = tf(intro, { n: bookPick.entries.length, pages: info.page_count || job.page_count });
+  el('book-pick-filter').value = '';
+  renderBookPick();
+  el('book-pick').classList.remove('hidden');
+}
+
+function bookPickVisible() {
+  const q = el('book-pick-filter').value.trim().toLowerCase();
+  return bookPick.entries.filter((e) => !q || `${e.title} ${e.group || ''}`.toLowerCase().includes(q));
+}
+
+function renderBookPick() {
+  const visible = bookPickVisible();
+  let group = null;
+  el('book-pick-list').innerHTML = visible.map((e) => {
+    const head = e.group && e.group !== group ? `<div class="pick-group">${escapeHtml(e.group)}</div>` : '';
+    group = e.group;
+    const pages = e.start === e.end ? tf('bookPickPage', { n: e.start }) : tf('bookPickPages', { from: e.start, to: e.end });
+    const badge = e.existing ? `<span class="pick-badge">${escapeHtml(t('bookPickExisting'))}</span>` : '';
+    return `${head}<label class="pick-row${e.existing ? ' is-existing' : ''}"><input type="checkbox" data-id="${escapeHtml(e.id)}"${bookPick.picked.has(e.id) ? ' checked' : ''} />
+      <div class="pick-main"><div class="pick-name">${escapeHtml(e.title)}${badge}</div><div class="pick-meta">${escapeHtml(pages)}</div></div></label>`;
+  }).join('');
+  el('book-pick-all').checked = visible.length > 0 && visible.every((e) => bookPick.picked.has(e.id));
+  updateBookPickHint();
+}
+
+// Roughly what the picked recipes cost, counted like the "large import"
+// estimate: the picked pages (each with the page after it) once, the
+// answers as a share of them, the instructions once per AI call.
+function updateBookPickHint() {
+  const info = bookPick.info || {};
+  const chosen = bookPick.entries.filter((e) => bookPick.picked.has(e.id));
+  const pages = new Set();
+  chosen.forEach((e) => { for (let n = e.start; n <= e.end + 1; n += 1) pages.add(String(n)); });
+  const text = [...pages].reduce((sum, n) => sum + ((info.page_tokens || {})[n] || 0), 0);
+  const calls = pages.size ? Math.ceil(pages.size / (info.pages_per_call || 10)) : 0;
+  const prompt = calls ? (info.prompt_first || 0) + (calls - 1) * (info.prompt_next || 0) : 0;
+  const total = Math.round(text * (1 + (info.output_share || 0.6)) + prompt);
+  const fmt = (n) => Number(n || 0).toLocaleString(LANG_CODE);
+  el('book-pick-hint').textContent = chosen.length
+    ? tf('bookPickEstimate', { total: fmt(total), whole: fmt(info.whole_total) }) : '';
+  el('book-pick-start').disabled = !chosen.length;
+  el('book-pick-start').textContent = tf('bookPickStart', { n: chosen.length });
+}
+
+el('book-pick-list').addEventListener('change', (ev) => {
+  const box = ev.target.closest('input[data-id]');
+  if (!box) return;
+  if (box.checked) bookPick.picked.add(box.dataset.id); else bookPick.picked.delete(box.dataset.id);
+  el('book-pick-all').checked = bookPickVisible().every((e) => bookPick.picked.has(e.id));
+  updateBookPickHint();
+});
+el('book-pick-filter').addEventListener('input', renderBookPick);
+el('book-pick-all').addEventListener('change', () => {
+  const on = el('book-pick-all').checked;
+  bookPickVisible().forEach((e) => (on ? bookPick.picked.add(e.id) : bookPick.picked.delete(e.id)));
+  renderBookPick();
+});
+
+async function answerBookPick(body) {
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/pick`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  } catch (e) {
+    el('book-pick-hint').textContent = `⚠️ ${e.message}`;
+    return;
+  }
+  el('book-pick').classList.add('hidden');
+  if (body.cancel) { leaveCancelledImport(); return; }
+  el('processing-screen').querySelector('.spinner').classList.remove('hidden');
+  el('processing-text').classList.remove('hidden');
+  pollJob();
+}
+el('book-pick-start').addEventListener('click', () => answerBookPick({ ids: [...bookPick.picked] }));
+el('book-pick-whole').addEventListener('click', () => answerBookPick({ all: true }));
+el('book-pick-cancel').addEventListener('click', () => answerBookPick({ cancel: true }));
 
 function leaveCancelledImport() {
   clearTimeout(state.pollTimer);
@@ -1960,7 +2055,6 @@ const TOOL_TITLE_KEYS = {
   recipes_translate: 'toolRecipesTranslateTitle',
   recipes_restructure: 'toolRecipesRestructureTitle',
   recipes_amounts: 'toolRecipesAmountsTitle',
-  recipes_doctor: 'toolRecipesDoctorTitle',
   recipes_servings: 'toolRecipesServingsTitle',
   recipes_images: 'toolRecipesImagesTitle',
   recipes_photos: 'toolRecipesPhotosTitle',
@@ -1983,7 +2077,7 @@ async function loadRecentImports() {
     if (!items.length) { box.classList.add('hidden'); return; }
     el('recent-imports-list').innerHTML = items.map((j) => {
       const status = j.status === 'processing' ? t('recentImportRunning')
-        : j.status === 'confirm' ? t('recentImportConfirm')
+        : j.status === 'confirm' || j.status === 'pick' ? t('recentImportConfirm')
         : j.status === 'error' ? t('recentImportError')
         : tf('recentImportLine', { recipes: j.recipes, imported: j.imported });
       return `<div class="new-recipes-open-job"><span><strong>${escapeHtml(j.filename)}</strong> · ${escapeHtml(status)} · ${escapeHtml(shortWhen(j.created_at))}</span>
@@ -2013,7 +2107,7 @@ const INBOX_GROUPS = [
   { key: 'merges', icon: '🔀', match: (i) => i.entity || i.kind === 'merge' || i.kind === 'rename' },
   { key: 'details', icon: '🥗', match: (i) => i.kind === 'enrich' || i.kind === 'set_plural' },
   { key: 'conversions', icon: '⚖️', match: (i) => i.kind === 'conversion' },
-  { key: 'recipes', icon: '🧩', match: (i) => ['restructure_recipe', 'translate_recipe', 'amounts_in_steps', 'doctor_fix'].includes(i.kind) },
+  { key: 'recipes', icon: '🧩', match: (i) => ['restructure_recipe', 'translate_recipe', 'amounts_in_steps'].includes(i.kind) },
   { key: 'tags', icon: '🏷️', match: (i) => i.kind === 'season' || i.kind === 'suggest_tags' || i.kind === 'source_tag' },
   { key: 'other', icon: '•', match: () => true },
 ];
@@ -2495,7 +2589,6 @@ const HEALTH_METRICS = [
   { key: 'recipes_not_translated', tool: 'recipes_translate', endpoint: '/api/tools/recipes/translate' },
   { key: 'recipes_need_restructure', tool: 'recipes_restructure', endpoint: '/api/tools/recipes/restructure' },
   { key: 'recipes_amounts_missing', tool: 'recipes_amounts', endpoint: '/api/tools/recipes/amounts' },
-  { key: 'recipes_inconsistent', tool: 'recipes_doctor', endpoint: '/api/tools/recipes/doctor' },
   { key: 'recipes_without_season', tool: 'tags_season', endpoint: '/api/tools/tags/season' },
   { key: 'recipes_without_source', tool: 'recipes_source', endpoint: '/api/tools/recipes/source' },
   { key: 'recipes_few_tags', tool: 'tags_suggest_more', endpoint: '/api/tools/tags/suggest-more' },
@@ -2517,7 +2610,7 @@ const HEALTH_GROUPS = [
   { key: 'units', titleKey: 'healthGroupUnits', metrics: ['units_duplicates', 'units_unused'],
     tool: { tool: 'units_review', endpoint: '/api/tools/units/review', titleKey: 'groupToolUnits', descKey: 'toolUnitsDesc' } },
   { key: 'recipes', titleKey: 'healthGroupRecipes',
-    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_inconsistent', 'recipes_without_season', 'recipes_without_source', 'recipes_few_tags',
+    metrics: ['recipes_not_translated', 'recipes_need_restructure', 'recipes_amounts_missing', 'recipes_without_season', 'recipes_without_source', 'recipes_few_tags',
       'recipes_without_servings', 'recipes_without_image', 'recipes_weak_image'] },
   { key: 'tags', titleKey: 'healthGroupTags', metrics: ['keywords_ungrouped', 'keywords_unused'],
     tool: { tool: 'tags_cleanup', endpoint: '/api/tools/tags/cleanup', titleKey: 'groupToolRecipes', descKey: 'toolTagsCleanupDesc' } },
@@ -4041,7 +4134,14 @@ if ('serviceWorker' in navigator) {
   el('more-way-folder').textContent = APP_CONFIG.watch_dir
     ? tf('moreWayFolderOn', { dir: APP_CONFIG.watch_dir }) : t('moreWayFolderOff');
   checkTandoor();
-  setInterval(checkTandoor, 15000);
+  whileVisible(checkTandoor, 15000);
   updateInboxBadge();
-  setInterval(updateInboxBadge, 20000);
+  whileVisible(updateInboxBadge, 20000);
 })();
+
+// Regular checks pause while the page isn't visible (background tab, locked
+// phone) and run once right away when it is shown again.
+function whileVisible(fn, ms) {
+  setInterval(() => { if (!document.hidden) fn(); }, ms);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) fn(); });
+}

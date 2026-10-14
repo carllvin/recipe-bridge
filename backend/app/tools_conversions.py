@@ -57,17 +57,7 @@ def _key(name) -> str:
 
 
 def _fetch_all(client, endpoint) -> list[dict]:
-    items, url, params = [], f"/{endpoint}/", {"page_size": 200}
-    for _ in range(200):
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        items.extend(data.get("results", data) if isinstance(data, dict) else data)
-        url = data.get("next") if isinstance(data, dict) else None
-        if not url:
-            break
-        params = None
-    return items
+    return tandoor_client.fetch_pages(client, f"/{endpoint}/")
 
 
 def _ref_id(ref):
@@ -89,7 +79,7 @@ def recipe_pairs(recipes) -> dict[tuple[int, int], int]:
 
 
 def find_missing(client, pairs, pending_nutrition=None, food_names=None,
-                 respect_ignored=True) -> tuple[list[ToolSuggestion], list[dict]]:
+                 respect_ignored=True, lists=None) -> tuple[list[ToolSuggestion], list[dict]]:
     """The no-AI part: (ready general metric conversions, pairs that need an
     AI estimate). Also used by the health overview to count what's missing.
 
@@ -98,14 +88,16 @@ def find_missing(client, pairs, pending_nutrition=None, food_names=None,
     need conversions too). food_names: food id -> name to show/ask with
     (e.g. the name after a pending rename). respect_ignored: leave out the
     pairs the user ignored in the health overview (off for the overview
-    itself, which filters them when read)."""
+    itself, which filters them when read). lists: {"foods", "units",
+    "conversions"} already read (the overview reads them once for all)."""
     skip = ignored.keys("missing_conversions") if respect_ignored else set()
     pending_nutrition = pending_nutrition or {}
     food_names = food_names or {}
-    foods = {f["id"]: f for f in tools_ingredients.fetch_all_foods_full(client)}
-    units = {u["id"]: u for u in _fetch_all(client, "unit")}
+    lists = lists or {}
+    foods = {f["id"]: f for f in lists.get("foods") or tools_ingredients.fetch_all_foods_full(client)}
+    units = {u["id"]: u for u in lists.get("units") or _fetch_all(client, "unit")}
     units_by_name = {_key(u["name"]): u for u in units.values()}
-    conversions = _fetch_all(client, CONVERSION_ENDPOINT)
+    conversions = lists["conversions"] if "conversions" in lists else _fetch_all(client, CONVERSION_ENDPOINT)
 
     # Pairs (food, unit) that are convertible already, either way round.
     direct = set()   # (food_id or None, unit_a, unit_b)

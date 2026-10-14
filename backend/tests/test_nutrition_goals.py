@@ -23,6 +23,8 @@ def test_weekly_plan_follows_the_goals(mealie, monkeypatch):  # noqa: F811
     by_slug = {r["name"]: r for r in mealie.recipes.values()}
     by_slug["Rindergulasch"]["nutrition"] = {"calories": "980 kcal", "proteinContent": "55 g"}
     by_slug["Linsensuppe"]["nutrition"] = {"calories": "420 kcal", "proteinContent": "24 g"}
+    for name in ("Rindergulasch", "Linsensuppe"):  # Mealie stamps every change
+        by_slug[name]["updatedAt"] = "2026-10-14T12:00:00"
     cook_today._rebuild()
     app_settings.update({"household": {"max_kcal": 700, "min_protein": 20, "goals": "2x Fisch pro Woche"}})
     ai = AI(monkeypatch)

@@ -86,3 +86,37 @@ def test_what_cannot_be_told_still_marks_stale(monkeypatch):
     monkeypatch.setattr(health, "_state", {**health._state, "changed_at": 0})
     health.settle("conversions", ToolSuggestion(id="x", kind="conversion", summary="", detail={}))
     assert health.cached()["stale"]
+
+
+def test_overview_reads_each_list_once(tandoor, caplog):
+    import logging
+    from collections import Counter
+    from app import health
+    tandoor.add("food", {"id": 1, "name": "Mehl"})
+    tandoor.add("unit", {"id": 1, "name": "g"})
+    tandoor.add("recipe", {"id": 1, "name": "Brot", "keywords": [], "steps": [
+        {"instruction": "Backen.", "ingredients": [{"food": {"id": 1}, "unit": {"id": 1}, "amount": 500}]}]})
+    with caplog.at_level(logging.INFO, logger="recipe-bridge"):
+        health.compute_now()
+    assert health.cached()["metrics"]["recipes_total"] == 1
+    lists = Counter(path for method, path in tandoor.requests if method == "GET" and path.count("/") == 2)
+    for path in ("/food/", "/unit/", "/keyword/", "/unit-conversion/"):
+        assert lists[path] == 1, (path, lists)
+    assert any("Collection overview:" in r.message and "foods" in r.message for r in caplog.records)
+
+
+def test_long_lists_read_page_by_page_at_once():
+    import httpx
+    items = [{"id": i, "name": f"F{i}"} for i in range(450)]
+    seen = []
+
+    def handler(request):
+        page, size = int(request.url.params.get("page", 1)), int(request.url.params["page_size"])
+        seen.append(page)
+        chunk = items[(page - 1) * size:page * size]
+        more = page * size < len(items)
+        return httpx.Response(200, json={"count": len(items), "results": chunk,
+                                         "next": f"http://tandoor/api/food/?page={page + 1}" if more else None})
+    client = httpx.Client(base_url="http://tandoor/api", transport=httpx.MockTransport(handler))
+    assert tandoor_client.fetch_pages(client, "/food/") == items
+    assert sorted(seen) == [1, 2, 3]

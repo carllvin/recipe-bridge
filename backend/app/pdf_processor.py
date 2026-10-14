@@ -80,6 +80,7 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
             }
 
     toc_pages = _extract_toc_pages(doc)
+    toc = _toc_entries(doc)
     doc.close()
 
     if ocr_page_count:
@@ -92,6 +93,8 @@ def process_pdf(pdf_path: str, images_dir: str, force_ocr: bool = False) -> dict
         "metadata_title": metadata_title,
         "metadata_author": metadata_author,
         "toc_pages": toc_pages,
+        "toc": toc,  # the bookmarks with their titles - the recipe list to pick from (recipe_picker.py)
+        "kind": "pdf",
     }
 
 
@@ -118,6 +121,15 @@ def _extract_toc_pages(doc: "fitz.Document") -> list[int]:
 
     pages = {entry[2] for entry in toc if len(entry) >= 3 and entry[2] >= 1}
     return sorted(pages)
+
+
+def _toc_entries(doc: "fitz.Document") -> list[dict]:
+    """[{"title", "page", "level"}] - the bookmarks in their order."""
+    try:
+        toc = doc.get_toc(simple=True)
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"level": e[0], "title": str(e[1]).strip(), "page": e[2]} for e in toc if len(e) >= 3 and e[2] >= 1]
 
 
 def build_text_with_page_markers(pages: list[dict]) -> str:

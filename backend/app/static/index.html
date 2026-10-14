@@ -466,6 +466,21 @@
       <div class="progress-track hidden" id="progress-track">
         <div class="progress-fill" id="progress-fill"></div>
       </div>
+      <section id="book-pick" class="pick-panel book-pick hidden">
+        <div class="pick-head"><h3 data-i18n="bookPickTitle">Which recipes should the AI read?</h3></div>
+        <p id="book-pick-intro" class="pick-status"></p>
+        <div class="pick-bar">
+          <input id="book-pick-filter" type="search" data-i18n-placeholder="healthFilter" placeholder="Filter …" />
+          <label><input id="book-pick-all" type="checkbox" /> <span data-i18n="toolSelectAll">Select all</span></label>
+        </div>
+        <div id="book-pick-list" class="pick-list"></div>
+        <div class="pick-foot">
+          <span id="book-pick-hint" class="settings-hint"></span>
+          <button id="book-pick-cancel" class="btn secondary" type="button" data-i18n="confirmCancel">Cancel</button>
+          <button id="book-pick-whole" class="btn secondary" type="button" data-i18n="bookPickWhole">Whole book</button>
+          <button id="book-pick-start" class="btn" type="button" disabled></button>
+        </div>
+      </section>
       <div id="confirm-box" class="confirm-box hidden">
         <h3 data-i18n="confirmTitle">A large import</h3>
         <p id="confirm-text"></p>

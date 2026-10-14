@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import cook_today, duplicates, migration, photo_quality, mealie_client, mealie_maintenance, source_index, source_tag, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_doctor, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
+from . import cook_today, duplicates, migration, photo_quality, mealie_client, mealie_maintenance, source_index, source_tag, target, tools_tag_groups, tools_unused, ignored, tools_recipe_details, recipe_amounts, recipe_restructure, tandoor_client, tool_jobs, tools_conversions, tools_ingredients, tools_recipes, tools_tags
 from .config import get_language_code, settings
 from .tandoor_helpers import fetch_all_recipes_full
 
@@ -107,6 +107,22 @@ def start_refresh() -> bool:
     return True
 
 
+def _read_parallel(timings: dict, reads: dict) -> dict:
+    """{name: read()} at the same time - the overview's lists don't depend
+    on each other. Each one's duration goes into timings (for the log)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def timed(name):
+        began = time.monotonic()
+        try:
+            return reads[name]()
+        finally:
+            timings[name] = time.monotonic() - began
+    with ThreadPoolExecutor(max_workers=len(reads)) as pool:
+        futures = {name: pool.submit(timed, name) for name in reads}
+        return {name: future.result() for name, future in futures.items()}
+
+
 def _unused_items(recipes, foods, units, keywords, unit_conversions) -> dict:
     used = tools_unused.used_ids(recipes)
     protected = {"unit": tools_unused.protected_unit_ids(foods.values(), unit_conversions)}
@@ -141,25 +157,38 @@ def _compute() -> None:
             _state["running"] = False
         return
     try:
+        timings = {}
         with tandoor_client.get_client() as client:
-            recipes = fetch_all_recipes_full(client)
-            foods = {f["id"]: f for f in tools_ingredients.fetch_all_foods_full(client)}
-            categories = tools_ingredients.fetch_supermarket_categories(client)
-            food_names = tools_tags.food_name_set(client)
+            # everything read once, the independent lists at the same time
+            read = _read_parallel(timings, {
+                "recipes": lambda: fetch_all_recipes_full(client),
+                "foods": lambda: tools_ingredients.fetch_all_foods_full(client),
+                "categories": lambda: tools_ingredients.fetch_supermarket_categories(client),
+                "units": lambda: tools_conversions._fetch_all(client, "unit"),
+                "keywords": lambda: tools_conversions._fetch_all(client, "keyword"),
+                "conversions": lambda: tools_conversions._fetch_all(client, tools_conversions.CONVERSION_ENDPOINT),
+                "books": lambda: migration._tandoor_books(client),  # recipe id -> its cookbooks, for the source tag
+            })
+            recipes, units, keywords = read["recipes"], read["units"], read["keywords"]
+            unit_conversions, books, categories = read["conversions"], read["books"], read["categories"]
+            foods = {f["id"]: f for f in read["foods"]}
+            food_names = tools_tags.food_name_set(client, read["foods"])
             used_foods = {
                 (ing.get("food") or {}).get("id")
                 for r in recipes for step in r.get("steps", []) for ing in step.get("ingredients", [])
             } - {None}
-            units = tools_conversions._fetch_all(client, "unit")
-            keywords = tools_conversions._fetch_all(client, "keyword")
-            unit_conversions = tools_conversions._fetch_all(client, "unit-conversion")
-            books = migration._tandoor_books(client)  # recipe id -> its cookbooks, for the source tag
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
             source_index.rebuild((r.get("source_url"), r.get("name", "")) for r in recipes)  # duplicates by address
+            began = time.monotonic()
             weak_photos = photo_quality.problems_of(
                 {str(r["id"]): r["image"] for r in recipes if r.get("image")}, photo_quality.fetcher(client))
+            timings["photos"] = time.monotonic() - began
+            began = time.monotonic()
             pairs = tools_conversions.recipe_pairs(recipes)
-            general, to_estimate = tools_conversions.find_missing(client, pairs, respect_ignored=False)
+            general, to_estimate = tools_conversions.find_missing(
+                client, pairs, respect_ignored=False,
+                lists={"foods": read["foods"], "units": units, "conversions": unit_conversions})
+            timings["conversions check"] = time.monotonic() - began
 
         expected = get_language_code(settings.output_language)
 
@@ -192,8 +221,6 @@ def _compute() -> None:
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
             "recipes_amounts_missing": recipe_items(recipe_amounts.needs_amounts),
-            "recipes_inconsistent": recipe_items(
-                lambda r, v=[f["name"] for f in foods.values()]: bool(recipe_doctor.findings(r, v))),
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),
             "recipes_without_source": recipe_items(
                 lambda r, store=source_tag.known(): source_tag.missing(
@@ -214,6 +241,8 @@ def _compute() -> None:
         # the conversions tool starts from these instead of reading every recipe
         _write(started, metrics, item_lists, recipe_versions,
                {"recipe_pairs": [[f, u, n] for (f, u), n in pairs.items()]})
+        log.info("Collection overview: %s, total %.1f s",
+                 ", ".join(f"{name} {seconds:.1f} s" for name, seconds in timings.items()), time.time() - started)
     except Exception as exc:  # noqa: BLE001
         log.exception("Health overview failed")
         _state["error"] = str(exc)
@@ -230,7 +259,7 @@ def _compute() -> None:
 
 RECIPE_KINDS = {
     "restructure_recipe": "recipes_need_restructure", "translate_recipe": "recipes_not_translated",
-    "amounts_in_steps": "recipes_amounts_missing", "doctor_fix": "recipes_inconsistent",
+    "amounts_in_steps": "recipes_amounts_missing",
     "season": "recipes_without_season", "suggest_tags": "recipes_few_tags", "source_tag": "recipes_without_source",
     "set_servings": "recipes_without_servings", "generate_image": "recipes_without_image",
     "enhance_image": "recipes_weak_image",
@@ -304,11 +333,15 @@ def _settled(metric: str, key: str, drops: set) -> bool:
 def settle(tool: str, suggestion) -> None:
     """Takes what an applied suggestion fixed off the tiles - or marks the
     overview stale when that can't be told."""
-    if suggestion.kind in ("merge", "rename", "delete_unused", "enrich", "food_category", "group_tags"):
-        # ingredients, units or tags changed inside recipes without Tandoor
-        # stamping them - the kept copy of the recipes is no longer right
-        from .tandoor_helpers import drop_recipe_cache
-        drop_recipe_cache()
+    if suggestion.kind in ("merge", "rename", "set_plural", "delete_unused", "enrich", "food_category", "group_tags"):
+        # ingredients, units or tags changed inside recipes without the
+        # recipe manager stamping them - the recipes using them are read again
+        from . import recipe_cache
+        changed = recipe_cache.changed_entities(tool, suggestion)
+        if changed is None:
+            recipe_cache.drop()
+        else:
+            recipe_cache.forget_using(*changed)
     drops = _drops(tool, suggestion)
     if drops is None:
         mark_changed()

@@ -18,6 +18,14 @@ recipe manager – "Tandoor" or "Mealie".
   overlapping chunks, so books with hundreds of pages work), finds each
   recipe with its page range, ingredients, steps, times, servings, tags and
   photo. Pictures embedded in a Word document become photo candidates.
+- **Pick the recipes first** – before the AI reads a cookbook (PDF from 15
+  pages, EPUB), the app lists its recipes **without AI**: from the PDF's
+  bookmarks or the EPUB's table of contents, otherwise the pages that look
+  like a recipe (lines like "200 g Mehl"). Only the picked recipes' pages go
+  to the AI, with a live estimate of the tokens next to the whole book's.
+  Ticked at first are the entries that look like a recipe and aren't in your
+  collection yet – not the foreword or the index. *Whole book* reads
+  everything as before; the watched folder always does.
 - **Photos of cookbook pages** – drop them in or, on the phone, take them one
   by one with the camera. They are collected first, can be reordered and
   removed, and are imported together; tick *"all photos show one single
@@ -93,7 +101,7 @@ the ingredient's note.
 
 With `TRANSLATE_RECIPES=false` recipes **keep the language they were written
 in** instead – the tools that improve recipes (amounts in the steps,
-revisions, contradictions) then write in that language too, and the *not in
+revisions) then write in that language too, and the *not in
 your language* tile and the translation in *Process new recipes* are left
 out.
 
@@ -165,7 +173,7 @@ grouped by kind:
   **recipe revisions** (one block of text split into steps, ingredients
   assigned to steps – with a before/after preview), **translations**,
   **tags & season**, **source tag** (site or cookbook author), **servings**, **photos**, **amounts in the steps**,
-  **contradictions** and **unused entries**. (The weekly plan is reviewed
+  and **unused entries**. (The weekly plan is reviewed
   and added on the 📅 Plan page itself.)
 - When an ingredient like *gemahlene Mandeln* is renamed to or merged into
   *Mandeln*, the preparation (*gemahlen*) goes into the note of every
@@ -201,7 +209,7 @@ grouped by kind:
     category, missing conversions, unused;
   - *Units*: possible duplicates, unused;
   - *Recipes*: not in your language, one block of text / all ingredients in
-    step 1, steps without amounts, contradictions, without a season, few
+    step 1, steps without amounts, without a season, few
     tags, without servings, without a photo, weak photos;
   - *Tags*: not in a tag group, unused.
 
@@ -220,19 +228,16 @@ grouped by kind:
   servings. A second AI pass proofreads each step as it will read; doubtful
   ones are marked ⚠️. Tandoor only – Mealie has no templates, and
   written-out amounts would be wrong once the servings change.
-- **Contradictions** (recipe doctor) – found without AI: an ingredient no
-  step mentions, a step naming an ingredient that isn't in the list, an
-  amount that can't be right (400 g salt for 4 servings), a time that
-  doesn't fit the method. Only for those, the AI proposes a fix; if it finds
-  a false alarm, the recipe goes on the tile's ignore list.
 - **Weak photos** – too dark, too bright, washed out, blurry or too small,
   measured from the pixels **without AI** (each photo once). Applying a
   suggestion improves the photo with the image AI (`IMAGE_GEN_ENABLED`).
 - **💬 Changes by chat** – ask in plain words: "every recipe with salmon gets
   the tag Fisch", "rename Paprika rot to rote Paprika", "put all soups into
-  the cookbook Winter", "which recipes have no photo?". The AI only picks
-  from a fixed set of actions (rename/merge ingredients, units, tags;
-  add/remove/delete tags; servings; cookbook; supermarket category; find)
+  the cookbook Winter", "all tags without a group into the group Quelle",
+  "which recipes have no photo?". The AI only picks from a fixed set of
+  actions (rename/merge ingredients, units, tags; add/remove/delete tags;
+  tags into a tag group (Tandoor); servings; cookbook; supermarket category;
+  find)
   and describes which recipes are meant – the app finds them itself. Every
   change is shown with the recipes it touches and applied only on a click;
   changes to more than 50 recipes and deleting a tag need a second click. A
@@ -342,7 +347,7 @@ default).
 | Tags (clean up, season, more tags), translate & revise recipes, process new recipes | ✓ | ✓ |
 | Amounts into the steps | ✓ (templates – follow the servings) | – (no templates: written-out amounts would be wrong once the servings change) |
 | Photos in the steps | ✓ (step file + Files) | ✓ (recipe assets in the step text) |
-| Contradictions, weak photos, changes by chat | ✓ | ✓ (chat without supermarket categories) |
+| Weak photos, changes by chat | ✓ | ✓ (chat without supermarket categories) |
 | Moving recipes from the other one | ✓ | ✓ |
 | Automatic maintenance | ✓ | ✓ (for the tiles above) |
 | Nutrition, supermarket categories, unit conversions, tag groups | ✓ | – (no matching data model) |

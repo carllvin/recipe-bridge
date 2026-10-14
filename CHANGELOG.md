@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Chat: sort tags into a tag group – named ones or every tag without a
+  group ("all tags without a group into the group Quelle"); Tandoor only
+- **Pick a cookbook's recipes before the AI reads it**: a PDF (from 15
+  pages) or EPUB shows its recipes – from its bookmarks or table of
+  contents, otherwise the pages that look like a recipe – and only the
+  picked pages go to the AI, with a live token estimate. Recipes already in
+  the collection, the foreword and the index start unticked
 - Half price with **Gemini** too: imports go to its Batch Mode like with
   Claude and OpenAI
 - A notification (ntfy, Telegram) also when a half-price import started in
@@ -12,6 +19,20 @@
 - Alternatives in an ingredient ("butter or margarine", "lemon, lime or
   orange"): only the first becomes the ingredient, the others go into its
   note ("or margarine")
+- Collection overview (Tandoor) faster: every list is read once instead of
+  up to three times, the lists at the same time, new photos checked six at
+  a time; the log shows how long each part took
+- After applying a change to ingredients, units or tags only the recipes
+  using them are read again – not the whole collection
+- Mealie: the overview reads only recipes changed since its last read, the
+  lists at the same time
+- Background checks (recipe manager reachable, review counter) pause while
+  the app isn't visible
+- Tandoor's long lists (ingredients, conversions) and the cookbooks are
+  read several pages at a time; the kept copy of the recipes is refreshed
+  in full once a week instead of daily
+- Removed: the tile **Contradictions** (recipe doctor) – it flagged too
+  many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;
   `docs/configuration.md` lists every setting
 
