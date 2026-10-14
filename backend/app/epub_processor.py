@@ -22,8 +22,8 @@ def process_epub(epub_path: str, images_dir: str) -> dict:
       - images: dict image_id -> {"page": n, "path": "...", "filename": "...",
         "width": w, "height": h} - images embedded in each chapter
       - metadata_title: the book's title from its metadata
-      - toc_pages: always [] (each "page" is already a whole chapter, so there's
-        no finer bookmark structure to align chunks to)
+      - toc: the table of contents [{"title", "page", "level"}] - page is
+        the chapter's number; the recipe list to pick from (recipe_picker.py)
     EPUB text is already digital, so no OCR is needed here.
     """
     os.makedirs(images_dir, exist_ok=True)
@@ -103,8 +103,7 @@ def process_epub(epub_path: str, images_dir: str) -> dict:
         "page_count": len(pages),
         "metadata_title": metadata_title,
         "metadata_author": metadata_author,
-        "toc_pages": [],
-        "toc": _toc_entries(book, ordered_docs),  # the recipe list to pick from (recipe_picker.py)
+                "toc": _toc_entries(book, ordered_docs),  # the recipe list to pick from (recipe_picker.py)
         "kind": "epub",
     }
 

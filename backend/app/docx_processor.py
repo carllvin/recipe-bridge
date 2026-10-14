@@ -92,4 +92,4 @@ def process_docx(path: str, images_dir: str) -> dict:
     if not pages:
         raise ValueError("The document contains no text.")
     return {"pages": [{"page": i, "text": t} for i, t in enumerate(pages, 1)], "images": images,
-            "page_count": len(pages), "metadata_title": title, "toc_pages": []}
+            "page_count": len(pages), "metadata_title": title}

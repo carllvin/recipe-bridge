@@ -252,13 +252,13 @@ def test_batch_survives_a_restart(monkeypatch):
     job = jobs.create_job("buch.pdf")
     job.batch = True
     monkeypatch.setattr(main, "process_pdf", lambda path, d, force_ocr=False: {
-        "pages": PAGES, "images": {}, "page_count": len(PAGES), "metadata_title": "Buch", "toc_pages": []})
+        "pages": PAGES, "images": {}, "page_count": len(PAGES), "metadata_title": "Buch"})
     main._run_extraction(job.id, ["/nowhere.pdf"], "pdf")  # the batch "fails" - falls back to single calls...
     assert sent == [1]
     # ...so simulate the real case: the container stopped while waiting - the file is still there
     main._remember_batch(job, {"provider": "anthropic", "id": "b9", "n": 3}, kind="pages", doc_type="pdf",
                          source_paths=["/nowhere.pdf"], result=main._keepable(
-                             {"pages": PAGES, "images": {}, "page_count": len(PAGES), "toc_pages": []}))
+                             {"pages": PAGES, "images": {}, "page_count": len(PAGES)}))
     jobs._jobs.clear()
     collected = []
 

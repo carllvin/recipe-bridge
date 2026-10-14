@@ -251,18 +251,17 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
                 return
             if picked is not None:
                 picked_pages, pick_starts, units = picked
-                result = {**result, "pages": picked_pages, "toc_pages": [], "units": units}
+                result = {**result, "pages": picked_pages, "units": units}
                 kept = {p["page"] for p in picked_pages}
                 job.images = {iid: info for iid, info in job.images.items() if info.get("page") in kept}
                 jobs.save_job(job)
-        toc_pages = result.get("toc_pages") if settings.toc_aware_chunking else None
         units = result.get("units")  # picked recipes: cut between them, no overlap
         if single_recipe and result["pages"]:
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
         if _asks_about_half_price(job):
-            if not _go_ahead(job, estimate_tokens(result["pages"], toc_pages=toc_pages, existing_tags=existing_tags,
+            if not _go_ahead(job, estimate_tokens(result["pages"], existing_tags=existing_tags,
                                                   units=units)):
                 return
         recipes: list[ExtractedRecipe]
@@ -275,7 +274,6 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
         recipes, usage = extract_recipes_from_pages(
             result["pages"],
             on_progress=progress_cb,
-            toc_pages=toc_pages,
             existing_tags=existing_tags,
             batch=_as_batch(job),
             on_wait=batch_wait,
@@ -350,7 +348,7 @@ def _batch_path(job_id: str) -> str:
 def _keepable(result: dict) -> dict:
     """What of a reader's result is needed after a restart (JSON only)."""
     return {k: result.get(k) for k in ("pages", "images", "page_count", "metadata_title", "metadata_author",
-                                       "toc_pages", "source_tag", "url", "units") if k in result}
+                                       "source_tag", "url", "units") if k in result}
 
 
 def _remember_batch(job, ref: dict, **context) -> None:

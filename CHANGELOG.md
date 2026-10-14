@@ -1,13 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
 
-- Picked cookbook recipes are sent to the AI cut between the recipes,
-  without overlapping parts – none is read twice (and fewer tokens)
-- Cookbooks: a recipe read twice by overlapping parts of the book – with a
-  slightly different title or page number – is recognised by its
-  ingredients and method and shows only once; neighbouring variants
-  ("Pfannkuchen" / "Apfelpfannkuchen") stay apart
+Docker image `ghcr.io/carllvin/recipe-bridge:1.3.1` (or `:1.3`). No changes
+to the configuration are needed; `TOC_AWARE_CHUNKING` is gone and is simply
+ignored if it's still in your `.env`.
+
+**Import**
+- Cookbooks: no more recipes shown twice in the review
+  - picked recipes go to the AI cut between the recipes, without
+    overlapping parts – none is read twice (and fewer tokens)
+  - with *Whole book*, a recipe read twice by overlapping parts – with a
+    slightly different title or page number – is recognised by its
+    ingredients and method and shows only once; neighbouring variants
+    ("Pfannkuchen" / "Apfelpfannkuchen") stay apart
+- Removed: `TOC_AWARE_CHUNKING` – picking the recipes does the same, better
 
 ## 1.3.0
 

@@ -376,30 +376,21 @@ def _chunk_pages(
     pages: list[dict],
     pages_per_chunk: int = 12,
     overlap: int = 2,
-    toc_pages: Optional[list[int]] = None,
     units: Optional[list[int]] = None,
 ):
-    """units: picked recipes (recipe_picker.py) - the positions where each
-    starts; each is whole already (with the page after it), so they're
-    grouped up to pages_per_chunk without overlap and never cut - no recipe
-    is read twice. Otherwise: splits pages into chunks for the AI calls. When toc_pages (bookmark/TOC page
-    numbers) are available, chunk boundaries are aligned to them - consecutive
-    chapters/recipes are grouped together up to roughly pages_per_chunk, but a
-    chunk never cuts a chapter in half unless a single chapter alone exceeds
-    pages_per_chunk (then it falls back to the sliding-window approach for that
-    chapter only). Without usable TOC data, falls back to plain fixed-size,
-    overlapping windows. Either way, every chunk after the first shares an
-    `overlap`-page margin with its predecessor."""
+    """Splits pages into chunks for the AI calls: fixed-size windows, each
+    sharing `overlap` pages with the one before, so a recipe cut at one
+    window's edge is whole in the next (the second reading is merged,
+    _same_recipe). units: picked recipes (recipe_picker.py) - the positions
+    where each starts; each is whole already (with the page after it), so
+    they're grouped up to pages_per_chunk without overlap and never cut - no
+    recipe is read twice."""
     n = len(pages)
     if n == 0:
         return
 
-    toc_pages = sorted(set(p for p in (toc_pages or []) if 1 <= p <= n))
-
     if units:
         ranges = _unit_ranges(n, units, pages_per_chunk)
-    elif len(toc_pages) >= 2:
-        ranges = _toc_chunk_ranges(n, toc_pages, pages_per_chunk, overlap)
     else:
         ranges = list(_sliding_windows(1, n, pages_per_chunk, overlap))
 
@@ -416,77 +407,6 @@ def _unit_ranges(n: int, units: list[int], pages_per_chunk: int) -> list[tuple[i
         else:
             ranges.append((start, end))
     return ranges
-
-
-def _toc_chunk_ranges(
-    n: int, toc_pages: list[int], pages_per_chunk: int, overlap: int
-) -> list[tuple[int, int]]:
-    """Builds chapter-aligned (start, end) ranges: consecutive short chapters are
-    grouped together up to ~pages_per_chunk; a single chapter longer than that is
-    split on its own via the sliding window (which already overlaps its own
-    sub-ranges correctly). Every NEW unit's start (a freshly flushed buffer, or
-    the first sub-range of an oversized chapter) is additionally nudged
-    backward - via `_start_with_overlap` - so it shares `overlap` pages with
-    whatever was yielded immediately before it. This is the piece a plain
-    per-range "extend every start backward" pass would get wrong: it would
-    also stretch the *internal* boundaries between an oversized chapter's own
-    sliding-window sub-ranges, which are already correctly overlapping and
-    don't need (or want) any further adjustment."""
-    boundaries = sorted(set([1] + toc_pages + [n + 1]))
-    segments = [
-        (boundaries[i], boundaries[i + 1] - 1)
-        for i in range(len(boundaries) - 1)
-        if boundaries[i] <= n
-    ]
-
-    result: list[tuple[int, int]] = []
-
-    def append_new_unit(start: int, end: int) -> None:
-        if result:
-            start = _start_with_overlap(start, result[-1][1], overlap)
-        result.append((start, end))
-
-    buffer_start = None
-    buffer_end = None
-
-    for seg_start, seg_end in segments:
-        seg_len = seg_end - seg_start + 1
-
-        if seg_len > pages_per_chunk:
-            # A single chapter is too long on its own - flush whatever is
-            # buffered, then split this chapter with the sliding window.
-            if buffer_start is not None:
-                append_new_unit(buffer_start, buffer_end)
-                buffer_start = None
-            sub_ranges = list(_sliding_windows(seg_start, seg_end, pages_per_chunk, overlap))
-            for i, (sub_start, sub_end) in enumerate(sub_ranges):
-                if i == 0:
-                    append_new_unit(sub_start, sub_end)
-                else:
-                    result.append((sub_start, sub_end))  # already correctly overlapping internally
-            continue
-
-        if buffer_start is None:
-            buffer_start, buffer_end = seg_start, seg_end
-        elif (seg_end - buffer_start + 1) <= pages_per_chunk:
-            buffer_end = seg_end
-        else:
-            append_new_unit(buffer_start, buffer_end)
-            buffer_start, buffer_end = seg_start, seg_end
-
-    if buffer_start is not None:
-        append_new_unit(buffer_start, buffer_end)
-
-    return result
-
-
-def _start_with_overlap(start: int, prev_end: int, overlap: int) -> int:
-    """Nudges `start` backward just enough to share `overlap` pages with a
-    previous range ending at `prev_end`, but never extends it forward (if
-    there's already at least that much overlap, or even a full containment,
-    `start` is left untouched) and never below page 1."""
-    target = max(1, prev_end - overlap + 1)
-    return min(start, target)
 
 
 def _sliding_windows(start: int, end: int, size: int, overlap: int):
@@ -509,15 +429,15 @@ OUTPUT_SHARE = 0.6       # the recipes' JSON is about this share of the text it 
 MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
 
 
-def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
-                    existing_tags: Optional[list[str]] = None, units: Optional[list[int]] = None) -> dict:
+def estimate_tokens(pages: list[dict], existing_tags: Optional[list[str]] = None,
+                    units: Optional[list[int]] = None) -> dict:
     """{"chunks", "input", "output", "total"} - roughly what the extraction
     of these pages will use, without asking the AI: the chunks' text (with
     the overlapping pages counted twice) plus the instructions per chunk
     (with Claude cached after the first), and the answers as a share of the
     text."""
     prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
-    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages, units=units)
+    chunks = [c for c in _chunk_pages(pages, units=units)
               if any((p.get("text") or "").strip() for p in c)]
     texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
     if len(chunks) > 1 and llm_provider._active_provider() == "anthropic":
@@ -576,7 +496,6 @@ def extract_each_as_batch(page_sets: list[list[dict]], existing_tags: Optional[l
 def extract_recipes_from_pages(
     pages: list[dict],
     on_progress: Optional[ProgressCallback] = None,
-    toc_pages: Optional[list[int]] = None,
     existing_tags: Optional[list[str]] = None,
     batch: bool = False,
     on_wait=None,
@@ -594,14 +513,14 @@ def extract_recipes_from_pages(
         raise RuntimeError(llm_provider.missing_key_hint())
     system_prompt = _system_prompt_for(pages, existing_tags)
 
-    chunks = list(_chunk_pages(pages, toc_pages=toc_pages, units=units))
+    chunks = list(_chunk_pages(pages, units=units))
     total_chunks = len(chunks) or 1
     raw_recipes: list[dict] = []
     total_usage = TokenUsage()
 
     log.info(
-        "Extraction starting: %d page(s) split into %d chunk(s) (toc_pages=%s)",
-        len(pages), total_chunks, toc_pages or "none",
+        "Extraction starting: %d page(s) split into %d chunk(s)%s",
+        len(pages), total_chunks, " at the picked recipes" if units else "",
     )
 
     texts = [_page_text(chunk) for chunk in chunks]

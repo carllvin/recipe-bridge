@@ -106,6 +106,5 @@ def process_images(image_paths: list[str], images_dir: str, handwriting: bool = 
         "images": images,
         "page_count": len(pages),
         "metadata_title": "",
-        "toc_pages": [],
-        "usage": usage,
+                "usage": usage,
     }
