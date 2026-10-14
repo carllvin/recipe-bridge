@@ -378,6 +378,82 @@ def page_photo_urls(url: str, html: str) -> list[str]:
     return list(dict.fromkeys(([main] if main else []) + [u for _, u in steps]))
 
 
+# ---------- short links and Pinterest pins: on to the recipe page ----------
+
+SHORTENERS = {"bit.ly", "bitly.com", "t.co", "tinyurl.com", "ow.ly", "buff.ly", "goo.gl", "is.gd", "rebrand.ly",
+              "cutt.ly", "shorturl.at", "tiny.cc", "t.ly", "s.id", "lnkd.in", "fb.me", "trib.al", "dlvr.it",
+              "pin.it", "spoti.fi", "amzn.to", "flip.it", "smarturl.it", "linktr.ee"}
+_PIN_LINK_RE = re.compile(r'"(?:link|tracked_link)"\s*:\s*"(https?:(?:\\/|/)[^"]+)"')
+
+
+def _host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _is_pinterest(url: str) -> bool:
+    host = _host(url)
+    return host.startswith("pinterest.") or ".pinterest." in host or host in ("pin.it", "pinimg.com") \
+        or host.endswith(".pinimg.com")
+
+
+def _unshorten(client: httpx.Client, url: str) -> str:
+    """Follows a short link's redirects without loading the page."""
+    try:
+        with client.stream("GET", url, timeout=PAGE_TIMEOUT) as resp:
+            return str(resp.url)
+    except httpx.HTTPError as exc:
+        log.info("Short link %s not resolved: %s", url, exc)
+        return url
+
+
+def pin_target(html: str) -> str | None:
+    """The page a Pinterest pin links to - from og:see_also, the JSON-LD
+    post or the page's own data; None for a pin without a link."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    candidates = [m.get("content") for m in soup.find_all("meta", attrs={"property": "og:see_also"})]
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or script.get_text() or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for item in data if isinstance(data, list) else [data]:
+            shared = item.get("sharedContent") if isinstance(item, dict) else None
+            if isinstance(shared, dict):
+                candidates.append(shared.get("url"))
+    candidates += [m.replace("\\/", "/").replace("\\u002F", "/") for m in _PIN_LINK_RE.findall(html or "")]
+    for link in candidates:
+        if not link or _is_pinterest(link) or not link.startswith("http"):
+            continue
+        if re.search(r"\.(jpe?g|png|webp|gif|mp4)(\?|$)", link, re.I):  # the pin's own picture
+            continue
+        return link
+    return None
+
+
+def _resolve(client: httpx.Client, url: str, html: str | None) -> tuple[str, str | None]:
+    """(the recipe page's address, the page as given) - short links are
+    followed, a Pinterest pin leads to the page it was saved from (the pin
+    itself is read when it has no link)."""
+    if html is None and _host(url) in SHORTENERS:
+        url = _unshorten(client, url)
+    if _is_pinterest(url) and "/pin/" in urlparse(url).path:
+        pin_html = html
+        if pin_html is None:
+            try:
+                pin_html, _ = _fetch_page(client, url)
+            except UrlImportError as exc:
+                log.info("Pinterest pin %s not loaded: %s", url, exc)
+                return url, html
+        target = pin_target(pin_html)
+        if target:
+            log.info("Pinterest pin %s links to %s", url, target)
+            target = _unshorten(client, target) if _host(target) in SHORTENERS else target
+            return target, None
+        return url, pin_html
+    return url, html
+
+
 def process_url(url: str, images_dir: str, html: str | None = None,
                 given_photos: dict[str, bytes] | None = None) -> dict:
     """html: the page as the browser already has it (bookmark button) - then
@@ -385,8 +461,10 @@ def process_url(url: str, images_dir: str, html: str | None = None,
     photos too, as far as the browser could fetch them (given_photos:
     {address: bytes}) - the others are loaded as usual."""
     os.makedirs(images_dir, exist_ok=True)
+    with _client() as client:
+        url, html = _resolve(client, url, html)
     if video_processor.platform(url) and html is None:
-        return _process_video(url, images_dir)
+        return {**_process_video(url, images_dir), "url": url}
     with _client() as client:
         if html is None:
             html, page_url = _fetch_page(client, url)
@@ -434,4 +512,5 @@ def process_url(url: str, images_dir: str, html: str | None = None,
         "metadata_title": title,
         "toc_pages": [],
         "source_tag": source_tag.from_page(soup, page_url, recipe or stub),
+        "url": url,  # the recipe page - also when a short link or a Pinterest pin led there
     }

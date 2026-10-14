@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Half price with **Gemini** too: imports go to its Batch Mode like with
+  Claude and OpenAI
+- A notification (ntfy, Telegram) also when a half-price import started in
+  the app is ready
+- **Pinterest pins** lead to the recipe page they were saved from, short
+  links (bit.ly, pin.it …) are followed – the recipe keeps the page's
+  address as its source
+- Docs: a short `.env.example` with what's needed to start;
+  `docs/configuration.md` lists every setting
+
 ## 1.2.0
 
 Docker image `ghcr.io/carllvin/recipe-bridge:1.2.0` (or `:1.2`). No changes

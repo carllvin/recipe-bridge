@@ -47,6 +47,13 @@ def test_import_ready_goes_to_both_channels(sent):
     assert sent == []
 
 
+def test_half_price_import_is_announced(sent):
+    job = Job(id="j3", filename="buch.pdf", status="ready")
+    job.batch = True  # started in the app, but the batch takes up to 24 hours
+    notify.import_finished(job)
+    assert len(sent) == 2
+
+
 def test_automatic_runs_are_collected(sent, monkeypatch):
     for n in (3, 4):
         job = tool_jobs.create_tool_job("conversions")

@@ -271,8 +271,8 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             batch_ref=(resume or {}).get("ref"),
         )
         if doc_type == "url":
-            for recipe in recipes:
-                recipe.source_url = source_paths[0]
+            for recipe in recipes:  # the recipe page, also behind a short link or a Pinterest pin
+                recipe.source_url = result.get("url") or source_paths[0]
         if source_tag.enabled():
             tag = result.get("source_tag") or source_tag.from_author(result.get("metadata_author") or "")
             if not tag and doc_type in ("pdf", "epub") and recipes:
@@ -331,7 +331,7 @@ def _batch_path(job_id: str) -> str:
 def _keepable(result: dict) -> dict:
     """What of a reader's result is needed after a restart (JSON only)."""
     return {k: result.get(k) for k in ("pages", "images", "page_count", "metadata_title", "metadata_author",
-                                       "toc_pages", "source_tag") if k in result}
+                                       "toc_pages", "source_tag", "url") if k in result}
 
 
 def _remember_batch(job, ref: dict, **context) -> None:
@@ -561,6 +561,7 @@ def _add_link_recipes(job, number: int, url: str, result: dict, recipes) -> None
     if not recipes:
         job.notes.append(f"{url} – no recipe found")
         return
+    url = result.get("url") or url  # behind a short link or a Pinterest pin
     for recipe in recipes:
         recipe.source_url = url
         recipe.source_page_start = recipe.source_page_end = number
