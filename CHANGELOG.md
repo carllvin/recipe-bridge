@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Cookbooks: a recipe read twice by overlapping parts of the book – with a
+  slightly different title or page number – is recognised by its
+  ingredients and method and shows only once; neighbouring variants
+  ("Pfannkuchen" / "Apfelpfannkuchen") stay apart
+
 ## 1.3.0
 
 Docker image `ghcr.io/carllvin/recipe-bridge:1.3.0` (or `:1.3`). No changes

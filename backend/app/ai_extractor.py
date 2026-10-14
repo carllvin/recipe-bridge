@@ -654,12 +654,55 @@ def _titles_likely_same(a: str, b: str, threshold: float = 0.78) -> bool:
     return difflib.SequenceMatcher(None, a_norm, b_norm).ratio() >= threshold
 
 
-def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
-    """Removes duplicates caused by overlapping chunks (similar title + overlapping page range)."""
-    results: list[ExtractedRecipe] = []
+PAGE_SLIP = 3      # a chunk may name a recipe's pages slightly off (printed vs. PDF page numbers)
+NEAR_PAGES = 12    # the same recipe read twice lies within one chunk's reach
+SAME_METHOD = 0.6  # share of the shorter method found in the other one
 
-    def overlaps(a_start, a_end, b_start, b_end) -> bool:
-        return a_start <= b_end and b_start <= a_end
+
+def _ingredient_names(recipe: ExtractedRecipe) -> set[str]:
+    return {re.sub(r"\s+", " ", (i.name or "").strip().casefold()) for i in recipe.ingredients if (i.name or "").strip()}
+
+
+def _contained(small: set, large: set) -> float:
+    return len(small & large) / min(len(small), len(large)) if small and large else 0.0
+
+
+def _method_overlap(a: ExtractedRecipe, b: ExtractedRecipe) -> float:
+    """How much of the shorter method text is found in the other one - a
+    partial reading (cut at a chunk edge) is contained in the full one, a
+    variant ("Apfelpfannkuchen") is written differently."""
+    texts = sorted((" ".join(s.instruction or "" for s in r.steps).casefold()[:2000] for r in (a, b)), key=len)
+    short, long = texts
+    if len(short) < 40:
+        return 0.0
+    matcher = difflib.SequenceMatcher(None, short, long, autojunk=False)
+    return sum(block.size for block in matcher.get_matching_blocks()) / len(short)
+
+
+def _same_recipe(a: ExtractedRecipe, b: ExtractedRecipe) -> bool:
+    """Two readings of one recipe from overlapping chunks. The titles may
+    drift a little ("mit Feta" / "mit Schafskäse") and so may the pages a
+    chunk names (printed page numbers); the ingredients and the method tell
+    a second reading from a neighbouring variant."""
+    gap = max(a.source_page_start, b.source_page_start) - min(a.source_page_end, b.source_page_end)
+    if gap > NEAR_PAGES:
+        return False
+    names_a, names_b = _ingredient_names(a), _ingredient_names(b)
+    if _titles_likely_same(a.title, b.title) and gap <= PAGE_SLIP:
+        # the same title close by - unless the ingredients clearly differ (two "Dressing"s);
+        # on pages that don't overlap the method has to match too ("Pfannkuchen" / "Apfelpfannkuchen")
+        if names_a and names_b and _contained(names_a, names_b) < 0.5:
+            return False
+        return gap <= 0 or _method_overlap(a, b) >= SAME_METHOD
+    if min(len(names_a), len(names_b)) < 2 or _contained(names_a, names_b) < 0.7:
+        return False
+    return _method_overlap(a, b) >= SAME_METHOD
+
+
+def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
+    """Removes duplicates caused by overlapping chunks (_same_recipe), keeping
+    the reading with more detail."""
+    results: list[ExtractedRecipe] = []
 
     from . import step_amounts
     for item in raw_recipes:
@@ -690,12 +733,7 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
 
         is_duplicate = False
         for existing in results:
-            same_title = _titles_likely_same(existing.title, recipe.title)
-            pages_overlap = overlaps(
-                existing.source_page_start, existing.source_page_end,
-                recipe.source_page_start, recipe.source_page_end,
-            )
-            if same_title and pages_overlap:
+            if _same_recipe(existing, recipe):
                 # Keep whichever version has more detail (more ingredients/steps),
                 # and prefer the wider page range either way (a chunk that only
                 # saw part of the recipe reports a narrower range than one that
