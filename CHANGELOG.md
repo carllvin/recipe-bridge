@@ -12,6 +12,9 @@
 - Alternatives in an ingredient ("butter or margarine", "lemon, lime or
   orange"): only the first becomes the ingredient, the others go into its
   note ("or margarine")
+- Collection overview (Tandoor) faster: every list is read once instead of
+  up to three times, the lists at the same time, new photos checked six at
+  a time; the log shows how long each part took
 - Removed: the tile **Contradictions** (recipe doctor) – it flagged too
   many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;

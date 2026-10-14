@@ -86,3 +86,20 @@ def test_what_cannot_be_told_still_marks_stale(monkeypatch):
     monkeypatch.setattr(health, "_state", {**health._state, "changed_at": 0})
     health.settle("conversions", ToolSuggestion(id="x", kind="conversion", summary="", detail={}))
     assert health.cached()["stale"]
+
+
+def test_overview_reads_each_list_once(tandoor, caplog):
+    import logging
+    from collections import Counter
+    from app import health
+    tandoor.add("food", {"id": 1, "name": "Mehl"})
+    tandoor.add("unit", {"id": 1, "name": "g"})
+    tandoor.add("recipe", {"id": 1, "name": "Brot", "keywords": [], "steps": [
+        {"instruction": "Backen.", "ingredients": [{"food": {"id": 1}, "unit": {"id": 1}, "amount": 500}]}]})
+    with caplog.at_level(logging.INFO, logger="recipe-bridge"):
+        health.compute_now()
+    assert health.cached()["metrics"]["recipes_total"] == 1
+    lists = Counter(path for method, path in tandoor.requests if method == "GET" and path.count("/") == 2)
+    for path in ("/food/", "/unit/", "/keyword/", "/unit-conversion/"):
+        assert lists[path] == 1, (path, lists)
+    assert any("Collection overview:" in r.message and "foods" in r.message for r in caplog.records)

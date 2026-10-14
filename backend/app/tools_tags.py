@@ -522,11 +522,11 @@ def tag_vocabulary(all_tags, recipes, food_names=frozenset()) -> list[str]:
     return sorted(names, key=lambda n: -usage_of.get(n, 0))[:MAX_VOCABULARY]
 
 
-def food_name_set(client) -> set[str]:
-    """Lower-case names (and plurals) of all ingredients, to keep ingredient
-    names out of tag suggestions."""
+def food_name_set(client, foods=None) -> set[str]:
+    """Lower-case names of all ingredients, to keep ingredient names out of
+    tag suggestions. foods: the ingredient list if it was read already."""
     names = set()
-    for food in tandoor_client.fetch_all_items(client, "food"):
+    for food in foods if foods is not None else tandoor_client.fetch_all_items(client, "food"):
         names.add(food["name"].strip().casefold())
     return names
 
