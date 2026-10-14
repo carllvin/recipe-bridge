@@ -250,18 +250,20 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             if picked is False:
                 return
             if picked is not None:
-                picked_pages, pick_starts = picked
-                result = {**result, "pages": picked_pages, "toc_pages": []}
+                picked_pages, pick_starts, units = picked
+                result = {**result, "pages": picked_pages, "toc_pages": [], "units": units}
                 kept = {p["page"] for p in picked_pages}
                 job.images = {iid: info for iid, info in job.images.items() if info.get("page") in kept}
                 jobs.save_job(job)
         toc_pages = result.get("toc_pages") if settings.toc_aware_chunking else None
+        units = result.get("units")  # picked recipes: cut between them, no overlap
         if single_recipe and result["pages"]:
             first = result["pages"][0]
             first["text"] = SINGLE_RECIPE_NOTE.format(n=len(result["pages"])) + (first.get("text") or "")
 
         if _asks_about_half_price(job):
-            if not _go_ahead(job, estimate_tokens(result["pages"], toc_pages=toc_pages, existing_tags=existing_tags)):
+            if not _go_ahead(job, estimate_tokens(result["pages"], toc_pages=toc_pages, existing_tags=existing_tags,
+                                                  units=units)):
                 return
         recipes: list[ExtractedRecipe]
 
@@ -280,6 +282,7 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
             on_submit=lambda ref: _remember_batch(job, ref, kind="pages", doc_type=doc_type, source_paths=source_paths,
                                                   result=_keepable(result)),
             batch_ref=(resume or {}).get("ref"),
+            units=units,
         )
         if pick_starts:  # a recipe starting on a page sent only to complete the one before wasn't picked
             dropped = [r.title for r in recipes if r.source_page_start not in pick_starts]
@@ -347,7 +350,7 @@ def _batch_path(job_id: str) -> str:
 def _keepable(result: dict) -> dict:
     """What of a reader's result is needed after a restart (JSON only)."""
     return {k: result.get(k) for k in ("pages", "images", "page_count", "metadata_title", "metadata_author",
-                                       "toc_pages", "source_tag", "url") if k in result}
+                                       "toc_pages", "source_tag", "url", "units") if k in result}
 
 
 def _remember_batch(job, ref: dict, **context) -> None:
@@ -441,11 +444,11 @@ def _go_ahead(job, estimate: dict) -> bool:
 PICK_WAIT_SECONDS = 24 * 3600
 
 
-def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple[list[dict], set[int]] | bool | None:
+def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple | bool | None:
     """A cookbook's recipes to pick before the AI reads it (recipe_picker.py):
     waits for POST /api/jobs/{id}/pick. (The picked pages, the pages their
-    recipes start on) - None for the whole book (nothing to pick, or "all"),
-    False when cancelled."""
+    recipes start on, where each starts among the picked pages) - None for
+    the whole book (nothing to pick, or "all"), False when cancelled."""
     found, source = recipe_picker.entries(result)
     if not recipe_picker.worth_asking(doc_type, result, found):
         return None
@@ -474,9 +477,10 @@ def _pick_recipes(job, doc_type: str, result: dict, existing_tags) -> tuple[list
     if job.picked is None:
         return None
     pages, starts = recipe_picker.picked_pages(entries, set(job.picked), result["pages"])
+    units = recipe_picker.units_of(entries, set(job.picked), pages)
     log.info("Import %s: %d of %d recipe(s) picked - %d of %d page(s) go to the AI", job.id, len(job.picked),
              len(entries), len(pages), len(result["pages"]))
-    return pages, starts
+    return pages, starts, units
 
 
 @app.post("/api/jobs/{job_id}/pick")

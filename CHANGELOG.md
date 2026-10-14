@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Picked cookbook recipes are sent to the AI cut between the recipes,
+  without overlapping parts – none is read twice (and fewer tokens)
 - Cookbooks: a recipe read twice by overlapping parts of the book – with a
   slightly different title or page number – is recognised by its
   ingredients and method and shows only once; neighbouring variants

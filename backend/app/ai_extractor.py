@@ -377,8 +377,12 @@ def _chunk_pages(
     pages_per_chunk: int = 12,
     overlap: int = 2,
     toc_pages: Optional[list[int]] = None,
+    units: Optional[list[int]] = None,
 ):
-    """Splits pages into chunks for the AI calls. When toc_pages (bookmark/TOC page
+    """units: picked recipes (recipe_picker.py) - the positions where each
+    starts; each is whole already (with the page after it), so they're
+    grouped up to pages_per_chunk without overlap and never cut - no recipe
+    is read twice. Otherwise: splits pages into chunks for the AI calls. When toc_pages (bookmark/TOC page
     numbers) are available, chunk boundaries are aligned to them - consecutive
     chapters/recipes are grouped together up to roughly pages_per_chunk, but a
     chunk never cuts a chapter in half unless a single chapter alone exceeds
@@ -392,13 +396,26 @@ def _chunk_pages(
 
     toc_pages = sorted(set(p for p in (toc_pages or []) if 1 <= p <= n))
 
-    if len(toc_pages) >= 2:
+    if units:
+        ranges = _unit_ranges(n, units, pages_per_chunk)
+    elif len(toc_pages) >= 2:
         ranges = _toc_chunk_ranges(n, toc_pages, pages_per_chunk, overlap)
     else:
         ranges = list(_sliding_windows(1, n, pages_per_chunk, overlap))
 
     for start, end in ranges:
         yield pages[start - 1:end]
+
+
+def _unit_ranges(n: int, units: list[int], pages_per_chunk: int) -> list[tuple[int, int]]:
+    bounds = sorted(set([1] + [u for u in units if 1 <= u <= n] + [n + 1]))
+    ranges: list[tuple[int, int]] = []
+    for start, end in ((bounds[i], bounds[i + 1] - 1) for i in range(len(bounds) - 1)):
+        if ranges and end - ranges[-1][0] + 1 <= pages_per_chunk:
+            ranges[-1] = (ranges[-1][0], end)
+        else:
+            ranges.append((start, end))
+    return ranges
 
 
 def _toc_chunk_ranges(
@@ -493,14 +510,15 @@ MAX_OUTPUT_TOKENS = 8000  # per chunk (complete_text below)
 
 
 def estimate_tokens(pages: list[dict], toc_pages: Optional[list[int]] = None,
-                    existing_tags: Optional[list[str]] = None) -> dict:
+                    existing_tags: Optional[list[str]] = None, units: Optional[list[int]] = None) -> dict:
     """{"chunks", "input", "output", "total"} - roughly what the extraction
     of these pages will use, without asking the AI: the chunks' text (with
     the overlapping pages counted twice) plus the instructions per chunk
     (with Claude cached after the first), and the answers as a share of the
     text."""
     prompt = len(_build_system_prompt(False, existing_tags=existing_tags)) // CHARS_PER_TOKEN
-    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages) if any((p.get("text") or "").strip() for p in c)]
+    chunks = [c for c in _chunk_pages(pages, toc_pages=toc_pages, units=units)
+              if any((p.get("text") or "").strip() for p in c)]
     texts = [sum(len(p.get("text") or "") + 30 for p in c) // CHARS_PER_TOKEN for c in chunks]
     if len(chunks) > 1 and llm_provider._active_provider() == "anthropic":
         # cached after the first chunk (complete_text cache=True): written once at 1.25x, then read at a tenth
@@ -564,6 +582,7 @@ def extract_recipes_from_pages(
     on_wait=None,
     on_submit=None,
     batch_ref: Optional[dict] = None,
+    units: Optional[list[int]] = None,
 ) -> tuple[list[ExtractedRecipe], TokenUsage]:
     """batch=True (the import page's checkbox, WATCH_BATCH): all chunks as
     one batch at half price - on_wait(done, total) while it runs; falls
@@ -575,7 +594,7 @@ def extract_recipes_from_pages(
         raise RuntimeError(llm_provider.missing_key_hint())
     system_prompt = _system_prompt_for(pages, existing_tags)
 
-    chunks = list(_chunk_pages(pages, toc_pages=toc_pages))
+    chunks = list(_chunk_pages(pages, toc_pages=toc_pages, units=units))
     total_chunks = len(chunks) or 1
     raw_recipes: list[dict] = []
     total_usage = TokenUsage()
