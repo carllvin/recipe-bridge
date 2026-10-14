@@ -67,13 +67,50 @@ def with_note(existing: str | None, note: str) -> str:
 # extraction asks the AI for that, this catches what slips through
 _ALTERNATIVE = re.compile(r"\s+(or|oder|ou|o|oppure)\s+", re.IGNORECASE)
 
+# A German shortened compound ("Romano- oder Wachsbohnen", "Zitronen- und
+# Orangensaft"): the word before the hyphen shares the end of a later one
+_ELIDED = re.compile(r"(?<![\w-])([^\W\d_]+)-(?=\s*(?:,|$|(?:or|oder|ou|o|oppure|und|and|bzw)\b))", re.IGNORECASE)
+# the common ends of compound ingredient names, longest first when matching
+_HEADS = sorted("""bohnen erbsen linsen saft mehl zucker käse öl essig pfeffer salz kraut salat nudeln beeren
+milch sahne butter wurst schinken fleisch fisch brot brötchen schale kerne nüsse kohl rüben zwiebeln
+pilze tomaten paprika sirup senf soße sauce brühe fond wein likör tee pulver flocken creme quark
+joghurt mus mark blätter würfel streifen filet filets kartoffeln äpfel birnen trauben kürbis lauch
+möhren karotten mandeln oliven chili chilis sprossen samen gewürz kräuter körner reis graupen""".split(), key=len, reverse=True)
+
+
+def _compound_end(text: str) -> str | None:
+    """What a shortened compound in text is completed with: a noun standing
+    on its own at the end ("grüne Bohnen" -> "bohnen"), else the known end
+    of the last compound ("Wachsbohnen" -> "bohnen"); None when unsure."""
+    words = re.findall(r"[^\W\d_][\w]*", text)
+    if not words:
+        return None
+    last = words[-1]
+    before = text[:text.rfind(last)].rstrip()
+    if len(words) >= 2 and last[0].isupper() and not before.endswith("-") and not _ALTERNATIVE.search(f" {words[-2]} "):
+        return last.casefold()
+    return next((h for h in _HEADS if last.casefold().endswith(h) and len(last) > len(h)), None)
+
+
+def complete_compounds(text: str, end: str | None = None) -> str:
+    """"Romano- oder Wachsbohnen" -> "Romanobohnen oder Wachsbohnen" - every
+    word is written out (an ingredient is never called "Romano-")."""
+    end = end or _compound_end(text)
+    if not end:
+        return text
+    return _ELIDED.sub(lambda m: m.group(1) + end, text)
+
 
 def split_alternatives(name: str) -> tuple[str, str | None]:
     """(the first ingredient, "or the others") - (name, None) when there are
-    no alternatives."""
+    no alternatives. Shortened compounds are written out first; when that
+    isn't possible the name stays whole rather than ending in "-"."""
     name = (name or "").strip()
     match = _ALTERNATIVE.search(name)
     if not match:
+        return name, None
+    name = complete_compounds(name)
+    if _ELIDED.search(name):
         return name, None
     word = match.group(1)
     parts = [p.strip() for p in re.split(r"\s*,\s*|" + _ALTERNATIVE.pattern, name, flags=re.IGNORECASE)

@@ -14,6 +14,9 @@ ignored if it's still in your `.env`.
     slightly different title or page number – is recognised by its
     ingredients and method and shows only once; neighbouring variants
     ("Pfannkuchen" / "Apfelpfannkuchen") stay apart
+- Ingredient names are always written out: a shortened compound like
+  "Romano- oder Wachsbohnen" becomes "Romanobohnen" with the note "oder
+  Wachsbohnen" – never "Romano-"
 - Removed: `TOC_AWARE_CHUNKING` – picking the recipes does the same, better
 
 ## 1.3.0

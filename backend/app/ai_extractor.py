@@ -156,6 +156,9 @@ ingredient "potatoes" with different notes).
 IMPORTANT - Alternatives: when the text offers a choice ("butter or margarine", \
 "lemon, lime or orange juice"), only the first is the ingredient ("name": \
 "butter"); the others go into its "note", e.g. "or margarine" (in {language}).
+Every word is written out in full: a shortened compound like "Romano- oder \
+Wachsbohnen" becomes "Romanobohnen" with the note "oder Wachsbohnen" - a name \
+never ends with a hyphen.
 
 IMPORTANT - Missing units: if a countable ingredient has no explicit unit in the \
 text (e.g. "2 onions", "3 eggs"), set "unit" to the word for "piece(s)" in \
@@ -699,9 +702,18 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
 def _first_alternative(ingredients) -> None:
     """"Butter oder Margarine" -> "Butter", note "oder Margarine" - for
     what slips past the prompt's rule."""
-    from .prep_notes import split_alternatives, with_note
+    from .prep_notes import _compound_end, complete_compounds, split_alternatives, with_note
     for ing in ingredients or []:
         if not isinstance(ing, dict) or not isinstance(ing.get("name"), str):
+            continue
+        if ing["name"].rstrip().endswith("-"):  # "frische Romano-" + note "oder Wachs-, grüne Bohnen"
+            rest = ing.get("note") or ""
+            end = _compound_end(rest)
+            if end:
+                ing["name"] = ing["name"].rstrip()[:-1] + end
+                ing["note"] = complete_compounds(rest, end)
+            else:  # can't tell: keep it readable as one
+                ing["name"], ing["note"] = f"{ing['name'].rstrip()} {rest}".strip(), None
             continue
         name, note = split_alternatives(ing["name"])
         if note:
