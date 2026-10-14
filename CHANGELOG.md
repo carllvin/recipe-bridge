@@ -21,6 +21,9 @@
   lists at the same time
 - Background checks (recipe manager reachable, review counter) pause while
   the app isn't visible
+- Tandoor's long lists (ingredients, conversions) and the cookbooks are
+  read several pages at a time; the kept copy of the recipes is refreshed
+  in full once a week instead of daily
 - Removed: the tile **Contradictions** (recipe doctor) – it flagged too
   many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;

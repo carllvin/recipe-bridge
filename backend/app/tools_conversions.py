@@ -57,17 +57,7 @@ def _key(name) -> str:
 
 
 def _fetch_all(client, endpoint) -> list[dict]:
-    items, url, params = [], f"/{endpoint}/", {"page_size": 200}
-    for _ in range(200):
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        items.extend(data.get("results", data) if isinstance(data, dict) else data)
-        url = data.get("next") if isinstance(data, dict) else None
-        if not url:
-            break
-        params = None
-    return items
+    return tandoor_client.fetch_pages(client, f"/{endpoint}/")
 
 
 def _ref_id(ref):

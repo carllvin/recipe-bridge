@@ -103,3 +103,20 @@ def test_overview_reads_each_list_once(tandoor, caplog):
     for path in ("/food/", "/unit/", "/keyword/", "/unit-conversion/"):
         assert lists[path] == 1, (path, lists)
     assert any("Collection overview:" in r.message and "foods" in r.message for r in caplog.records)
+
+
+def test_long_lists_read_page_by_page_at_once():
+    import httpx
+    items = [{"id": i, "name": f"F{i}"} for i in range(450)]
+    seen = []
+
+    def handler(request):
+        page, size = int(request.url.params.get("page", 1)), int(request.url.params["page_size"])
+        seen.append(page)
+        chunk = items[(page - 1) * size:page * size]
+        more = page * size < len(items)
+        return httpx.Response(200, json={"count": len(items), "results": chunk,
+                                         "next": f"http://tandoor/api/food/?page={page + 1}" if more else None})
+    client = httpx.Client(base_url="http://tandoor/api", transport=httpx.MockTransport(handler))
+    assert tandoor_client.fetch_pages(client, "/food/") == items
+    assert sorted(seen) == [1, 2, 3]

@@ -71,8 +71,11 @@ def _tandoor_books(client) -> dict:
             found = _tandoor_list(client, f"/{endpoint}/")
             if found is None:
                 continue
-            for book in found:
-                for row in _tandoor_list(client, f"/{entries}/", {"book": book["id"]}) or []:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as pool:  # one request per book - several at a time
+                rows = list(pool.map(lambda b: _tandoor_list(client, f"/{entries}/", {"book": b["id"]}) or [], found))
+            for book, book_rows in zip(found, rows):
+                for row in book_rows:
                     in_book = row.get("book")
                     in_book = in_book.get("id") if isinstance(in_book, dict) else in_book
                     recipe = row.get("recipe")

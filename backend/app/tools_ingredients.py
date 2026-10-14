@@ -328,18 +328,7 @@ element per ingredient:
 def fetch_all_foods_full(client):
     """Paginated /food/ list. Tandoor's list view already contains
     plural_name and properties, so no per-food GET is needed."""
-    foods = []
-    url, params = "/food/", {"page_size": 200}
-    for _ in range(100):
-        resp = client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        foods.extend(data.get("results", data) if isinstance(data, dict) else data)
-        url = data.get("next") if isinstance(data, dict) else None
-        if not url:
-            break
-        params = None
-    return foods
+    return tandoor_client.fetch_pages(client, "/food/")
 
 
 def fetch_supermarket_categories(client):

@@ -8,7 +8,7 @@ a recipe the recipe manager reports unchanged is taken from there.
 Changes the recipe manager doesn't stamp on the recipe (an ingredient
 renamed or merged, a tag moved into a group) are why an applied change to
 ingredients, units or tags forgets the recipes using them - only those are
-read again - and why once a day everything is read fresh."""
+read again - and why once a week everything is read fresh."""
 from __future__ import annotations
 
 import json
@@ -21,7 +21,7 @@ from .config import settings
 
 log = logging.getLogger("recipe-bridge")
 
-MAX_AGE = 24 * 3600
+MAX_AGE = 7 * 24 * 3600  # changes made through the app are tracked; this catches the rest
 FILES = {"tandoor": "recipe_cache.json", "mealie": "mealie_recipe_cache.json"}
 _lock = threading.Lock()
 
@@ -67,6 +67,8 @@ def read(kind: str, overview: list[dict], key, version, fetch) -> list[dict]:
     id and version."""
     cache = _load(kind)
     kept = cache.get("recipes") or {}
+    copy = (f"copy from {(time.time() - cache['created_at']) / 3600:.0f} h ago" if cache
+            else "no copy yet (first read, older than a week, or dropped after an undo)")
 
     def unchanged(item):
         old = kept.get(str(key(item)))
@@ -75,7 +77,10 @@ def read(kind: str, overview: list[dict], key, version, fetch) -> list[dict]:
     fresh = {str(key(r)): r for r in fetch(todo)}
     recipes = [fresh.get(str(key(item))) or kept.get(str(key(item))) for item in overview]
     recipes = [r for r in recipes if r is not None]
-    log.info("Collection read: %d recipe(s) fetched, %d unchanged from the last read", len(fresh), len(recipes) - len(fresh))
+    no_version = sum(1 for item in todo if not version(item))
+    log.info("Collection read: %d recipe(s) fetched, %d unchanged from the last read - %s%s", len(fresh),
+             len(recipes) - len(fresh), copy,
+             f"; {no_version} without a version from the recipe manager (always read)" if no_version else "")
     _save(kind, {str(key(r)): r for r in recipes}, cache.get("created_at") or time.time())
     return recipes
 
