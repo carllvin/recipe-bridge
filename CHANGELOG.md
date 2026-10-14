@@ -12,6 +12,8 @@
 - Alternatives in an ingredient ("butter or margarine", "lemon, lime or
   orange"): only the first becomes the ingredient, the others go into its
   note ("or margarine")
+- Removed: the tile **Contradictions** (recipe doctor) – it flagged too
+  many recipes that were fine
 - Docs: a short `.env.example` with what's needed to start;
   `docs/configuration.md` lists every setting
 

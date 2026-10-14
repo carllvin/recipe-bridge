@@ -39,7 +39,6 @@ backend/
     undo.py                 Undo journals: replays recorded writes backwards (Tandoor)
     tools_*.py, recipe_restructure.py, nutrition_properties.py   The individual tools
     recipe_amounts.py       Amounts into the steps (Tandoor templates), proofreading
-    recipe_doctor.py        Contradictions inside a recipe (found without AI, fixed with it)
     photo_quality.py        Weak photos, measured from the pixels
     prep_notes.py           "gemahlene Mandeln" -> "Mandeln" + note "gemahlen"
     db_chat.py              Changes by chat: fixed action catalog, recipes found by the app
@@ -73,7 +72,7 @@ Mealie import, tools and planning against a fake Mealie, the background
 queue, duplicate detection, the weekly plan and its chat, the household
 profile and nutrition goals, the guest menu, the meal-prep plan, *what can
 I cook today?*, video, voice and migration imports, the
-amounts in the steps, the recipe doctor, the photo check, the maintenance
+amounts in the steps, the photo check, the maintenance
 chat, budget and schedule, the review inbox – have automated tests. They
 need neither a recipe manager nor an AI key and run in a few seconds:
 

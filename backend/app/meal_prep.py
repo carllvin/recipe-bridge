@@ -93,8 +93,11 @@ def _ingredient_lines(recipe, scale) -> list[str]:
 
 # ---------- the oven, planned without AI ----------
 
+DURATION = re.compile(r"(\d+(?:[.,]\d+)?)(?:\s*(?:-|–|bis|to)\s*(\d+(?:[.,]\d+)?))?\s*"
+                      r"(stunden|stunde|std|hours|hour|hrs|h|minuten|minute|min|minutes|mins)\b", re.I)
+
+
 def _step_minutes(step) -> int | None:
-    from .recipe_doctor import DURATION
     longest = 0
     for m in DURATION.finditer(step["text"]):
         value = float((m.group(2) or m.group(1)).replace(",", "."))
