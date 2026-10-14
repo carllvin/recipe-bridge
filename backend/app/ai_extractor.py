@@ -47,9 +47,12 @@ def _build_system_prompt(same_language: bool, existing_tags: Optional[list[str]]
         f"lb/pounds, °F, inches for pan sizes) to metric units (g, ml, °C, cm). Use "
         f"realistic, commonly used kitchen conversion values (e.g. 1 cup flour ≈ 120 g, "
         f"1 cup sugar ≈ 200 g, 1 cup butter ≈ 227 g, 1 cup liquid ≈ 240 ml, 1 oz ≈ 28 g, "
-        f"1 lb ≈ 454 g, °F -> °C via (F-32)*5/9). Round sensibly (e.g. to the nearest "
-        f"5 or 10 g/ml). Output the converted value, not the original unit. Units "
-        f"already metric (g, kg, ml, l, tsp, tbsp, ...) stay unchanged."
+        f"1 lb ≈ 454 g, °F -> °C via (F-32)*5/9). ml only for liquids: cups of solid "
+        f"or leafy things become grams by weight (e.g. 1 cup fresh herbs or leaves ≈ 25 g, "
+        f"1 cup baby spinach ≈ 30 g, 1 cup chopped nuts ≈ 120 g, 1 cup grated hard cheese "
+        f"≈ 100 g, 1 cup chopped onion ≈ 160 g, 1 cup cooked rice ≈ 180 g). Round sensibly "
+        f"(e.g. to the nearest 5 or 10 g/ml). Output the converted value, not the original "
+        f"unit. Units already metric (g, kg, ml, l, tsp, tbsp, ...) stay unchanged."
         if settings.convert_to_metric else
         "Units: Keep the units used in the original text unchanged (no conversion)."
     )

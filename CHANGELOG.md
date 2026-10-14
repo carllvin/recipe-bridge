@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Converting cups: only liquids become ml – herbs, leaves, nuts, cheese or
+  chopped vegetables become grams (1 cup fresh herbs ≈ 25 g, not 240 ml)
+
 ## 1.3.1
 
 Docker image `ghcr.io/carllvin/recipe-bridge:1.3.1` (or `:1.3`). No changes
