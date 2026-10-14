@@ -40,8 +40,10 @@ ENTITIES = ("food", "unit", "keyword")
 PROMPT = """You turn a home cook's request about their recipe collection (kept in
 {manager}) into actions. Language for "reply": {language}. You will receive a
 JSON object: {"message": string, "history": [{"role", "text"}], "recipe_count": int,
-"tags": [string], "cookbooks": [string], "categories": [string]}
-("categories" = supermarket categories; empty when there are none).
+"tags": [string], "tag_groups": [string], "cookbooks": [string], "categories": [string]}
+("categories" = supermarket categories; empty when there are none. "tag_groups"
+= the tags that have other tags sorted below them - Tandoor's tag groups,
+e.g. "Quelle" or "Mahlzeit"; empty when the recipe manager has none).
 
 FILTER - which recipes are meant; every field optional, all combined with AND:
 {"name": string (part of the title), "ingredient": [string] (uses any of these),
@@ -58,6 +60,9 @@ Actions ("entity" is "food" (ingredient), "unit" or "tag"):
 {"type": "set_servings", "recipes": FILTER, "servings": <number>}
 {"type": "add_to_cookbook", "recipes": FILTER, "cookbook": <name, new or existing>}
 {"type": "set_category", "foods": [<ingredient names>], "category": <name>} (only if "categories" is given)
+{"type": "group_tags", "tags": [<tag names>] | "ungrouped", "group": <group name, new or existing>}
+  (sorts tags into a tag group; "ungrouped" = every tag that is in no group yet -
+  the "tags without a group" tile; only with Tandoor)
 {"type": "find", "recipes": FILTER} (a question - the app lists the recipes)
 
 Rules:
@@ -332,11 +337,50 @@ def to_suggestions(col, actions) -> tuple[list[ToolSuggestion], list[str], list[
                     id=uuid.uuid4().hex[:10], kind="food_category",
                     summary=f"ingredients: category {category!r} for {', '.join(repr(f['name']) for f in known)}",
                     detail={"category": category, "food_ids": [f["id"] for f in known]}))
+            elif kind == "group_tags":
+                suggestions.append(_group_tags(col, action))
             else:
                 problems.append(f"unknown action {kind!r}")
         except Problem as exc:
             problems.append(str(exc))
     return suggestions, problems, answers
+
+
+def _group_tags(col, action) -> ToolSuggestion:
+    """Tags into a tag group (Tandoor) - applied like the tag-groups tool's
+    suggestions (tools_tag_groups.apply_suggestion)."""
+    from . import tools_tag_groups
+    if col.mealie:
+        raise Problem("tag groups exist only in Tandoor")
+    group = str(action.get("group") or "").strip()
+    if not group:
+        raise Problem("no group given")
+    keywords = tandoor_client.fetch_pages(col.client, "/keyword/")
+    existing = next((k for k in keywords if _norm(k.get("name")) == _norm(group)), None)
+    wanted = action.get("tags")
+    if wanted == "ungrouped" or _list(wanted) == ["ungrouped"]:
+        tags = tools_tag_groups.ungrouped(keywords)
+    else:
+        by_name = {_norm(k.get("name")): k for k in keywords}
+        unknown = [t for t in _list(wanted) if _norm(t) not in by_name]
+        if unknown:
+            raise Problem("no tag called " + ", ".join(repr(t) for t in unknown))
+        tags = [by_name[_norm(t)] for t in _list(wanted)]
+    if existing:  # not into itself, and not what is in that group already
+        tags = [k for k in tags if k["id"] != existing["id"] and tools_tag_groups._parent_id(k) != existing["id"]]
+    if not tags:
+        raise Problem(f"no tag to sort into {group!r}")
+    name = existing["name"] if existing else group
+    s = ToolSuggestion(
+        id=uuid.uuid4().hex[:10], kind="group_tags",
+        summary=f"tags: {len(tags)} into the group {name!r}" + ("" if existing else " (new)"),
+        detail={"group": name, "group_id": existing["id"] if existing else None,
+                "tags": [{"id": k["id"], "name": k.get("name", "")} for k in tags]},
+        preview="\n".join(f"• {k.get('name', '')}" for k in tags[:MAX_FOUND_LISTED])
+        + (f"\n… and {len(tags) - MAX_FOUND_LISTED} more" if len(tags) > MAX_FOUND_LISTED else ""))
+    if len(tags) > CONFIRM_ABOVE:
+        s.detail["confirm"] = True
+    return s
 
 
 # ---------- one chat message ----------
@@ -355,9 +399,10 @@ def chat(message: str, job_id: str | None = None) -> dict:
     with target.client().get_client() as client:
         col = Collection(client)
         tags = sorted((k["name"] for k in col.items("keyword")), key=str.casefold)[:MAX_TAGS_SHOWN]
+        groups = sorted((k["name"] for k in col.items("keyword") if k.get("numchild")), key=str.casefold)
         payload = {"message": message, "history": [{"role": h["role"], "text": h["text"]} for h in history[-HISTORY:]],
-                   "recipe_count": len(col.recipes()), "tags": tags, "cookbooks": col.cookbooks(),
-                   "categories": col.categories()}
+                   "recipe_count": len(col.recipes()), "tags": tags, "tag_groups": groups,
+                   "cookbooks": col.cookbooks(), "categories": col.categories()}
 
         def ask(system_prompt):
             out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
@@ -462,6 +507,9 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
         raise tandoor_client.TandoorError("Suggestion not found.")
     if suggestion.status != "pending":
         return suggestion
+    if suggestion.kind == "group_tags":
+        from . import tools_tag_groups
+        return tools_tag_groups.apply_suggestion(job_id, suggestion_id)
     if suggestion.kind in ("rename", "merge") and not target.is_mealie():
         from . import tools_ingredients, tools_tags, tools_units
         apply_fn = {"food": tools_ingredients.apply_suggestion, "unit": tools_units.apply_suggestion,

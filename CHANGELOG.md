@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Chat: sort tags into a tag group – named ones or every tag without a
+  group ("all tags without a group into the group Quelle"); Tandoor only
 - **Pick a cookbook's recipes before the AI reads it**: a PDF (from 15
   pages) or EPUB shows its recipes – from its bookmarks or table of
   contents, otherwise the pages that look like a recipe – and only the

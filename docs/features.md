@@ -233,9 +233,11 @@ grouped by kind:
   suggestion improves the photo with the image AI (`IMAGE_GEN_ENABLED`).
 - **💬 Changes by chat** – ask in plain words: "every recipe with salmon gets
   the tag Fisch", "rename Paprika rot to rote Paprika", "put all soups into
-  the cookbook Winter", "which recipes have no photo?". The AI only picks
-  from a fixed set of actions (rename/merge ingredients, units, tags;
-  add/remove/delete tags; servings; cookbook; supermarket category; find)
+  the cookbook Winter", "all tags without a group into the group Quelle",
+  "which recipes have no photo?". The AI only picks from a fixed set of
+  actions (rename/merge ingredients, units, tags; add/remove/delete tags;
+  tags into a tag group (Tandoor); servings; cookbook; supermarket category;
+  find)
   and describes which recipes are meant – the app finds them itself. Every
   change is shown with the recipes it touches and applied only on a click;
   changes to more than 50 recipes and deleting a tag need a second click. A
