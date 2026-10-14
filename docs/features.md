@@ -21,7 +21,8 @@ recipe manager – "Tandoor" or "Mealie".
 - **Pick the recipes first** – before the AI reads a cookbook (PDF from 15
   pages, EPUB), the app lists its recipes **without AI**: from the PDF's
   bookmarks or the EPUB's table of contents, otherwise the pages that look
-  like a recipe (lines like "200 g Mehl"). Only the picked recipes' pages go
+  like a recipe (lines like "200 g Mehl"), each with a preview (its photo, or
+  the top of its page). Only the picked recipes' pages go
   to the AI, with a live estimate of the tokens next to the whole book's.
   Ticked at first are the entries that look like a recipe and aren't in your
   collection yet – not the foreword or the index. *Whole book* reads

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Picking a cookbook's recipes: each entry shows a preview – the largest
+  photo on its pages, else the top of its first page (PDF) – without AI
 - "3 Knoblauchzehen" becomes 3 *Zehen* Knoblauch – the portion in a name
   (clove, stalk, sprig, slice, bunch, can) is the unit, not "3 Stück
   Knoblauch"
