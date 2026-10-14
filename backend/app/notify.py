@@ -1,7 +1,7 @@
 """Push notifications to the phone via ntfy and/or Telegram (NOTIFY_* in
 .env; nothing is sent without them):
-- an import that came in without you (phone share, watched folder) is ready
-  - or failed,
+- an import that came in without you (phone share, watched folder) or
+  waited for its half-price AI batch is ready - or failed,
 - automatic runs (maintenance, new recipes, post-processing) prepared
   suggestions - collected for a while, so a night's maintenance is one
   message, not ten,
@@ -151,8 +151,9 @@ def test() -> dict:
 # ---------- events ----------
 
 def import_finished(job) -> None:
-    """For imports that came in without you at the screen."""
-    if not job.source:
+    """For imports that came in without you at the screen - and half-price
+    ones (a batch takes up to 24 hours, nobody waits at the screen for it)."""
+    if not job.source and not getattr(job, "batch", False):
         return
     if job.status == "ready":
         send("import_ready", name=job.filename, n=len(job.recipes))

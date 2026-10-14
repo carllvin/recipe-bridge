@@ -62,8 +62,10 @@ pasted text. Needs an OpenAI or Gemini key (also when `AI_PROVIDER` is
 
 Links (single, from a list, a scan or bookmarks) are read one page at a
 time – the page's schema.org recipe data is used when present – and each
-recipe keeps its link as the source. Links that can't be loaded or contain
-no recipe are skipped and listed in the review.
+recipe keeps its link as the source. Short links (bit.ly, pin.it …) are
+followed, and a Pinterest pin leads to the page it was saved from. Links
+that can't be loaded or contain no recipe are skipped and listed in the
+review.
 
 **More ways in** (under *More ways* on the import page):
 
@@ -85,7 +87,9 @@ no recipe are skipped and listed in the review.
   into the cookbooks they were in before.
 
 Everything is **translated into your language** (`OUTPUT_LANGUAGE`) and
-**converted to metric** on the way.
+**converted to metric** on the way. Ingredient names stay simple: the
+preparation ("finely chopped") and alternatives ("or margarine") go into
+the ingredient's note.
 
 With `TRANSLATE_RECIPES=false` recipes **keep the language they were written
 in** instead – the tools that improve recipes (amounts in the steps,
@@ -317,8 +321,9 @@ grouped by kind:
 The whole app works on the phone – with a bottom navigation, the camera for
 cookbook and fridge photos, the share menu for links, and the review inbox
 for approving suggestions on the go. Optional push notifications (ntfy or
-Telegram) tell you when an import is ready, automatic runs prepared
-suggestions or the AI budget runs low.
+Telegram) tell you when an import from the phone, the watched folder or at
+half price is ready, automatic runs prepared suggestions or the AI budget
+runs low.
 
 <p align="center">
   <img src="../screenshots/mobile.png" alt="Review inbox and plan on a phone" width="60%">

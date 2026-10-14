@@ -109,6 +109,47 @@ def test_openai_batch(monkeypatch):
     assert state["lines"][0]["body"]["messages"][0] == {"role": "system", "content": "sys"}
 
 
+def test_gemini_batch(monkeypatch):
+    from google import genai
+    state = {"polls": 0}
+
+    class Batches:
+        def create(self, model, src, config=None):
+            state["src"], state["model"] = src, model
+            return SimpleNamespace(name="batches/1")
+
+        def get(self, name):
+            state["polls"] += 1
+            n, ended = len(state["src"]), state["polls"] >= 2
+            response = SimpleNamespace(text=RECIPE, usage_metadata=SimpleNamespace(prompt_token_count=600,
+                                                                                   candidates_token_count=100))
+            return SimpleNamespace(
+                state=SimpleNamespace(name="JOB_STATE_SUCCEEDED" if ended else "JOB_STATE_RUNNING"),
+                completion_stats=SimpleNamespace(successful_count=n if ended else 0, failed_count=0),
+                dest=SimpleNamespace(inlined_responses=[SimpleNamespace(response=response, error=None)] * n)
+                if ended else None)
+    monkeypatch.setattr(genai, "Client", lambda api_key=None: SimpleNamespace(batches=Batches()))
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "x")
+    monkeypatch.setattr(llm_provider, "BATCH_POLL_SECONDS", 0)
+    assert llm_provider.batch_supported()
+    waits = []
+    out = llm_provider.complete_batch("sys", ["a", "b"], max_tokens=100, on_wait=lambda d, t: waits.append((d, t)))
+    assert [t for t, _u in out] == [RECIPE, RECIPE] and out[0][1].input_tokens == 300 and out[0][1].output_tokens == 50
+    assert state["src"][0]["config"] == {"max_output_tokens": 100, "system_instruction": "sys"}
+    assert state["src"][1]["contents"][0]["parts"][0]["text"] == "b"
+    assert waits == [(0, 2), (2, 2)]
+
+
+def test_gemini_batch_too_large_asks_one_by_one(monkeypatch):
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "x")
+    monkeypatch.setattr(llm_provider, "GEMINI_INLINE_MAX", 10)
+    import pytest
+    with pytest.raises(RuntimeError):
+        llm_provider.submit_batch("sys", ["a" * 20])
+
+
 def test_which_imports_go_as_batch(monkeypatch):
     from app import jobs, main
     monkeypatch.setattr(llm_provider, "batch_supported", lambda: True)
@@ -122,7 +163,7 @@ def test_which_imports_go_as_batch(monkeypatch):
     monkeypatch.setattr(settings, "watch_batch", False)
     assert not main._as_batch(folder)
     monkeypatch.setattr(llm_provider, "batch_supported", lambda: False)
-    assert not main._as_batch(job)  # e.g. Gemini: as usual
+    assert not main._as_batch(job)  # e.g. a local model: as usual
 
 
 def test_checkbox_reaches_the_job(monkeypatch):

@@ -61,7 +61,7 @@ app actually uses.
 |---|---|---|
 | `WATCH_DIR` | – | Watched folder: files put there are imported on their own (mount it, see `docker-compose.yml`). Done files move to `processed/`, unusable ones to `failed/` |
 | `WATCH_INTERVAL_SECONDS` | `30` | How often the folder is checked |
-| `WATCH_BATCH` | `true` | Watched-folder imports go to the AI as a batch: half price, ready within up to 24 hours (Claude, OpenAI). Imports in the app have a checkbox for it |
+| `WATCH_BATCH` | `true` | Watched-folder imports go to the AI as a batch: half price, ready within up to 24 hours (Claude, OpenAI, Gemini). Imports in the app have a checkbox for it |
 | `MAX_UPLOAD_MB` | `100` | Largest upload |
 | `JOB_RETENTION_HOURS` | `48` | Imports (and their files) are deleted after this long |
 
@@ -90,7 +90,7 @@ app actually uses.
 | Variable | Default | Meaning |
 |---|---|---|
 | `APP_PASSWORD` | – | Password for the web interface; each device signs in once. Changing it signs every device out |
-| `NOTIFY_NTFY_URL` / `NOTIFY_NTFY_TOKEN` | – | Push messages via an ntfy topic (token only for a protected topic) – when an import from the phone or the folder is ready, automatic runs prepared suggestions, the budget runs low |
+| `NOTIFY_NTFY_URL` / `NOTIFY_NTFY_TOKEN` | – | Push messages via an ntfy topic (token only for a protected topic) – when an import from the phone, the folder or at half price is ready, automatic runs prepared suggestions, the budget runs low |
 | `NOTIFY_TELEGRAM_TOKEN` / `NOTIFY_TELEGRAM_CHAT_ID` | – | The same via a Telegram bot (@BotFather) |
 | `APP_URL` | – | The app's public address – notifications link to it |
 | `AUTO_PROCESS_INTERVAL_HOURS` | `0` (off) | Run *Process new recipes* every N hours |
@@ -143,7 +143,7 @@ pages and the fridge photo the model must read images (e.g. `qwen2.5vl`,
 
 ### Keeping costs down
 
-- **Half price:** with Claude or OpenAI an import can go to the AI as a
+- **Half price:** with Claude, OpenAI or Gemini an import can go to the AI as a
   batch – ready within up to 24 hours. On by default for the watched folder
   (`WATCH_BATCH`), a checkbox on the import page otherwise; a large import
   without it asks once more.

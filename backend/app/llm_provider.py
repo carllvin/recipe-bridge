@@ -310,15 +310,16 @@ def transcribe_audio(data: bytes, filename: str) -> tuple[str, TokenUsage]:
 # For imports nobody waits for (the watched folder, WATCH_BATCH=true): all of
 # a cookbook's chunks go to the provider as one batch, billed at half price;
 # the import waits (polling once a minute) until every answer is there.
-# Claude (Message Batches) and OpenAI (Batch API) - the others answer one by
-# one as usual.
+# Claude (Message Batches), OpenAI (Batch API) and Gemini (Batch Mode) - a
+# local model answers one by one as usual.
 
 BATCH_POLL_SECONDS = 60
 BATCH_MAX_SECONDS = 25 * 3600
+GEMINI_INLINE_MAX = 18 * 1024 * 1024
 
 
 def batch_supported() -> bool:
-    return _active_provider() in ("anthropic", "openai") and is_configured()
+    return _active_provider() in ("anthropic", "openai", "gemini") and is_configured()
 
 
 def complete_batch(system_prompt, contents: list[str], max_tokens: int = 4096,
@@ -368,6 +369,23 @@ def submit_batch(system_prompt, contents: list[str], max_tokens: int = 4096) -> 
         batch = client.batches.create(input_file_id=uploaded.id, endpoint="/v1/chat/completions",
                                       completion_window="24h")
         return {"provider": "openai", "id": batch.id, "n": len(contents)}
+    if provider == "gemini":
+        from google import genai
+
+        # sent inline - Gemini takes up to 20 MB that way; a bigger batch is
+        # asked one by one by the caller
+        if sum(len(c.encode("utf-8")) + len((s or "").encode("utf-8")) for s, c in zip(systems, contents)) > GEMINI_INLINE_MAX:
+            raise RuntimeError("Too large for a Gemini batch.")
+        client = genai.Client(api_key=settings.gemini_api_key)
+
+        def request(system, content):
+            config = {"max_output_tokens": max_tokens}
+            if system:
+                config["system_instruction"] = system
+            return {"contents": [{"role": "user", "parts": [{"text": content}]}], "config": config}
+        job = client.batches.create(model=model, src=[request(s, c) for s, c in zip(systems, contents)],
+                                    config={"display_name": "recipe-bridge"})
+        return {"provider": "gemini", "id": job.name, "n": len(contents)}
     raise RuntimeError(f"Batches aren't available with AI_PROVIDER={provider}.")
 
 
@@ -377,6 +395,8 @@ def collect_batch(ref: dict, on_wait=None) -> list[tuple[str, TokenUsage]]:
         return _collect_anthropic(ref, on_wait)
     if ref["provider"] == "openai":
         return _collect_openai(ref, on_wait)
+    if ref["provider"] == "gemini":
+        return _collect_gemini(ref, on_wait)
     raise RuntimeError(f"Unknown batch provider {ref['provider']!r}.")
 
 
@@ -462,3 +482,41 @@ def _collect_openai(ref, on_wait):
     if failed:
         raise RuntimeError(f"{len(failed)} of {total} batch request(s) failed.")
     return [answers[f"c{n}"] for n in range(total)]
+
+
+def _collect_gemini(ref, on_wait):
+    from google import genai
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    total = ref["n"]
+    state = {}
+    ended = ("JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",
+             "JOB_STATE_PARTIALLY_SUCCEEDED")
+
+    def check():
+        job = client.batches.get(name=ref["id"])
+        state["job"] = job
+        stats = job.completion_stats
+        done = ((stats.successful_count or 0) + (stats.failed_count or 0)) if stats else 0
+        name = getattr(job.state, "name", str(job.state))
+        return done, total, name in ended
+    _wait(check, on_wait)
+    job = state["job"]
+    responses = (job.dest.inlined_responses if job.dest else None) or []
+    answers = []
+    for item in responses:
+        response = item.response
+        if item.error or response is None:
+            answers.append(None)
+            continue
+        usage = TokenUsage()
+        meta = getattr(response, "usage_metadata", None)
+        if meta is not None:
+            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+        answers.append((response.text or "", _half(usage)))
+    failed = total - sum(1 for a in answers[:total] if a)
+    if failed:
+        name = getattr(job.state, "name", str(job.state))
+        raise RuntimeError(f"{failed} of {total} batch request(s) failed ({name}).")
+    return answers[:total]
