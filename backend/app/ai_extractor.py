@@ -168,6 +168,11 @@ text (e.g. "2 onions", "3 eggs"), set "unit" to the word for "piece(s)" in \
 {language} (e.g. "pcs" in English, "Stück" in German) instead of leaving it null. \
 Only leave "unit" null when the ingredient genuinely has no natural unit at all \
 (e.g. "salt to taste").
+When the portion is part of the name, it becomes the unit and the name stays the \
+ingredient: "3 garlic cloves" / "3 Knoblauchzehen" -> amount 3, unit "clove(s)" / \
+"Zehe(n)", name "garlic" / "Knoblauch" - never "3 pcs garlic" (three whole bulbs). \
+The same for a stalk of celery, a sprig of thyme, a slice of bread, a bunch of \
+parsley, a can of tomatoes.
 
 IMPORTANT - Side notes: if the recipe text contains important information that \
 isn't part of the actual cooking steps - e.g. storage/shelf life, freezing, make- \

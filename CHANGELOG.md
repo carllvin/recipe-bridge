@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- "3 Knoblauchzehen" becomes 3 *Zehen* Knoblauch – the portion in a name
+  (clove, stalk, sprig, slice, bunch, can) is the unit, not "3 Stück
+  Knoblauch"
 - Converting cups: only liquids become ml – herbs, leaves, nuts, cheese or
   chopped vegetables become grams (1 cup fresh herbs ≈ 25 g, not 240 ml)
 
