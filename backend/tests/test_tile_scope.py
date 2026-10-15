@@ -29,7 +29,7 @@ def test_few_tags_only_the_tile_recipes(tandoor, monkeypatch):
                     "recipe_versions": {"1": None, "2": None}})
     sent = []
 
-    def ai(job, prompt, payload, max_tokens):
+    def ai(job, prompt, payload, max_tokens, cache=False):
         sent.extend(r["id"] for r in payload["recipes"])
         return []
     monkeypatch.setattr(tools_tags, "_complete_json", ai)

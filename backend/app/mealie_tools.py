@@ -77,6 +77,7 @@ def view(recipe: dict, for_tags: bool = False) -> dict:
         "id": recipe.get("slug"), "slug": recipe.get("slug"), "name": recipe.get("name", ""),
         "description": recipe.get("description") or "",
         "keywords": [{"id": t.get("id"), "name": t.get("name", "")} for t in recipe.get("tags") or []],
+        "updated_at": recipe.get("updatedAt") or recipe.get("dateUpdated"),
         "source_url": recipe.get("orgURL") or "",  # source_tag
         "books": [c.get("name", "") for c in recipe.get("recipeCategory") or [] if c.get("name")],  # an import's cookbook
         "servings": recipe.get("recipeServings") or recipe.get("recipeYieldQuantity") or 0,
@@ -396,6 +397,7 @@ def suggest_more(job, client):
     todo = _recipes_for(client, "recipes_few_tags",
                         lambda v: few_tags(v, names) or (v["id"] not in checked and not tools_tags.has_diet_tag(v, diets)),
                         job, True)
+    todo = tools_tags.not_declined(todo)
     job.progress_total = len(todo)
     job.cost_estimate = format_cost_estimate(len(todo), "batched_suggest_tags")
     job.suggestions = tools_tags.suggest_tags_suggestions(job, todo, vocabulary, names)

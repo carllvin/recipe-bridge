@@ -95,10 +95,25 @@ def _has_amount(ing) -> bool:
     return bool(ing.get("food") and ing.get("amount") and not ing.get("no_amount"))
 
 
+_FRACTIONS = {0.25: ("¼", "1/4"), 0.5: ("½", "1/2"), 0.75: ("¾", "3/4"), 0.33: ("⅓", "1/3"), 0.67: ("⅔", "2/3"),
+              0.125: ("⅛", "1/8")}
+
+
+def _amount_forms(amount: float) -> list[str]:
+    """How the amount may be written: "1.5", "1,5", "1½", "1 1/2", "½" ..."""
+    number = f"{round(amount, 2):g}"
+    forms = [number, number.replace(".", ",")]
+    whole, part = int(amount), round(amount - int(amount), 3)
+    for value, (glyph, slash) in _FRACTIONS.items():
+        if abs(part - value) < 0.01:
+            prefix = str(whole) if whole else ""
+            forms += [prefix + glyph, f"{prefix} {glyph}".strip(), f"{prefix} {slash}".strip()]
+    return forms
+
+
 def _mentions_amount(ing, text) -> bool:
-    number = f"{round(float(ing['amount']), 2):g}"
-    return any(re.search(rf"(?<![\d.,]){re.escape(n)}(?![\d.,]*\d)", text)
-               for n in (number, number.replace(".", ",")))
+    return any(re.search(rf"(?<![\d.,/]){re.escape(n)}(?![\d.,]*\d)", text)
+               for n in _amount_forms(float(ing["amount"])))
 
 
 TEMPLATE = re.compile(r"\{\{\s*ingredients\[(\d+)\]\s*\}\}")
@@ -139,8 +154,9 @@ def skip_reason(recipe, after_import: bool = False) -> str | None:
     (the review was it), so it isn't waited for."""
     steps = recipe.get("steps") or []
     if steps and any("{{" in (s.get("instruction") or "") for s in steps):
-        # templates already: only the comments and the "0 Pfeffer" ones
-        return None if any(_notes_missing(s) or _zero_templates(s) for s in steps) else "templates already"
+        # templates already: only a "0 Pfeffer" one is wrong - a missing comment in
+        # brackets still leaves the amounts in the steps (not on the tile for that)
+        return None if any(_zero_templates(s) for s in steps) else "templates already"
     if not steps:
         return "no steps"
     if not after_import and recipe_restructure.needs_restructure(recipe):

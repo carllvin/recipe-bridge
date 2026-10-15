@@ -302,7 +302,8 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
             answers = _complete_json(job, system_prompt, compact, max_tokens=25 * len(batch) + 100)
         except Exception as exc:  # noqa: BLE001
             log.warning("Season batch %d failed: %s", i, exc)
-            answers = []
+            continue  # asked again next time
+        seasoned = set()
 
         for answer in answers:
             recipe = by_id.get(answer.get("id")) if isinstance(answer, dict) else None
@@ -310,21 +311,28 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
             season = labels_by_lower.get(season.strip().strip(".").lower()) if isinstance(season, str) else None
             if season is None:
                 continue
+            seasoned.add(recipe["id"])
             suggestions.append(ToolSuggestion(
                 id=uuid.uuid4().hex[:10], kind="season",
                 summary=f"tag {recipe.get('name', '')!r} as {season!r}",
                 detail={"recipe_id": recipe["id"], "season": season},
             ))
+        # the rest is year-round (or had no answer): off the "without season" tile for good
+        year_round = [{"key": str(r["id"]), "name": r.get("name", "")} for r in batch if r["id"] not in seasoned]
+        if year_round:
+            ignored.add("recipes_without_season", year_round)
         job.progress_current = min(i * SEASON_BATCH_SIZE, len(recipes))
         tool_jobs.save_tool_job(job)
     return suggestions
 
 
-def _complete_json(job, system_prompt, payload, max_tokens):
+def _complete_json(job, system_prompt, payload, max_tokens, cache=False):
     """One AI call with a JSON payload; adds token usage to the job and
-    returns the parsed JSON answer."""
+    returns the parsed JSON answer. cache: the system prompt repeats over
+    batches (Claude reads it from the cache at a tenth)."""
     def ask(prompt):
-        text_out, usage = llm_provider.complete_tool_text(prompt, json.dumps(payload, ensure_ascii=False), max_tokens=max_tokens)
+        text_out, usage = llm_provider.complete_tool_text(prompt, json.dumps(payload, ensure_ascii=False),
+                                                          max_tokens=max_tokens, cache=cache)
         job.token_usage.input_tokens += getattr(usage, "input_tokens", 0) or 0
         job.token_usage.output_tokens += getattr(usage, "output_tokens", 0) or 0
         return text_out, usage
@@ -397,9 +405,10 @@ def apply_season_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
 
 SUGGEST_MORE_SYSTEM_PROMPT = """You suggest additional DESCRIPTIVE tags for recipes
 in a database whose target language is {language}. You will receive a JSON
-object: {"vocabulary": [string], "diet_tags": [string], "recipes": [{"id": integer,
-"title": string, "description": string|null, "ingredients": [string],
-"ingredients_complete": bool, "existing_tags": [string]}, ...]}.
+object: {"recipes": [{"id": integer, "title": string, "description": string|null,
+"ingredients": [string], "ingredients_complete": bool, "existing_tags": [string],
+"missing": integer}, ...]}. "vocabulary" and "diet_tags" are given at the end of
+these instructions.
 
 Good tags describe the dish, e.g.:
 - cuisine / origin: amerikanisch, italienisch, asiatisch
@@ -417,8 +426,10 @@ useful descriptive tag is missing from the vocabulary - in the same style
 (short, {language}, lowercase adjectives / capitalized nouns as usual in
 {language}). Don't repeat "existing_tags".
 
-For each recipe suggest at most 3 tags that are genuinely obvious, not a
-stretch; an empty list is fine.
+"missing" says how many more tags a recipe needs to have five: suggest up to
+that many that fit the dish. Fill the gap from the different kinds above
+(course, cuisine, taste, cooking method, occasion/effort) rather than leaving
+it - only suggest fewer when nothing more honestly fits; never a stretch.
 
 Separately, "diet": which of "diet_tags" (diet / allergen tags: vegetarian,
 vegan, gluten-free, lactose-free, nut-free - in exactly the given spelling)
@@ -479,12 +490,16 @@ def mark_diet_checked(recipe_ids) -> None:
         json.dump(sorted(ids, key=str), f)  # Tandoor ids and Mealie slugs
 
 MIN_TAGS_DEFAULT = 5
-# Recipes per AI call. The prompt and the tag vocabulary (the bulk of the
-# input) are sent once per batch instead of once per recipe.
-SUGGEST_MORE_BATCH_SIZE = 20
+# Recipes per AI call. The prompt and the tag vocabulary are sent once per
+# batch (cached with Claude) instead of once per recipe.
+SUGGEST_MORE_BATCH_SIZE = 40
 MAX_VOCABULARY = 200
-MAX_DESCRIPTION_CHARS = 200
+MAX_DESCRIPTION_CHARS = 80
 MAX_INGREDIENTS = 40
+# basics that say nothing about a dish's tags or diet - not sent
+STAPLES = {"salz", "salt", "pfeffer", "pepper", "schwarzer pfeffer", "black pepper", "wasser", "water", "öl", "oil",
+           "olivenöl", "olive oil", "pflanzenöl", "rapsöl", "vegetable oil", "sel", "poivre", "eau", "huile", "sale",
+           "pepe", "acqua", "olio", "sal", "pimienta", "agua", "aceite"}
 
 
 def _compact_recipe(recipe):
@@ -494,7 +509,7 @@ def _compact_recipe(recipe):
     for step in recipe.get("steps", []):
         for ing in step.get("ingredients", []):
             name = (ing.get("food") or {}).get("name")
-            if name and name not in ingredients:
+            if name and name not in ingredients and name.strip().casefold() not in STAPLES:
                 ingredients.append(name)
     description = (recipe.get("description") or "").strip()
     return {
@@ -540,12 +555,53 @@ def _is_ingredient_tag(tag, recipe_ingredients, food_names) -> bool:
     return any(len(name) >= 4 and name in low for name in recipe_ingredients)
 
 
+def _descriptive_count(recipe, food_names) -> int:
+    """Tags that count for the "few tags" tile - not ingredient names."""
+    return sum(1 for kw in recipe.get("keywords", []) if kw["name"].strip().casefold() not in food_names)
+
+
+# ---------- declined suggestions aren't asked for again ----------
+# A recipe whose tag suggestion was skipped stays in the tile, but isn't
+# sent to the AI again until it changes (its version).
+
+def _declined_path() -> str:
+    return os.path.join(settings.data_dir, "tags_declined.json")
+
+
+def declined() -> dict:
+    try:
+        with open(_declined_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_declined(suggestion) -> None:
+    d = suggestion.detail or {}
+    if suggestion.kind != "suggest_tags" or not d.get("version"):
+        return
+    known = declined()
+    known[str(d["recipe_id"])] = d["version"]
+    os.makedirs(settings.data_dir, exist_ok=True)
+    with open(_declined_path(), "w", encoding="utf-8") as f:
+        json.dump(known, f)
+
+
+def not_declined(recipes) -> list:
+    known = declined()
+    return [r for r in recipes if not (r.get("updated_at") and known.get(str(r["id"])) == r["updated_at"])]
+
+
 def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -> list[ToolSuggestion]:
     """Batched "suggest more tags" for the given recipes. Adds token usage to
     `job`, stops early on cancel. Shared by the "Tags: suggest more" tool and
     the new-recipes workflow."""
-    system_prompt = SUGGEST_MORE_SYSTEM_PROMPT.replace("{language}", settings.output_language)
     diets = diet_tags(vocabulary)
+    # the same for every batch: in the (cached) instructions, not in each call's data
+    system_prompt = (SUGGEST_MORE_SYSTEM_PROMPT.replace("{language}", settings.output_language)
+                     + "\nvocabulary: " + json.dumps(vocabulary, ensure_ascii=False)
+                     + "\ndiet_tags: " + json.dumps(diets, ensure_ascii=False) + "\n")
+    missing = {r["id"]: max(0, MIN_TAGS_DEFAULT - _descriptive_count(r, food_names)) for r in recipes}
     diet_by_key = {d.casefold(): d for d in diets}
     by_id = {r["id"]: r for r in recipes}
     # casefold, not lower: "SÜSS" must match an existing "süß"
@@ -560,8 +616,8 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
         try:
             answers = _complete_json(
                 job, system_prompt,
-                {"vocabulary": vocabulary, "diet_tags": diets, "recipes": [_compact_recipe(r) for r in batch]},
-                max_tokens=80 * len(batch) + 200,
+                {"recipes": [{**_compact_recipe(r), "missing": missing[r["id"]]} for r in batch]},
+                max_tokens=110 * len(batch) + 200, cache=len(batches) > 1,
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("Suggest-more batch %d failed: %s", i, exc)
@@ -580,7 +636,7 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
             tags = [known.get(t.casefold(), t) for t in tags]
             tags = [t for t in dict.fromkeys(tags)
                     if t.casefold() not in existing and t.casefold() not in diet_by_key
-                    and not _is_ingredient_tag(t, ingredients, food_names)][:3]
+                    and not _is_ingredient_tag(t, ingredients, food_names)][:missing[recipe["id"]]]
             # Diet / allergen tags on top of the 3 descriptive ones; vegan
             # implies vegetarian.
             diet = [diet_by_key[d.strip().casefold()] for d in answer.get("diet") or []
@@ -596,7 +652,7 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
             suggestions.append(ToolSuggestion(
                 id=uuid.uuid4().hex[:10], kind="suggest_tags",
                 summary=f"add [{labels}] to {recipe.get('name', '')!r}",
-                detail={"recipe_id": recipe["id"], "tags": tags},
+                detail={"recipe_id": recipe["id"], "tags": tags, "version": recipe.get("updated_at")},
             ))
         job.progress_current = min(i * SUGGEST_MORE_BATCH_SIZE, len(recipes))
         tool_jobs.save_tool_job(job)
@@ -634,6 +690,7 @@ def run_suggest_more_scan(job_id: str) -> None:
             # The recipes the tile lists and the ones changed since the
             # overview - not the whole collection (recipe_scope).
             recipes = under_tagged = recipe_scope.recipes_for(client, "recipes_few_tags", needs_tags, skip, job)
+            under_tagged = not_declined(under_tagged)
             job.progress_total = len(under_tagged)
             job.cost_estimate = format_cost_estimate(len(under_tagged), "batched_suggest_tags")
             tool_jobs.save_tool_job(job)
