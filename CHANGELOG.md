@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Steps without amounts** no longer lists recipes whose steps have the
+  amounts: a comment missing in brackets doesn't count, and "½ TL" or
+  "1 1/2 l" are recognised as amounts
 - **Without a season**: a recipe the AI finds year-round goes onto the
   tile's ignore list right after the run – it doesn't come back (undo it
   under the tile's ignored entries)

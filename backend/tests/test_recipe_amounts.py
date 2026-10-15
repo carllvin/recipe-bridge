@@ -172,7 +172,7 @@ def test_recipes_done_before_get_the_comments_without_ai(monkeypatch, tandoor):
     r["steps"][0]["instruction"] = "{{ ingredients[0] }} mit {{ ingredients[1] }} und {{ ingredients[2] }} verrühren."
     r["steps"][1]["instruction"] = "{{ ingredients[0] }} erhitzen, bei 180 °C backen."
     r["steps"][0]["ingredients"][0]["note"] = "gesiebt"
-    assert recipe_amounts.needs_amounts(r)
+    assert not recipe_amounts.needs_amounts(r)  # the amounts are there: not on the tile for a comment
     monkeypatch.setattr(llm_provider, "complete_text", lambda *a, **k: pytest.fail("no AI needed"))
     suggestion = recipe_amounts.plan_suggestion(tool_jobs.create_tool_job("recipes_amounts"), r)
     assert suggestion.summary.startswith("recipe: fix the ingredients in the steps")
@@ -288,3 +288,13 @@ def test_after_an_import_all_ingredients_in_step_one_still_get_amounts():
     done["steps"][0]["instruction"] = "250 g Mehl mit 500 ml Milch und 3 Eiern verrühren."
     done["steps"][1]["instruction"] = "1 EL Butter erhitzen."
     assert recipe_amounts.skip_reason(done, after_import=True) == "the steps name the amounts already"
+
+
+def test_fractions_count_as_amounts():
+    r = recipe()
+    r["steps"][0]["ingredients"][0]["amount"] = 0.5
+    r["steps"][0]["ingredients"][1]["amount"] = 1.5
+    r["steps"][0]["ingredients"][2]["amount"] = 3
+    for text in ("½ kg Mehl mit 1 1/2 l Milch und 3 Eiern verrühren.", "1/2 kg Mehl mit 1½ l Milch und 3 Eiern verrühren."):
+        r["steps"][0]["instruction"] = text
+        assert recipe_amounts.skip_reason(r) == "the steps name the amounts already", text
