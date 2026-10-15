@@ -298,3 +298,16 @@ def test_fractions_count_as_amounts():
     for text in ("½ kg Mehl mit 1 1/2 l Milch und 3 Eiern verrühren.", "1/2 kg Mehl mit 1½ l Milch und 3 Eiern verrühren."):
         r["steps"][0]["instruction"] = text
         assert recipe_amounts.skip_reason(r) == "the steps name the amounts already", text
+
+
+def test_amounts_named_in_another_step_count_and_the_tile_says_why():
+    r = recipe()
+    for ing in r["steps"][0]["ingredients"]:
+        ing["amount"] = ing["amount"] or 1
+    amounts = [f"{i['amount']:g}" for i in r["steps"][0]["ingredients"]]
+    r["steps"][0]["instruction"] = "Alles bereitstellen."
+    r["steps"][1]["instruction"] = " und ".join(amounts) + " verrühren und backen."
+    assert recipe_amounts.skip_reason(r) == "the steps name the amounts already"
+    r["steps"][1]["instruction"] = "Verrühren und backen."
+    assert recipe_amounts.needs_amounts(r)
+    assert recipe_amounts.why_listed(r).startswith("ohne Menge im Text: ")

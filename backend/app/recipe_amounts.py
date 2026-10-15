@@ -144,6 +144,32 @@ def _zero_templates(step) -> list[int]:
             if n < len(ingredients) and _without_amount(ingredients[n])]
 
 
+WHY = {  # shown after the recipe on the tile: what the check found
+    "de": ("ohne Menge im Text: {names}", "„0 {name}“ in Schritt {step}"),
+    "en": ("no amount in the text: {names}", "\"0 {name}\" in step {step}"),
+    "fr": ("sans quantité dans le texte : {names}", "« 0 {name} » à l'étape {step}"),
+    "it": ("senza quantità nel testo: {names}", "«0 {name}» nel passo {step}"),
+    "es": ("sin cantidad en el texto: {names}", "«0 {name}» en el paso {step}"),
+}
+
+
+def why_listed(recipe) -> str:
+    """What puts a recipe on the "steps without amounts" tile - shown with
+    it, so a false alarm can be told (and reported)."""
+    without, zero = WHY.get(get_language_code(settings.output_language), WHY["en"])
+    steps = recipe.get("steps") or []
+    if any("{{" in (s.get("instruction") or "") for s in steps):
+        for i, step in enumerate(steps):
+            for n in _zero_templates(step):
+                return zero.format(name=((step["ingredients"][n].get("food") or {}).get("name") or "?"), step=i + 1)
+        return ""
+    method = "\n".join(s.get("instruction") or "" for s in steps)
+    names = [(ing.get("food") or {}).get("name") or "?" for s in steps for ing in s.get("ingredients") or []
+             if _has_amount(ing) and (s.get("instruction") or "").strip() and not _mentions_amount(ing, method)]
+    shown = ", ".join(names[:3]) + (f" (+{len(names) - 3})" if len(names) > 3 else "")
+    return without.format(names=shown) if names else ""
+
+
 def needs_amounts(recipe, after_import: bool = False) -> bool:
     return skip_reason(recipe, after_import) is None
 
@@ -161,11 +187,13 @@ def skip_reason(recipe, after_import: bool = False) -> str | None:
         return "no steps"
     if not after_import and recipe_restructure.needs_restructure(recipe):
         return "the structure revision comes first"
-    rows = [(ing, s.get("instruction") or "") for s in steps for ing in s.get("ingredients") or []
+    rows = [ing for s in steps for ing in s.get("ingredients") or []
             if _has_amount(ing) and (s.get("instruction") or "").strip()]
     if not rows:
         return "no ingredient with an amount in a step"
-    mentioned = sum(1 for ing, text in rows if _mentions_amount(ing, text))
+    # anywhere in the method: an ingredient listed in step 1 is often used (with its amount) later
+    method = "\n".join(s.get("instruction") or "" for s in steps)
+    mentioned = sum(1 for ing in rows if _mentions_amount(ing, method))
     return None if mentioned * 2 < len(rows) else "the steps name the amounts already"
 
 
