@@ -196,6 +196,8 @@ def _compute() -> None:
             return sorted(({"key": str(fid), "name": foods[fid]["name"]} for fid in used_foods
                            if fid in foods and missing(foods[fid])), key=lambda i: i["name"].casefold())
 
+        by_id = {str(r["id"]): r for r in recipes}
+
         def recipe_items(matches):
             return [{"key": str(r["id"]), "name": r.get("name", ""), "recipe_id": r["id"]}
                     for r in sorted(recipes, key=lambda r: (r.get("name") or "").casefold()) if matches(r)]
@@ -220,7 +222,9 @@ def _compute() -> None:
                                    for k in tools_tag_groups.ungrouped(keywords)],
             "recipes_not_translated": recipe_items(lambda r: not tools_recipes.already_in_target_language(r, expected)),
             "recipes_need_restructure": recipe_items(lambda r: bool(recipe_restructure.needs_restructure(r))),
-            "recipes_amounts_missing": recipe_items(recipe_amounts.needs_amounts),
+            "recipes_amounts_missing": [  # with what the check found
+                {**i, "name": f"{i['name']} ({why})" if (why := recipe_amounts.why_listed(by_id[i['key']])) else i["name"]}
+                for i in recipe_items(recipe_amounts.needs_amounts)],
             "recipes_without_season": recipe_items(lambda r: not tools_tags.has_season_tag(r)),
             "recipes_without_source": recipe_items(
                 lambda r, store=source_tag.known(): source_tag.missing(

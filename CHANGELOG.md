@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Steps without amounts**: an amount named in another step than the
+  ingredient's counts too, and each listed recipe says why it's there
+  ("no amount in the text: Butter, Milch" / "\"0 Pfeffer\" in step 2")
 - **Steps without amounts** no longer lists recipes whose steps have the
   amounts: a comment missing in brackets doesn't count, and "½ TL" or
   "1 1/2 l" are recognised as amounts
