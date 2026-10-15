@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- After an update (or any restart) the collection overview is recounted
+  on the first visit to Maintain – the tiles no longer show the old
+  version's results
 - **Steps without amounts**: an amount named in another step than the
   ingredient's counts too, and each listed recipe says why it's there
   ("no amount in the text: Butter, Milch" / "\"0 Pfeffer\" in step 2")

@@ -120,3 +120,12 @@ def test_long_lists_read_page_by_page_at_once():
     client = httpx.Client(base_url="http://tandoor/api", transport=httpx.MockTransport(handler))
     assert tandoor_client.fetch_pages(client, "/food/") == items
     assert sorted(seen) == [1, 2, 3]
+
+
+def test_an_overview_from_before_the_start_is_recounted():
+    from app import health
+    overview({}, {})  # written "now" - after the app's start
+    assert not health.cached()["stale"]
+    with open(os.path.join(settings.data_dir, "health.json"), "w") as f:
+        json.dump({"computed_at": health._state["changed_at"] - 60, "metrics": {}, "items": {}}, f)
+    assert health.cached()["stale"]  # e.g. computed by the version before an update
