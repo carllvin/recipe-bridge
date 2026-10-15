@@ -20,7 +20,9 @@ log = logging.getLogger("recipe-bridge")
 
 # changed_at: when a suggestion was last applied or recipes were imported -
 # a cached result computed before that is stale and the page refreshes it.
-_state = {"running": False, "error": None, "changed_at": 0.0}
+# changed_at starts at the app's start: an overview computed before (by an
+# older version, after an update) is recounted on the first visit to Maintain
+_state = {"running": False, "error": None, "changed_at": time.time()}
 _lock = threading.Lock()
 
 
