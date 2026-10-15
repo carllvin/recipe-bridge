@@ -302,7 +302,8 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
             answers = _complete_json(job, system_prompt, compact, max_tokens=25 * len(batch) + 100)
         except Exception as exc:  # noqa: BLE001
             log.warning("Season batch %d failed: %s", i, exc)
-            answers = []
+            continue  # asked again next time
+        seasoned = set()
 
         for answer in answers:
             recipe = by_id.get(answer.get("id")) if isinstance(answer, dict) else None
@@ -310,11 +311,16 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
             season = labels_by_lower.get(season.strip().strip(".").lower()) if isinstance(season, str) else None
             if season is None:
                 continue
+            seasoned.add(recipe["id"])
             suggestions.append(ToolSuggestion(
                 id=uuid.uuid4().hex[:10], kind="season",
                 summary=f"tag {recipe.get('name', '')!r} as {season!r}",
                 detail={"recipe_id": recipe["id"], "season": season},
             ))
+        # the rest is year-round (or had no answer): off the "without season" tile for good
+        year_round = [{"key": str(r["id"]), "name": r.get("name", "")} for r in batch if r["id"] not in seasoned]
+        if year_round:
+            ignored.add("recipes_without_season", year_round)
         job.progress_current = min(i * SEASON_BATCH_SIZE, len(recipes))
         tool_jobs.save_tool_job(job)
     return suggestions

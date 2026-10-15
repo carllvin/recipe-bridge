@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Without a season**: a recipe the AI finds year-round goes onto the
+  tile's ignore list right after the run – it doesn't come back (undo it
+  under the tile's ignored entries)
 - **Few tags**: the suggestions fill a recipe up to five tags (it was at
   most three, so recipes stayed on the tile); a declined suggestion isn't
   asked for again until the recipe changes

@@ -25,3 +25,21 @@ def test_a_declined_suggestion_is_not_sent_again():
     changed = {"id": 7, "updated_at": "2026-10-15"}
     assert tools_tags.not_declined([unchanged, {"id": 8, "updated_at": "x"}]) == [{"id": 8, "updated_at": "x"}]
     assert tools_tags.not_declined([changed]) == [changed]  # asked again once the recipe changed
+
+
+def test_year_round_recipes_leave_the_season_tile(monkeypatch):
+    from app import ignored
+    monkeypatch.setattr(tools_tags, "SEASON_BATCH_SIZE", 2)
+    calls = []
+
+    def ai(job, prompt, payload, max_tokens, cache=False):
+        calls.append([r["id"] for r in payload])
+        if 5 in calls[-1]:
+            raise RuntimeError("AI down")  # this batch is asked again next time
+        return [{"id": 1, "season": "Winter"}, {"id": 2, "season": None}]
+    monkeypatch.setattr(tools_tags, "_complete_json", ai)
+    recipes = [recipe(1, "Grünkohl", ["Grünkohl"]), recipe(2, "Spaghetti", ["Nudeln"]),
+               recipe(5, "Spargel", ["Spargel"])]
+    out = tools_tags.season_suggestions(ToolJob(id="j", tool="tags_season"), recipes)
+    assert [s.detail["recipe_id"] for s in out] == [1]
+    assert ignored.keys("recipes_without_season") == {"2"}
