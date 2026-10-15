@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Few tags**: the suggestions fill a recipe up to five tags (it was at
+  most three, so recipes stayed on the tile); a declined suggestion isn't
+  asked for again until the recipe changes
+- **Few tags** uses about half the tokens: 40 recipes per AI call, the
+  instructions and your tag list cached (Claude), no salt, pepper, water or
+  oil, a shorter description
 - Picking a cookbook's recipes: each entry shows a preview – the largest
   photo on its pages, else the top of its first page (PDF) – without AI
 - "3 Knoblauchzehen" becomes 3 *Zehen* Knoblauch – the portion in a name

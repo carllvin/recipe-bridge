@@ -2192,6 +2192,7 @@ def _perform_suggestion_action(job_id: str, suggestion_id: str, action: str):
     if suggestion.status in ("pending", "error"):  # also dismisses a failed one
         suggestion.status = "skipped"
         tool_jobs.save_tool_job(job)
+        tools_tags.remember_declined(suggestion)  # not asked again until the recipe changes
         tools_new_recipes.after_action(job)
     return suggestion
 

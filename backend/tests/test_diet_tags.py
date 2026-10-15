@@ -20,8 +20,8 @@ def test_diet_tags_follow_the_language_and_existing_spelling(monkeypatch):
 def test_diet_tags_come_on_top_and_vegan_implies_vegetarian(monkeypatch):
     sent = {}
 
-    def fake(job, prompt, payload, max_tokens):
-        sent.update(payload)
+    def fake(job, prompt, payload, max_tokens, cache=False):
+        sent.update(payload, prompt=prompt)
         return [{"id": 1, "tags": ["herzhaft", "Vegan", "Tomate"], "diet": ["vegan", "glutenfrei", "keto"]},
                 {"id": 2, "tags": [], "diet": ["glutenfrei", "vegetarisch"]}]
     monkeypatch.setattr(tools_tags, "_complete_json", fake)
@@ -34,7 +34,11 @@ def test_diet_tags_come_on_top_and_vegan_implies_vegetarian(monkeypatch):
     assert tags[1] == ["herzhaft", "vegetarisch", "vegan", "glutenfrei"]
     # incomplete ingredient list -> no "free of" tags; vegetarisch already there
     assert 2 not in tags
-    assert sent["diet_tags"] == ["vegetarisch", "vegan", "glutenfrei", "laktosefrei", "nussfrei"]
+    # the same for every batch: in the (cached) instructions, not in each call's data
+    assert 'diet_tags: ["vegetarisch", "vegan", "glutenfrei", "laktosefrei", "nussfrei"]' in sent["prompt"]
+    assert 'vocabulary: ["herzhaft"]' in sent["prompt"] and "diet_tags" not in sent
+    assert sent["recipes"][0]["ingredients"] == ["Tomate"]  # olive oil says nothing about the tags
+    assert sent["recipes"][0]["missing"] == 4
     assert sent["recipes"][1]["ingredients_complete"] is False
     assert tools_tags.diet_checked() == {1, 2}
 

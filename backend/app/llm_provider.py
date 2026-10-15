@@ -184,10 +184,12 @@ def _complete_gemini(system_prompt: Optional[str], user_content: str, max_tokens
     return text, usage
 
 
-def complete_tool_text(system_prompt: Optional[str], user_content: str, max_tokens: int = 4096) -> tuple[str, TokenUsage]:
+def complete_tool_text(system_prompt: Optional[str], user_content: str, max_tokens: int = 4096,
+                       cache: bool = False) -> tuple[str, TokenUsage]:
     """complete_text() with the cheaper tools model - used by the maintenance
-    tools and scripts (matching, tagging, plurals, nutrition, seasons)."""
-    return complete_text(system_prompt, user_content, max_tokens, tools=True)
+    tools and scripts (matching, tagging, plurals, nutrition, seasons).
+    cache=True: the same system prompt comes in several calls (batches)."""
+    return complete_text(system_prompt, user_content, max_tokens, tools=True, cache=cache)
 
 
 def transcribe_image(jpeg: bytes, prompt: str, max_tokens: int = 4000, tools: bool = False) -> tuple[str, TokenUsage]:
