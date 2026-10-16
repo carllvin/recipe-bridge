@@ -25,6 +25,7 @@ class FakeMealie:
         self.shopping_lists: list[dict] = []
         self.ratings: dict[str, int] = {}  # recipe id -> rating
         self.user_id = str(uuid.uuid4())
+        self.new_slug_on_rename = False
 
     def add(self, kind, name, **extra):
         item = {"id": str(uuid.uuid4()), "name": name, **extra}
@@ -60,24 +61,26 @@ class FakeMealie:
                         ing[kind] = {"id": dst, "name": self.db[kind][dst]["name"]}
             del self.db[kind][src]
             return httpx.Response(200, json={"message": "merged"})
-        item = re.match(r"^(/foods|/units|/organizers/tags)/([^/]+)$", path)
+        item = re.match(r"^(/foods|/units|/organizers/tags|/organizers/categories)/([^/]+)$", path)
         if item:
             kind, item_id = LISTS[item.group(1)], item.group(2)
             if item_id not in self.db[kind]:
                 return httpx.Response(404, json={})
             if request.method == "DELETE":
                 removed = self.db[kind].pop(item_id)
-                if kind == "tag":  # Mealie takes a deleted tag off its recipes
+                if kind in ("tag", "category"):  # Mealie takes a deleted tag/category off its recipes
+                    field = "tags" if kind == "tag" else "recipeCategory"
                     for recipe in self.recipes.values():
-                        recipe["tags"] = [t for t in recipe.get("tags", []) if t["id"] != item_id]
+                        recipe[field] = [t for t in recipe.get(field, []) if t["id"] != item_id]
                 return httpx.Response(200, json=removed)
             if request.method == "GET":
                 return httpx.Response(200, json=copy.deepcopy(self.db[kind][item_id]))
             if request.method == "PUT":
-                name = json.loads(request.content)["name"]
+                body = json.loads(request.content)
+                name = body["name"]
                 if any(i["name"].lower() == name.lower() and i["id"] != item_id for i in self.db[kind].values()):
                     return httpx.Response(400, json={"detail": "exists"})
-                self.db[kind][item_id]["name"] = name
+                self.db[kind][item_id].update({k: v for k, v in body.items() if k != "id"})
                 self._rename_refs(kind, item_id, name)
                 return httpx.Response(200, json=self.db[kind][item_id])
         if path in LISTS:
@@ -143,6 +146,11 @@ class FakeMealie:
                     return httpx.Response(422, json={"detail": error})
                 self.recipes[slug].update(body)
                 self._touch(slug)
+                if "name" in body and self.new_slug_on_rename:  # a new name, a new slug
+                    new = re.sub(r"[^a-z0-9]+", "-", body["name"].lower()).strip("-")
+                    if new != slug and new not in self.recipes:
+                        self.recipes[new] = self.recipes.pop(slug)
+                        self.recipes[new]["slug"] = slug = new
                 return httpx.Response(200, json=self.recipes[slug])
             if request.method == "DELETE":
                 return httpx.Response(200, json=self.recipes.pop(slug))

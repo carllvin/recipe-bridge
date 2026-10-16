@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Maintenance chat** – new actions, each shown as a card first:
+  - replace a tag on some recipes, or an ingredient in some recipes only
+    (“use butter instead of margarine in all cakes”)
+  - take recipes out of a cookbook, rename or delete a cookbook (the
+    recipes stay)
+  - delete recipes – never all of them, always with a second click
+  - change recipe titles: one at a time, or in series (remove or replace a
+    word, small letters / capitals)
+  - set prep and cooking times; set an ingredient's or unit's plural
+  - start an AI tool for just the recipes meant (“give all Ottolenghi
+    recipes a season”: season, more tags, source, translate, restructure,
+    amounts, servings, find or improve photos) – its suggestions come
+    into Review like a tile's
+  - “undo that” takes back the changes applied in the last step (Tandoor)
 - **Maintenance chat**: “all tags in small letters” (or capitals, or a
   capital first letter) works for every tag, ingredient or unit at once –
   the app lists each rename itself, names that end up the same are merged.

@@ -46,7 +46,7 @@ REF_KEYS = {
     "food": "food", "unit": "unit", "keywords": "keyword", "keyword": "keyword",
     "supermarket_category": "supermarket-category", "category": "supermarket-category",
     "property_type": "property-type", "properties_food_unit": "unit", "base_unit": "unit",
-    "converted_unit": "unit", "recipe": "recipe", "meal_type": "meal-type",
+    "converted_unit": "unit", "recipe": "recipe", "book": "recipe-book", "meal_type": "meal-type",
     "created_by": None, "shared": None, "parent": "food", "substitute": "food", "inherit_fields": None,
 }
 
@@ -75,6 +75,17 @@ def recording():
     _local.journal = journal
     try:
         yield journal
+    finally:
+        _local.journal = previous
+
+
+@contextlib.contextmanager
+def paused():
+    """Writes in here are not recorded (e.g. an undo started as a suggestion)."""
+    previous = current()
+    _local.journal = None
+    try:
+        yield
     finally:
         _local.journal = previous
 

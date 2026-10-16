@@ -132,7 +132,8 @@ def changed_entities(tool: str, suggestion) -> tuple[str, set] | None:
         entity = d.get("entity") or tool_entity
         return (entity, {d.get("id")}) if entity and d.get("id") is not None else None
     if kind == "set_plural":
-        return (tool_entity, {d.get("id")}) if tool_entity and d.get("id") is not None else None
+        entity = d.get("entity") or tool_entity
+        return (entity, {d.get("id")}) if entity and d.get("id") is not None else None
     if kind == "enrich":
         return "food", {d.get("food_id")}
     if kind == "food_category":

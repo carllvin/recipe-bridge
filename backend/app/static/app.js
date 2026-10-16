@@ -3250,7 +3250,9 @@ function dbChatCard(s) {
     actions = `<button class="btn db-chat-apply" data-id="${s.id}" type="button">${escapeHtml(label)}</button>
       <button class="btn secondary db-chat-skip" data-id="${s.id}" type="button">${t('dbChatSkip')}</button>`;
   }
-  const state = s.status === 'applied' ? `✓ ${t('dbChatApplied')}${s.undoable ? ` · ${t('dbChatUndoHint')}` : ''}`
+  const state = s.status === 'applied' && s.kind === 'run_tool'
+    ? `✓ ${t('dbChatToolRunning')} <button class="btn secondary db-chat-review" type="button">${t('dbChatToReview')}</button>`
+    : s.status === 'applied' ? `✓ ${t('dbChatApplied')}${s.undoable ? ` · ${t('dbChatUndoHint')} ${t('dbChatUndoChat')}` : ''}`
     : s.status === 'skipped' ? t('dbChatSkipped') : s.status === 'error' ? `⚠️ ${escapeHtml(s.error || '')}` : '';
   return `<div class="db-chat-card ${s.status}">
     <span class="db-chat-summary">${escapeHtml(s.summary)}</span>${actions}
@@ -3272,6 +3274,7 @@ function renderDbChat() {
   el('db-chat-log').innerHTML = parts.join('');
   el('db-chat-log').querySelectorAll('.db-chat-apply').forEach((b) => b.addEventListener('click', () => dbChatAct(b.dataset.id, 'apply')));
   el('db-chat-log').querySelectorAll('.db-chat-skip').forEach((b) => b.addEventListener('click', () => dbChatAct(b.dataset.id, 'skip')));
+  el('db-chat-log').querySelectorAll('.db-chat-review').forEach((b) => b.addEventListener('click', () => showArea('inbox')));
 }
 
 async function dbChatAct(id, action) {

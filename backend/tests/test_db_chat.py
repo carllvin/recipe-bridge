@@ -201,3 +201,157 @@ def test_an_answer_cut_off_is_said(kitchen, monkeypatch):
                         lambda *a, **k: ('{"reply": "Ok", "actions": [{"type": "rename", "name": "Fi', None))
     turn = say("Alles umbenennen")
     assert turn["suggestions"] == [] and "too long" in turn["problems"][0]
+
+
+def test_replace_a_tag_and_an_ingredient_on_some_recipes(kitchen, monkeypatch):
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "replace_tag", "recipes": {}, "tag": "test", "new_tag": "Probe"},
+                  {"type": "replace_ingredient", "recipes": {"name": "Lachs"}, "ingredient": "Lachs",
+                   "new_ingredient": "Forelle"}]
+    turn = say("Test heißt jetzt Probe, und im Lachs mit Dill nimm Forelle")
+    tag, food = turn["suggestions"]
+    assert tag["summary"] == "recipes: tag 'Test' -> 'Probe' (1)" and tag["detail"]["recipe_ids"] == [10]
+    assert food["summary"] == "recipes: ingredient 'Lachs' -> 'Forelle' (1)"
+    assert apply(turn, 0).status == "applied" and apply(turn, 1).status == "applied"
+    recipe = kitchen.db["recipe"][10]
+    assert [k["name"] for k in recipe["keywords"]] == ["Probe"]
+    assert recipe["steps"][0]["ingredients"][0]["food"]["name"] == "Forelle"
+    assert "Lachs" in kitchen.names("food")  # stays for other recipes
+    assert main._perform_suggestion_action(turn["job_id"], food["id"], "undo").status == "undone"
+    assert kitchen.db["recipe"][10]["steps"][0]["ingredients"][0]["food"]["id"] == 1
+
+
+def test_cookbooks_out_renamed_and_deleted(kitchen, monkeypatch):
+    kitchen.add("recipe-book-entry", {"id": 70, "book": 30, "recipe": 10})
+    kitchen.add("recipe-book-entry", {"id": 71, "book": 30, "recipe": 11})
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "remove_from_cookbook", "recipes": {"name": "Bagel"}, "cookbook": "winter"},
+                  {"type": "rename_cookbook", "cookbook": "Winter", "new_name": "Kalte Tage"}]
+    turn = say("Bagel raus aus Winter, und Winter heißt Kalte Tage")
+    out, rename = turn["suggestions"]
+    assert out["summary"] == "recipes: out of the cookbook 'Winter' (1)"
+    assert apply(turn, 0).status == "applied" and apply(turn, 1).status == "applied"
+    assert set(kitchen.db["recipe-book-entry"]) == {70} and kitchen.db["recipe-book"][30]["name"] == "Kalte Tage"
+    ai.actions = [{"type": "delete_cookbook", "cookbook": "Kalte Tage"}]
+    turn = say("Lösch das Kochbuch", turn["job_id"])
+    (delete,) = turn["suggestions"]
+    assert delete["detail"]["confirm"] and "1 recipe(s) stay" in delete["summary"]
+    assert apply(turn).status == "applied"
+    assert not kitchen.db["recipe-book"] and not kitchen.db["recipe-book-entry"] and 10 in kitchen.db["recipe"]
+
+
+def test_delete_recipes_needs_a_filter_and_confirmation(kitchen, monkeypatch):
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "delete_recipes", "recipes": {}},
+                  {"type": "delete_recipes", "recipes": {"tag": ["Test"]}}]
+    turn = say("Lösch die Test-Rezepte")
+    assert turn["problems"] == ["deleting every recipe isn't offered - say which ones"]
+    (s,) = turn["suggestions"]
+    assert s["detail"]["confirm"] and s["detail"]["recipe_ids"] == [10]
+    assert apply(turn).status == "applied" and 10 not in kitchen.db["recipe"]
+
+
+def test_titles_times_and_plurals(kitchen, monkeypatch):
+    kitchen.db["recipe"][11]["name"] = "Bagel Rezept"
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "edit_titles", "recipes": {"name": "rezept"}, "find": "Rezept", "replace": ""},
+                  {"type": "rename_recipe", "recipes": {"name": "Rührkuchen"}, "new_name": "Marmorkuchen"},
+                  {"type": "rename_recipe", "recipes": {}, "new_name": "X"},
+                  {"type": "set_time", "recipes": {"missing": ["time"]}, "prep_minutes": 15},
+                  {"type": "set_plural", "entity": "food", "name": "Mehl", "plural": "Mehle"}]
+    turn = say("…")
+    assert turn["problems"] == ["3 recipes match - say which one"]
+    titles, cake, time, plural = turn["suggestions"]
+    assert titles["preview"] == "• Bagel Rezept → Bagel" and cake["preview"] == "• Rührkuchen → Marmorkuchen"
+    assert time["summary"] == "recipes: prep 15 min (3)"
+    for n in range(4):
+        assert apply(turn, n).status == "applied"
+    assert kitchen.db["recipe"][11]["name"] == "Bagel" and kitchen.db["recipe"][12]["name"] == "Marmorkuchen"
+    assert {r["working_time"] for r in kitchen.db["recipe"].values()} == {15}
+    assert kitchen.db["food"][5]["plural_name"] == "Mehle"
+
+
+def test_a_tool_runs_for_just_the_recipes_meant(kitchen, monkeypatch):
+    started = []
+    monkeypatch.setitem(main._TOOL_SCANS, "tags_season", lambda job_id: started.append(tool_jobs.get_tool_job(job_id)))
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "run_tool", "tool": "season", "recipes": {"tag": ["Fisch"]}},
+                  {"type": "run_tool", "tool": "dance", "recipes": {}}]
+    turn = say("Gib den Fischrezepten eine Saison")
+    assert turn["problems"] == ["no tool 'dance'"]
+    (s,) = turn["suggestions"]
+    assert s["summary"] == "AI: season tag for 1 recipe(s)"
+    applied = apply(turn)
+    assert applied.status == "applied" and not applied.undoable
+    import time
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.02)
+    assert started[0].tool == "tags_season" and started[0].meta["only"] == [11]
+    assert applied.detail["job_id"] == started[0].id
+
+
+def test_only_reads_exactly_those_recipes(kitchen):
+    from app import recipe_scope
+    from app.schemas import ToolJob
+    job = ToolJob(id="j", tool="tags_season", meta={"only": [10, 12]})
+    with kitchen.client() as client:
+        found = recipe_scope.recipes_for(client, "recipes_without_season", lambda r: True, {"10"}, job)
+    assert [r["id"] for r in found] == [10, 12]  # ignored ones too: asked for by name
+
+
+def test_undo_the_last_step(kitchen, monkeypatch):
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "set_servings", "recipes": {}, "servings": 6},
+                  {"type": "add_tag", "recipes": {}, "tag": "Fisch"}]
+    turn = say("Alle für 6 und Fisch dran")
+    apply(turn, 0)
+    apply(turn, 1)
+    ai.actions = [{"type": "undo"}]
+    undo_turn = say("Mach das rückgängig", turn["job_id"])
+    (s,) = undo_turn["suggestions"]
+    assert s["summary"] == "undo: 2 change(s)"
+    applied = apply(undo_turn)
+    assert applied.status == "applied" and not applied.undoable
+    assert {r["servings"] for r in kitchen.db["recipe"].values()} == {2, 4, 0}
+    assert [k["id"] for k in kitchen.db["recipe"][10]["keywords"]] == [21]
+    job = tool_jobs.get_tool_job(turn["job_id"])
+    assert {x.status for x in job.suggestions if x.id in turn["suggestion_ids"]} == {"undone"}
+    again = say("Nochmal rückgängig", turn["job_id"])
+    assert again["problems"] == ["nothing applied in this chat to take back"]
+
+
+def test_mealie_more_actions(monkeypatch):
+    fake = FakeMealie()
+    fake.new_slug_on_rename = True
+    monkeypatch.setattr(settings, "recipe_manager", "mealie")
+    monkeypatch.setattr(settings, "mealie_url", "https://mealie.example")
+    monkeypatch.setattr(settings, "mealie_token", "secret")
+    monkeypatch.setattr(mealie_client, "get_client", lambda: fake.client(settings.mealie_token))
+    butter, test_tag, book = fake.add("food", "Butter", pluralName=""), fake.add("tag", "Test"), fake.add("category", "Winter")
+    cake = fake.add_recipe("Kuchen Rezept", [(butter, None)], tags=[test_tag])
+    cake["recipeCategory"] = [{"id": book["id"], "name": "Winter", "slug": "winter"}]
+    fake.add_recipe("Brot", [])
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "edit_titles", "recipes": {}, "find": " Rezept", "replace": ""},
+                  {"type": "replace_tag", "recipes": {}, "tag": "Test", "new_tag": "Probe"},
+                  {"type": "replace_ingredient", "recipes": {}, "ingredient": "Butter", "new_ingredient": "Margarine"},
+                  {"type": "set_time", "recipes": {"name": "Brot"}, "prep_minutes": 10, "cook_minutes": 40},
+                  {"type": "set_plural", "entity": "food", "name": "Butter", "plural": "Butter"},
+                  {"type": "remove_from_cookbook", "recipes": {}, "cookbook": "Winter"},
+                  {"type": "rename_cookbook", "cookbook": "Winter", "new_name": "Kalt"},
+                  {"type": "undo"}]
+    turn = say("…")
+    assert turn["problems"] == ["with Mealie, changes can't be taken back"]
+    for n in range(len(turn["suggestions"])):
+        assert apply(turn, n).status == "applied", turn["suggestions"][n]
+    cake = fake.recipes["kuchen"]  # the new title gave a new slug - the later changes found it
+    assert [t["name"] for t in cake["tags"]] == ["Probe"] and cake["name"] == "Kuchen"
+    assert cake["recipeIngredient"][0]["food"]["name"] == "Margarine" and cake["recipeCategory"] == []
+    assert fake.recipes["brot"]["prepTime"] == "10 min" and fake.recipes["brot"]["totalTime"] == "50 min"
+    assert fake.db["category"][book["id"]]["name"] == "Kalt"
+    ai.actions = [{"type": "delete_recipes", "recipes": {"name": "Brot"}}, {"type": "delete_cookbook", "cookbook": "Kalt"}]
+    turn = say("weg damit", turn["job_id"])
+    assert apply(turn, 0).status == "applied" and apply(turn, 1).status == "applied"
+    assert "brot" not in fake.recipes and not fake.db["category"]
