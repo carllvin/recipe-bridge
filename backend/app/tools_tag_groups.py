@@ -54,6 +54,44 @@ def ungrouped(keywords) -> list[dict]:
                   key=lambda k: (k.get("name") or "").casefold())
 
 
+# ---------- source tags go together, without AI ----------
+# The app knows which tags it gave as a recipe's source (source_tag.py) -
+# "einfachkochen" can't be told from its name. They go into the group
+# that already holds source tags, else one named like it, else a new one.
+
+SOURCE_GROUP_NAMES = {"quelle", "quellen", "herkunft", "source", "sources", "fonte", "fonti", "fuente", "fuentes",
+                      "origine", "origen"}
+SOURCE_GROUP = {"de": "Quelle", "en": "Source", "fr": "Source", "it": "Fonte", "es": "Fuente"}
+
+
+def source_group(keywords) -> tuple[dict | None, str]:
+    """(the existing group for source tags or None, its name)."""
+    from . import source_tag
+    from .config import get_language_code
+    sources = source_tag.all_tags()
+    groups = {k["id"]: k for k in keywords if k.get("numchild")}
+    counts = {}
+    for k in keywords:
+        parent = _parent_id(k)
+        if parent in groups and k["name"].strip().casefold() in sources:
+            counts[parent] = counts.get(parent, 0) + 1
+    if counts:
+        best = groups[max(counts, key=counts.get)]
+        return best, best["name"]
+    named = next((g for g in groups.values() if g["name"].strip().casefold() in SOURCE_GROUP_NAMES), None)
+    if named:
+        return named, named["name"]
+    return None, SOURCE_GROUP.get(get_language_code(settings.output_language), "Source")
+
+
+def split_sources(tags) -> tuple[list, list]:
+    """(source tags, the others) of a list of keyword dicts."""
+    from . import source_tag
+    sources = source_tag.all_tags()
+    return ([k for k in tags if k["name"].strip().casefold() in sources],
+            [k for k in tags if k["name"].strip().casefold() not in sources])
+
+
 def run_scan(job_id: str) -> None:
     job = tool_jobs.get_tool_job(job_id)
     if job is None:
@@ -75,6 +113,7 @@ def run_scan(job_id: str) -> None:
         # are sent by name.
         tags = sorted((k for k in ungrouped(keywords) if str(k["id"]) not in skip),
                       key=lambda k: -(k.get("numrecipe") or 0))[:MAX_TAGS]
+        sources, tags = split_sources(tags)  # the app's own source tags: not for the AI
         by_name = {k["name"].casefold(): k for k in tags}
         job.progress_total = 1
         job.cost_estimate = f"{len(tags)} tag(s) -> 1 AI call with the tools model."
@@ -87,8 +126,18 @@ def run_scan(job_id: str) -> None:
             "tags": [{"name": k["name"], "recipes": k.get("numrecipe") or 0,
                       "group": (by_id.get(_parent_id(k)) or {}).get("name")} for k in tags],
         }
-        answer = tools_tags._complete_json(job, SYSTEM_PROMPT, payload, max_tokens=4000)
         suggestions, placed = [], set()
+        if sources:
+            group, name = source_group(keywords)
+            members = [{"id": k["id"], "name": k["name"]} for k in sources]
+            suggestions.append(ToolSuggestion(
+                id=uuid.uuid4().hex[:10], kind="group_tags",
+                summary=f"{name}: {', '.join(m['name'] for m in members)}"[:200],
+                detail={"group": name, "group_id": group["id"] if group else None, "tags": members},
+                preview=f"{'existing' if group else 'new'} group {name!r} (sources)\n"
+                        + "\n".join(f"  - {m['name']}" for m in members),
+            ))
+        answer = tools_tags._complete_json(job, SYSTEM_PROMPT, payload, max_tokens=4000) if tags else []
         for entry in answer if isinstance(answer, list) else []:
             if not isinstance(entry, dict):
                 continue
@@ -168,3 +217,74 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     finally:
         tool_jobs.save_tool_job(job)
     return suggestion
+
+
+# ---------- after an import: new tags go straight into a fitting group ----------
+
+PLACE_PROMPT = """You sort a few new tags (keywords) of a home cook's recipe
+collection into the tag groups that already exist. You receive JSON:
+{"groups": [{"name": string, "examples": [tags already in it]}], "tags": [string]}
+
+For each tag pick the ONE existing group it clearly belongs to, judging by the
+group's name and examples (e.g. a website, video channel or cookbook author
+goes where other sources are; "vegan" where other diets are). When no group
+clearly fits, give null - never invent a group.
+
+Respond with ONLY a JSON object (no explanation, no markdown fence):
+{"<tag>": "<group name>" | null, ...}
+"""
+EXAMPLES_PER_GROUP = 8
+
+
+def place_imported_tags(tag_names) -> int:
+    """The given tags (an import's) that are in no group yet go into the
+    existing group they fit - one small AI call with the tools model, applied
+    right away; nothing when there are no groups. Returns how many moved."""
+    from . import health, usage_log
+    from .schemas import ToolJob
+    wanted = {str(n).strip().casefold() for n in tag_names if str(n).strip()}
+    if not wanted or not llm_provider.is_configured() or usage_log.budget_status().get("exceeded"):
+        return 0
+    with tandoor_client.get_client() as client:
+        keywords = tandoor_client.fetch_pages(client, "/keyword/")
+        groups = [k for k in keywords if k.get("numchild")]
+        new = [k for k in ungrouped(keywords) if k["name"].strip().casefold() in wanted]
+        sources, new = split_sources(new)
+        moved = 0
+        if sources:  # the import's source tag: with the other sources, no AI needed
+            group, name = source_group(keywords)
+            group_id = group["id"] if group else _find_or_create_group(client, name, None)
+            for tag in sources:
+                if client.put(f"/keyword/{tag['id']}/move/{group_id}/").status_code < 400:
+                    moved += 1
+        if not groups or not new:
+            if moved:
+                health.mark_changed()
+            return moved
+        members = {}
+        for k in keywords:
+            if _parent_id(k):
+                members.setdefault(_parent_id(k), []).append(k["name"])
+        payload = {"groups": [{"name": g["name"], "examples": members.get(g["id"], [])[:EXAMPLES_PER_GROUP]}
+                              for g in groups],
+                   "tags": [k["name"] for k in new]}
+        job = ToolJob(id="after-import", tool="tags_groups")
+        try:
+            answer = tools_tags._complete_json(job, PLACE_PROMPT, payload, max_tokens=40 * len(new) + 100)
+        except Exception as exc:  # noqa: BLE001 - the tags stay on the tile then
+            log.info("Placing imported tags failed: %s", exc)
+            return 0
+        finally:
+            usage_log.record("tags_groups", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        by_group = {g["name"].strip().casefold(): g for g in groups}
+        by_tag = {k["name"].strip().casefold(): k for k in new}
+        for tag_name, group_name in (answer.items() if isinstance(answer, dict) else []):
+            tag, group = by_tag.get(str(tag_name).strip().casefold()), by_group.get(str(group_name or "").strip().casefold())
+            if tag and group and group["id"] != tag["id"]:
+                resp = client.put(f"/keyword/{tag['id']}/move/{group['id']}/")
+                if resp.status_code < 400:
+                    moved += 1
+                    log.info("Tag %r put into the group %r after the import", tag["name"], group["name"])
+    if moved:
+        health.mark_changed()
+    return moved

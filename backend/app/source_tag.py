@@ -107,6 +107,7 @@ def add(recipes, tag: str) -> None:
     for recipe in recipes:
         if tag.casefold() not in (t.casefold() for t in recipe.tags):
             recipe.tags = [tag, *recipe.tags]
+    remember_tag(tag)
 
 
 # ---------- the tile "recipes without source" (existing recipes) ----------
@@ -132,7 +133,7 @@ def known() -> dict:
             data = json.load(f)
     except (OSError, ValueError):
         data = {}
-    return {"hosts": data.get("hosts") or {}, "books": data.get("books") or {}}
+    return {"hosts": data.get("hosts") or {}, "books": data.get("books") or {}, "tags": data.get("tags") or []}
 
 
 def remember(kind: str, key: str, tag: str) -> None:
@@ -147,6 +148,44 @@ def remember(kind: str, key: str, tag: str) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, _path())
+
+
+def remember_tag(tag: str) -> None:
+    """Every source tag the app gave - so the tag groups can tell them from
+    other tags (and put them together)."""
+    if not tag or tag.casefold() in all_tags():
+        return
+    with _lock:
+        data = known()
+        data["tags"].append(tag)
+        os.makedirs(settings.data_dir, exist_ok=True)
+        tmp = _path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _path())
+
+
+def learn_from(recipes) -> None:
+    """Source tags given before they were remembered: a recipe's tag whose
+    name is in its address ("einfachkochen" on einfachkochen.de)."""
+    known_tags = all_tags()
+    for recipe in recipes:
+        host = re.sub(r"[^a-z0-9]", "", host_of(recipe.get("source_url") or recipe.get("orgURL") or ""))
+        if not host:
+            continue
+        for kw in recipe.get("keywords") or recipe.get("tags") or []:
+            name = (kw.get("name") or "").strip()
+            key = re.sub(r"[^a-z0-9]", "", name.casefold())
+            if len(key) >= 4 and key in host and name.casefold() not in known_tags:
+                remember_tag(name)
+                known_tags.add(name.casefold())
+
+
+def all_tags() -> set[str]:
+    """The source tags the app knows (casefolded): given on import, or
+    remembered for a site or cookbook."""
+    data = known()
+    return {t.casefold() for t in [*data["tags"], *data["hosts"].values(), *data["books"].values()] if t}
 
 
 def host_of(url: str) -> str:

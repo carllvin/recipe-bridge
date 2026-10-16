@@ -621,11 +621,13 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("Suggest-more batch %d failed: %s", i, exc)
-            answers = []
+            answers = None
         else:
             mark_diet_checked(r["id"] for r in batch)
 
-        for answer in answers:
+        short = []  # the AI found fewer fitting tags than missing: off the tile afterwards
+        answered = {}
+        for answer in answers or []:
             recipe = by_id.get(answer.get("id")) if isinstance(answer, dict) else None
             if recipe is None:
                 continue
@@ -637,6 +639,7 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
             tags = [t for t in dict.fromkeys(tags)
                     if t.casefold() not in existing and t.casefold() not in diet_by_key
                     and not _is_ingredient_tag(t, ingredients, food_names)][:missing[recipe["id"]]]
+            answered[recipe["id"]] = len(tags)
             # Diet / allergen tags on top of the 3 descriptive ones; vegan
             # implies vegetarian.
             diet = [diet_by_key[d.strip().casefold()] for d in answer.get("diet") or []
@@ -654,6 +657,11 @@ def suggest_tags_suggestions(job, recipes, vocabulary, food_names=frozenset()) -
                 summary=f"add [{labels}] to {recipe.get('name', '')!r}",
                 detail={"recipe_id": recipe["id"], "tags": tags, "version": recipe.get("updated_at")},
             ))
+        if answers is not None:  # a failed batch is asked again next time
+            short = [{"key": str(r["id"]), "name": r.get("name", "")} for r in batch
+                     if missing[r["id"]] and answered.get(r["id"], 0) < missing[r["id"]]]
+            if short:
+                ignored.add("recipes_few_tags", short)
         job.progress_current = min(i * SUGGEST_MORE_BATCH_SIZE, len(recipes))
         tool_jobs.save_tool_job(job)
     return suggestions
