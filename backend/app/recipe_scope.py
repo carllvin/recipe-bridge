@@ -76,6 +76,9 @@ def changed_since_overview(client, job=None):
 
 def recipes_for(client, metric: str, matches, skip=frozenset(), job=None) -> list[dict]:
     """Full recipes (not in skip) for which matches(recipe) is true."""
+    only = job.meta.get("only") if job is not None else None
+    if only:  # started from the chat for these recipes: exactly them, ignored ones too
+        return [r for r in fetch_recipes_full(client, only) if matches(r)]
     data = _health()
     listed = (data.get("items") or {}).get(metric)
     versions = data.get("recipe_versions")

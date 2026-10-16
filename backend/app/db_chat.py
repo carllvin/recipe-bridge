@@ -54,6 +54,9 @@ An empty FILTER {} means every recipe.
 Actions ("entity" is "food" (ingredient), "unit" or "tag"):
 {"type": "rename", "entity": ..., "name": <current name>, "new_name": <new name>}
 {"type": "merge", "entity": ..., "names": [<names that mean the same>], "into": <name to keep>}
+{"type": "change_case", "entity": ..., "case": "lower" | "upper" | "capitalize", "names": [<names>]}
+  (writes names in small letters, capitals, or with a capital first letter;
+  leave out "names" for all of them - the app lists every change itself)
 {"type": "add_tag", "recipes": FILTER, "tag": <tag>}
 {"type": "remove_tag", "recipes": FILTER, "tag": <tag>}
 {"type": "delete_tag", "tag": <tag>} (removes it from every recipe and deletes it)
@@ -63,6 +66,26 @@ Actions ("entity" is "food" (ingredient), "unit" or "tag"):
 {"type": "group_tags", "tags": [<tag names>] | "ungrouped", "group": <group name, new or existing>}
   (sorts tags into a tag group; "ungrouped" = every tag that is in no group yet -
   the "tags without a group" tile; only with Tandoor)
+{"type": "replace_tag", "recipes": FILTER, "tag": <tag>, "new_tag": <tag>} (on those recipes)
+{"type": "replace_ingredient", "recipes": FILTER, "ingredient": <name>, "new_ingredient": <name>}
+  (only in those recipes - the ingredient itself stays for the others)
+{"type": "remove_from_cookbook", "recipes": FILTER, "cookbook": <name>}
+{"type": "rename_cookbook", "cookbook": <name>, "new_name": <name>}
+{"type": "delete_cookbook", "cookbook": <name>} (the recipes stay)
+{"type": "delete_recipes", "recipes": FILTER} (never with an empty FILTER)
+{"type": "rename_recipe", "recipes": FILTER, "new_name": <title>} (FILTER meaning one recipe)
+{"type": "edit_titles", "recipes": FILTER, "find": <text>, "replace": <text; "" removes it>}
+{"type": "edit_titles", "recipes": FILTER, "case": "lower" | "upper" | "capitalize"}
+{"type": "set_time", "recipes": FILTER, "prep_minutes": <number>, "cook_minutes": <number>}
+  (either or both)
+{"type": "set_plural", "entity": "food" | "unit", "name": <name>, "plural": <plural>}
+{"type": "run_tool", "tool": TOOL, "recipes": FILTER} (starts a maintenance tool with
+  AI for just those recipes; its suggestions come into the review inbox). TOOL is
+  "season" (season tag), "more_tags" (fill up to five tags), "source" (source tag),
+  "translate" (into {language}), "restructure" (steps, ingredient groups),
+  "amounts" (amounts into the steps), "servings", "images" (find a photo),
+  "photos" (improve weak photos)
+{"type": "undo"} (takes back the changes applied in the chat's last step)
 {"type": "find", "recipes": FILTER} (a question - the app lists the recipes)
 
 Rules:
@@ -70,6 +93,8 @@ Rules:
   actions and say in "reply" what is possible instead
 - for tags and cookbooks use the exact spelling from the lists when one is
   meant; ingredients and units: the cook's words (the app finds them)
+- a change to many names at once that one action covers (e.g. all tags in
+  small letters -> change_case) is that one action, never a long list of renames
 - "history" is the conversation so far ("it", "those" may refer to it)
 - "reply": one or two short sentences, what you are proposing (or the
   answer), no lists - the app shows the details
@@ -257,6 +282,38 @@ def _entity_action(col, action) -> ToolSuggestion:
     return _merge(entity, keep, others, into or keep["name"])
 
 
+CASES = {"lower": str.lower, "upper": str.upper, "capitalize": lambda name: name[:1].upper() + name[1:]}
+
+
+def _change_case(col, action) -> list[ToolSuggestion]:
+    """Every name (or the given ones) in other letters - one rename each;
+    names that end up the same ("Vegan", "VEGAN") are merged."""
+    entity = ENTITY_OF.get(str(action.get("entity", "")).casefold())
+    write = CASES.get(str(action.get("case", "")).casefold())
+    if not entity or not write:
+        raise Problem("unknown kind of entry or spelling")
+    names = _list(action.get("names"))
+    items = [col.find(entity, n) for n in names] if names else col.items(entity)
+    unknown = [n for n, item in zip(names, items) if item is None]
+    if unknown:
+        raise Problem(f"no {LABEL[entity]} called " + ", ".join(repr(n) for n in unknown))
+    by_new: dict[str, list[dict]] = {}
+    for item in {i["id"]: i for i in items if i and i.get("name")}.values():
+        by_new.setdefault(write(item["name"].strip()), []).append(item)
+    out = []
+    for new_name, same in sorted(by_new.items(), key=lambda pair: pair[0].casefold()):
+        keep = next((i for i in same if i["name"] == new_name), same[0])
+        others = [i for i in same if i is not keep]
+        if others:
+            out.append(_merge(entity, keep, others, new_name))
+        elif keep["name"] != new_name:
+            out.append(_suggestion("rename", f"{LABEL[entity]}: rename {keep['name']!r} -> {new_name!r}",
+                                   {"type": "rename", "entity": entity, "id": keep["id"], "new_name": new_name}))
+    if not out:
+        raise Problem(f"every {LABEL[entity]} is written that way already")
+    return out
+
+
 def _merge(entity, keep, others, keep_name) -> ToolSuggestion:
     detail = {"type": "merge", "entity": entity, "keep_id": keep["id"], "keep_name": keep_name,
               "remove_ids": [o["id"] for o in others]}
@@ -266,7 +323,7 @@ def _merge(entity, keep, others, keep_name) -> ToolSuggestion:
     return _suggestion("merge", text, detail)
 
 
-def to_suggestions(col, actions) -> tuple[list[ToolSuggestion], list[str], list[dict]]:
+def to_suggestions(col, actions, job=None) -> tuple[list[ToolSuggestion], list[str], list[dict]]:
     """(suggestions, problems, answers) - answers are the "find" results."""
     suggestions, problems, answers = [], [], []
     for action in actions if isinstance(actions, list) else []:
@@ -276,6 +333,8 @@ def to_suggestions(col, actions) -> tuple[list[ToolSuggestion], list[str], list[
         try:
             if kind in ("rename", "merge"):
                 suggestions.append(_entity_action(col, action))
+            elif kind == "change_case":
+                suggestions += _change_case(col, action)
             elif kind == "find":
                 found = select(col, action.get("recipes"))
                 answers.append({"count": len(found),
@@ -339,6 +398,11 @@ def to_suggestions(col, actions) -> tuple[list[ToolSuggestion], list[str], list[
                     detail={"category": category, "food_ids": [f["id"] for f in known]}))
             elif kind == "group_tags":
                 suggestions.append(_group_tags(col, action))
+            elif kind == "undo":
+                suggestions.append(_undo(col, action, job))
+            elif kind in MORE:
+                result = MORE[kind](col, action)
+                suggestions += result if isinstance(result, list) else [result]
             else:
                 problems.append(f"unknown action {kind!r}")
         except Problem as exc:
@@ -383,6 +447,213 @@ def _group_tags(col, action) -> ToolSuggestion:
     return s
 
 
+# ---------- more actions ----------
+
+def _found(col, action, what) -> list[dict]:
+    found = select(col, action.get("recipes"))
+    if not found:
+        raise Problem(f"no recipe to {what}")
+    return found
+
+
+def _replace_tag(col, action) -> ToolSuggestion:
+    old, new = str(action.get("tag") or "").strip(), str(action.get("new_tag") or "").strip()
+    if not old or not new or _norm(old) == _norm(new):
+        raise Problem("no tag and new tag given")
+    found = [r for r in select(col, action.get("recipes")) if _norm(old) in {_norm(t) for t in r["tags"]}]
+    if not found:
+        raise Problem(f"no recipe with the tag {old!r}")
+    known = col.find("keyword", new)
+    new = known["name"] if known and _norm(known["name"]) == _norm(new) else new
+    old = next((t for r in found for t in r["tags"] if _norm(t) == _norm(old)), old)
+    return _suggestion("bulk_tag", f"recipes: tag {old!r} -> {new!r} ({len(found)})",
+                       {"op": "replace_tag", "tag": old, "new_tag": new}, found)
+
+
+def _replace_ingredient(col, action) -> ToolSuggestion:
+    old = col.find("food", str(action.get("ingredient") or ""))
+    new = str(action.get("new_ingredient") or "").strip()
+    if old is None:
+        raise Problem(f"no ingredient called {action.get('ingredient')!r}")
+    if not new or _norm(new) == _norm(old["name"]):
+        raise Problem("no new ingredient given")
+    using = col.using_food(old["id"])
+    found = [r for r in select(col, action.get("recipes")) if r["id"] in using]
+    if not found:
+        raise Problem(f"no recipe with {old['name']!r} to change")
+    known = col.find("food", new)
+    new = known["name"] if known else new
+    return _suggestion("replace_food", f"recipes: ingredient {old['name']!r} -> {new!r} ({len(found)})",
+                       {"food_id": old["id"], "food": old["name"], "new_food": new}, found)
+
+
+def _book(col, name) -> dict:
+    """{"id", "name", "endpoint"} of the cookbook (Mealie: category)."""
+    for endpoint in (["category"] if col.mealie else tandoor_client._COOKBOOK_ENDPOINT_CANDIDATES):
+        try:
+            api = mealie_client if col.mealie else tandoor_client
+            books = api.fetch_all_items(col.client, endpoint)
+        except tandoor_client.TandoorError:
+            continue
+        book = next((b for b in books if _norm(b["name"]) == _norm(name)), None)
+        if book:
+            return {"id": book["id"], "name": book["name"], "endpoint": endpoint}
+        break
+    raise Problem(f"no cookbook called {name!r}")
+
+
+def _remove_from_cookbook(col, action) -> ToolSuggestion:
+    book = _book(col, str(action.get("cookbook") or ""))
+    found = [r for r in select(col, action.get("recipes")) if _norm(book["name"]) in {_norm(b) for b in r["cookbooks"]}]
+    if not found:
+        raise Problem(f"no recipe to take out of {book['name']!r}")
+    return _suggestion("cookbook_remove", f"recipes: out of the cookbook {book['name']!r} ({len(found)})",
+                       {"book": book}, found)
+
+
+def _rename_cookbook(col, action) -> ToolSuggestion:
+    book = _book(col, str(action.get("cookbook") or ""))
+    new = str(action.get("new_name") or "").strip()
+    if not new or new == book["name"]:
+        raise Problem(f"no new name for {book['name']!r}")
+    return _suggestion("cookbook_rename", f"cookbook: rename {book['name']!r} -> {new!r}", {"book": book, "new_name": new})
+
+
+def _delete_cookbook(col, action) -> ToolSuggestion:
+    book = _book(col, str(action.get("cookbook") or ""))
+    found = [r for r in col.recipes() if _norm(book["name"]) in {_norm(b) for b in r["cookbooks"]}]
+    s = _suggestion("cookbook_delete", f"cookbook: delete {book['name']!r} ({len(found)} recipe(s) stay)",
+                    {"book": book}, found)
+    s.detail["confirm"] = True
+    return s
+
+
+def _delete_recipes(col, action) -> ToolSuggestion:
+    flt = action.get("recipes")
+    if not isinstance(flt, dict) or not any(flt.values()):
+        raise Problem("deleting every recipe isn't offered - say which ones")
+    found = _found(col, action, "delete")
+    s = _suggestion("delete_recipes", f"recipes: delete {len(found)}", {}, found)
+    s.detail["confirm"] = True
+    return s
+
+
+def _rename_recipe(col, action) -> ToolSuggestion:
+    found = _found(col, action, "rename")
+    new = str(action.get("new_name") or "").strip()[:128]
+    if len(found) != 1:
+        raise Problem(f"{len(found)} recipes match - say which one")
+    if not new or new == found[0]["name"]:
+        raise Problem("no new title given")
+    return _titles({found[0]["id"]: (found[0]["name"], new)})
+
+
+def _edit_titles(col, action) -> ToolSuggestion:
+    found = _found(col, action, "rename")
+    write = CASES.get(str(action.get("case") or "").casefold())
+    find = str(action.get("find") or "")
+    if not write and not find.strip():
+        raise Problem("no text to change in the titles")
+    changes = {}
+    for r in found:
+        if write:
+            new = write(r["name"])
+        else:
+            new = re.sub(re.escape(find.strip()), str(action.get("replace") or ""), r["name"], flags=re.IGNORECASE)
+            new = re.sub(r"\s{2,}", " ", new).strip(" -–,:")
+        if new and new != r["name"]:
+            changes[r["id"]] = (r["name"], new[:128])
+    if not changes:
+        raise Problem("no title would change")
+    return _titles(changes)
+
+
+def _titles(changes: dict) -> ToolSuggestion:
+    rows = [f"• {old} → {new}" for old, new in changes.values()]
+    more = len(rows) - MAX_FOUND_LISTED
+    s = ToolSuggestion(id=uuid.uuid4().hex[:10], kind="bulk_titles", summary=f"recipes: new title ({len(changes)})",
+                       detail={"titles": {str(k): new for k, (_old, new) in changes.items()},
+                               "recipe_ids": list(changes)},
+                       preview="\n".join(rows[:MAX_FOUND_LISTED]) + (f"\n… and {more} more" if more > 0 else ""))
+    if len(changes) > CONFIRM_ABOVE:
+        s.detail["confirm"] = True
+    return s
+
+
+def _minutes(value):
+    if value is None or value == "":
+        return None
+    if not isinstance(value, (int, float)) or not 0 <= value <= 24 * 60:
+        raise Problem("no sensible time given")
+    return int(round(value))
+
+
+def _set_time(col, action) -> ToolSuggestion:
+    prep, cook = _minutes(action.get("prep_minutes")), _minutes(action.get("cook_minutes"))
+    if prep is None and cook is None:
+        raise Problem("no time given")
+    found = _found(col, action, "change")
+    parts = [f"prep {prep} min" if prep is not None else "", f"cooking {cook} min" if cook is not None else ""]
+    return _suggestion("bulk_time", f"recipes: {', '.join(p for p in parts if p)} ({len(found)})",
+                       {"prep": prep, "cook": cook}, found)
+
+
+def _set_plural(col, action) -> ToolSuggestion:
+    entity = ENTITY_OF.get(str(action.get("entity", "")).casefold())
+    if entity not in ("food", "unit"):
+        raise Problem("plurals exist for ingredients and units")
+    item = col.find(entity, str(action.get("name") or ""))
+    plural = str(action.get("plural") or "").strip()
+    if item is None:
+        raise Problem(f"no {LABEL[entity]} called {action.get('name')!r}")
+    if not plural or plural == (item.get("plural_name") or ""):
+        raise Problem(f"no new plural for {item['name']!r}")
+    return _suggestion("set_plural", f"{LABEL[entity]}: plural of {item['name']!r} -> {plural!r}",
+                       {"entity": entity, "id": item["id"], "plural": plural})
+
+
+# chat name -> (maintenance tool, what it does)
+TOOLS = {"season": ("tags_season", "season tag"), "more_tags": ("tags_suggest_more", "more tags"),
+         "source": ("recipes_source", "source tag"), "translate": ("recipes_translate", "translate"),
+         "restructure": ("recipes_restructure", "restructure"), "amounts": ("recipes_amounts", "amounts into the steps"),
+         "servings": ("recipes_servings", "servings"), "images": ("recipes_images", "find a photo"),
+         "photos": ("recipes_photos", "improve the photo")}
+
+
+def _run_tool(col, action) -> ToolSuggestion:
+    name = str(action.get("tool") or "").casefold()
+    if name not in TOOLS:
+        raise Problem(f"no tool {name!r}")
+    tool, what = TOOLS[name]
+    if col.mealie:
+        from . import mealie_maintenance
+        if tool not in mealie_maintenance.TOOLS:
+            raise Problem(f"{what!r} needs Tandoor")
+    found = _found(col, action, "check")
+    s = _suggestion("run_tool", f"AI: {what} for {len(found)} recipe(s)", {"tool": tool}, found)
+    s.detail.pop("confirm", None)  # nothing changes yet - its suggestions are reviewed
+    return s
+
+
+def _undo(col, action, job=None) -> ToolSuggestion:
+    if col.mealie:
+        raise Problem("with Mealie, changes can't be taken back")
+    done = [s for s in (job.suggestions if job else []) if s.status == "applied" and s.undoable and s.kind != "undo_turn"]
+    if not done:
+        raise Problem("nothing applied in this chat to take back")
+    last = max(s.detail.get("turn", 0) for s in done)
+    ids = [s.id for s in done if s.detail.get("turn", 0) == last]
+    return ToolSuggestion(id=uuid.uuid4().hex[:10], kind="undo_turn", summary=f"undo: {len(ids)} change(s)",
+                          detail={"ids": ids},
+                          preview="\n".join(f"• {s.summary}" for s in done if s.id in ids))
+
+
+MORE = {"replace_tag": _replace_tag, "replace_ingredient": _replace_ingredient,
+        "remove_from_cookbook": _remove_from_cookbook, "rename_cookbook": _rename_cookbook,
+        "delete_cookbook": _delete_cookbook, "delete_recipes": _delete_recipes, "rename_recipe": _rename_recipe,
+        "edit_titles": _edit_titles, "set_time": _set_time, "set_plural": _set_plural, "run_tool": _run_tool}
+
+
 # ---------- one chat message ----------
 
 def chat(message: str, job_id: str | None = None) -> dict:
@@ -406,16 +677,21 @@ def chat(message: str, job_id: str | None = None) -> dict:
 
         def ask(system_prompt):
             out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
-                                                         max_tokens=2000)
+                                                         max_tokens=4000)
             tokens_in, tokens_out = getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0
             job.token_usage.input_tokens += tokens_in
             job.token_usage.output_tokens += tokens_out
             usage_log.record(TOOL, tokens_in, tokens_out)
             return out, usage
         prompt = PROMPT.replace("{language}", settings.output_language).replace("{manager}", target.name())
-        answer = json_answer.complete(ask, prompt)[0]
+        cut_off = []
+        try:
+            answer = json_answer.complete(ask, prompt)[0]
+        except json.JSONDecodeError:  # cut off - far too many actions for one answer
+            answer, cut_off = {}, ["the AI's answer was too long - ask for a smaller part at a time"]
         answer = answer if isinstance(answer, dict) else {}
-        suggestions, problems, answers = to_suggestions(col, answer.get("actions"))
+        suggestions, problems, answers = to_suggestions(col, answer.get("actions"), job)
+        problems = cut_off + problems
     for s in suggestions:
         s.detail["turn"] = len(history) // 2
         if s.detail.get("confirm"):
@@ -431,17 +707,64 @@ def chat(message: str, job_id: str | None = None) -> dict:
 
 # ---------- applying ----------
 
-def _apply(client, suggestion) -> None:
+def _apply(client, suggestion, renamed=None) -> None:
+    """renamed: Mealie recipe slugs changed by a new title in this chat (old -> new)."""
     d = suggestion.detail
     mealie = target.is_mealie()
+    if mealie and renamed:
+        d = {**d, "recipe_ids": [renamed.get(r, r) for r in d.get("recipe_ids") or []],
+             "titles": {renamed.get(k, k): v for k, v in (d.get("titles") or {}).items()}}
     if suggestion.kind in ("rename", "merge"):
         if mealie:
             from . import mealie_tools
             mealie_tools.apply(client, suggestion)
         return  # Tandoor: the tool's own apply (apply_suggestion below)
-    if suggestion.kind == "bulk_tag":
+    if suggestion.kind == "bulk_tag" and d["op"] == "replace_tag":
+        for rid in d["recipe_ids"]:
+            _edit_tags(client, rid, [d["tag"]], [d["new_tag"]], mealie)
+    elif suggestion.kind == "bulk_tag":
         for rid in d["recipe_ids"]:
             _set_tag(client, rid, d["tag"], d["op"] == "add_tag", mealie)
+    elif suggestion.kind == "replace_food":
+        _replace_food(client, d, mealie)
+    elif suggestion.kind in ("cookbook_remove", "cookbook_rename", "cookbook_delete"):
+        _cookbook(client, suggestion.kind, d, mealie)
+    elif suggestion.kind == "delete_recipes":
+        for rid in d["recipe_ids"]:
+            if mealie:
+                resp = client.delete(f"/recipes/{rid}")
+                if resp.status_code != 404:
+                    mealie_client._check(resp, "deleting the recipe")
+            else:
+                resp = client.delete(f"/recipe/{rid}/")
+                if resp.status_code != 404:
+                    _ok(resp)
+    elif suggestion.kind == "bulk_titles":
+        for rid, name in d["titles"].items():
+            if mealie:
+                saved = mealie_client._check(client.patch(f"/recipes/{rid}", json={"name": name}), "the title")
+                slug = saved.json().get("slug") if saved.content else None
+                if slug and slug != rid and renamed is not None:
+                    renamed.update({old: slug for old, now in renamed.items() if now == rid} | {rid: slug})
+            else:
+                _ok(client.patch(f"/recipe/{rid}/", json={"name": name}))
+    elif suggestion.kind == "bulk_time":
+        for rid in d["recipe_ids"]:
+            if mealie:
+                body = {k: f"{v} min" for k, v in (("prepTime", d["prep"]), ("performTime", d["cook"])) if v is not None}
+                if d["prep"] is not None and d["cook"] is not None:
+                    body["totalTime"] = f"{d['prep'] + d['cook']} min"
+                mealie_client._check(client.patch(f"/recipes/{rid}", json=body), "the times")
+            else:
+                body = {k: v for k, v in (("working_time", d["prep"]), ("waiting_time", d["cook"])) if v is not None}
+                _ok(client.patch(f"/recipe/{rid}/", json=body))
+    elif suggestion.kind == "set_plural":
+        if mealie:
+            path = f"{mealie_client.ENDPOINTS[d['entity']]}/{d['id']}"
+            item = mealie_client._check(client.get(path), "loading the entry").json()
+            mealie_client._check(client.put(path, json={**item, "pluralName": d["plural"]}), "the plural")
+        else:
+            _ok(client.patch(f"/{d['entity']}/{d['id']}/", json={"plural_name": d["plural"]}))
     elif suggestion.kind == "delete_tag":
         if mealie:
             resp = client.delete(f"/organizers/tags/{d['id']}")
@@ -477,25 +800,88 @@ def _ok(resp):
 
 
 def _set_tag(client, rid, tag, add: bool, mealie: bool) -> None:
+    _edit_tags(client, rid, [] if add else [tag], [tag] if add else [], mealie)
+
+
+def _edit_tags(client, rid, remove, add, mealie: bool) -> None:
+    """Takes tags off a recipe and puts others on - one save."""
+    gone = {_norm(t) for t in remove}
     if mealie:
         from . import mealie_tools
-        if add:
-            mealie_tools.add_tags(client, rid, [tag])
-            return
         recipe = mealie_tools._fetch(client, rid)
-        tags = [t for t in recipe.get("tags") or [] if _norm(t.get("name")) != _norm(tag)]
+        tags = [{"id": t["id"], "name": t["name"], "slug": t.get("slug")} for t in recipe.get("tags") or []
+                if _norm(t.get("name")) not in gone]
+        lookup = mealie_client._Lookup(client)
+        for name in add:
+            if _norm(name) not in {_norm(t["name"]) for t in tags}:
+                tag = lookup.get_or_create("keyword", name)
+                tags.append({"id": tag["id"], "name": tag["name"], "slug": tag.get("slug")})
         mealie_tools._patch(client, rid, {"tags": tags})
         return
     recipe = _ok(client.get(f"/recipe/{rid}/")).json()
-    keywords = [minimal_ref(k) for k in recipe.get("keywords") or []]
-    if add:
-        if _norm(tag) in {_norm(k["name"]) for k in keywords}:
+    keywords = [minimal_ref(k) for k in recipe.get("keywords") or [] if _norm(k.get("name")) not in gone]
+    before = len(recipe.get("keywords") or [])
+    for name in add:
+        if _norm(name) not in {_norm(k["name"]) for k in keywords}:
+            kid, canonical = tandoor_client._get_or_create(client, "keyword", name)
+            keywords.append({"id": kid, "name": canonical})
+    if len(keywords) != before or add:
+        _ok(client.patch(f"/recipe/{rid}/", json={"keywords": keywords}))
+
+
+def _replace_food(client, d, mealie: bool) -> None:
+    """The ingredient becomes another one - only in the listed recipes."""
+    if mealie:
+        from . import mealie_tools
+        new = mealie_client._Lookup(client).get_or_create("food", d["new_food"])
+        for rid in d["recipe_ids"]:
+            recipe = mealie_tools._fetch(client, rid)
+            rows = recipe.get("recipeIngredient") or []
+            for row in rows:
+                if (row.get("food") or {}).get("id") == d["food_id"]:
+                    row["food"] = {"id": new["id"], "name": new["name"]}
+            mealie_tools._patch(client, rid, {"recipeIngredient": rows})
+        return
+    from .tools_ingredients import _repoint_recipe_food
+    new_id, new_name = tandoor_client._get_or_create(client, "food", d["new_food"])
+    for rid in d["recipe_ids"]:
+        recipe = _ok(client.get(f"/recipe/{rid}/")).json()
+        _ok(client.patch(f"/recipe/{rid}/", json=_repoint_recipe_food(recipe, d["food_id"], new_id, new_name)))
+
+
+def _cookbook(client, kind, d, mealie: bool) -> None:
+    book = d["book"]
+    if mealie:  # cookbooks are categories
+        path = f"/organizers/categories/{book['id']}"
+        if kind == "cookbook_rename":
+            item = mealie_client._check(client.get(path), "loading the category").json()
+            mealie_client._check(client.put(path, json={**item, "name": d["new_name"]}), "renaming")
             return
-        kid, name = tandoor_client._get_or_create(client, "keyword", tag)
-        keywords.append({"id": kid, "name": name})
-    else:
-        keywords = [k for k in keywords if _norm(k["name"]) != _norm(tag)]
-    _ok(client.patch(f"/recipe/{rid}/", json={"keywords": keywords}))
+        if kind == "cookbook_delete":
+            mealie_client._check(client.delete(path), "deleting the category")
+            return
+        from . import mealie_tools
+        for rid in d["recipe_ids"]:
+            recipe = mealie_tools._fetch(client, rid)
+            kept = [c for c in recipe.get("recipeCategory") or [] if c.get("id") != book["id"]]
+            mealie_tools._patch(client, rid, {"recipeCategory": kept})
+        return
+    endpoint = f"/{book['endpoint']}/{book['id']}/"
+    if kind == "cookbook_rename":
+        _ok(client.patch(endpoint, json={"name": d["new_name"]}))
+        return
+    entries = "recipe-book-entry" if book["endpoint"] == "recipe-book" else "cookbook-recipe"
+    rows = tandoor_client.fetch_pages(client, f"/{entries}/", params={"book": book["id"]})
+    wanted = None if kind == "cookbook_delete" else {str(r) for r in d["recipe_ids"]}
+    for row in rows:
+        in_book = row.get("book")
+        in_book = in_book.get("id") if isinstance(in_book, dict) else in_book
+        recipe = row.get("recipe")
+        recipe = recipe.get("id") if isinstance(recipe, dict) else recipe
+        if in_book == book["id"] and (wanted is None or str(recipe) in wanted):
+            _ok(client.delete(f"/{entries}/{row['id']}/"))  # one by one, so undo can put them back
+    if kind == "cookbook_delete":
+        _ok(client.delete(endpoint))
 
 
 def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
@@ -510,6 +896,17 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     if suggestion.kind == "group_tags":
         from . import tools_tag_groups
         return tools_tag_groups.apply_suggestion(job_id, suggestion_id)
+    if suggestion.kind in ("run_tool", "undo_turn"):
+        try:
+            if suggestion.kind == "run_tool":
+                _start_tool(suggestion)
+            else:
+                _undo_turn(job, suggestion)
+            suggestion.status = "applied"
+        except Exception as exc:  # noqa: BLE001
+            suggestion.status, suggestion.error = "error", str(getattr(exc, "detail", "") or exc)
+        tool_jobs.save_tool_job(job)
+        return suggestion
     if suggestion.kind in ("rename", "merge") and not target.is_mealie():
         from . import tools_ingredients, tools_tags, tools_units
         apply_fn = {"food": tools_ingredients.apply_suggestion, "unit": tools_units.apply_suggestion,
@@ -517,10 +914,33 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
         return apply_fn(job_id, suggestion_id)
     try:
         with target.client().get_client() as client:
-            _apply(client, suggestion)
+            _apply(client, suggestion, job.meta.setdefault("renamed", {}) if target.is_mealie() else None)
         suggestion.status = "applied"
     except Exception as exc:  # noqa: BLE001
         suggestion.status, suggestion.error = "error", str(exc)
     finally:
         tool_jobs.save_tool_job(job)
     return suggestion
+
+
+def _start_tool(suggestion) -> None:
+    """The maintenance tool for just these recipes (recipe_scope "only") -
+    its suggestions come into the review inbox like a tile's."""
+    from . import main  # late: main imports this module
+    started = main._start_tool_job(suggestion.detail["tool"], {"only": suggestion.detail["recipe_ids"]})
+    suggestion.detail["job_id"] = started["job_id"]
+
+
+def _undo_turn(job, suggestion) -> None:
+    """Takes back the chat's last applied changes, newest first. Not
+    recorded itself - it isn't one more change to undo."""
+    from . import main, undo
+    failed = []
+    with undo.paused():
+        for sid in reversed(suggestion.detail["ids"]):
+            try:
+                main._perform_suggestion_action(job.id, sid, "undo")
+            except Exception as exc:  # noqa: BLE001
+                failed.append(str(exc))
+    if failed:
+        raise tandoor_client.TandoorError("; ".join(failed))

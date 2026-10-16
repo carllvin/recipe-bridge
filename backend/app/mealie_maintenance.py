@@ -177,6 +177,9 @@ def _changed(summaries, versions) -> set[str]:
 
 def recipes_for(client, metric, matches, skip=frozenset(), job=None) -> list[dict]:
     """Full recipes (not in skip) for which matches(recipe) is true."""
+    only = job.meta.get("only") if job is not None else None
+    if only:  # started from the chat for these recipes: exactly them, ignored ones too
+        return [r for r in _read(client, only) if matches(r)]
     data = _overview()
     versions, listed = data.get("recipe_versions"), (data.get("items") or {}).get(metric)
     if versions is None or listed is None:
