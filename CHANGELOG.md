@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Maintenance chat**: “all tags in small letters” (or capitals, or a
+  capital first letter) works for every tag, ingredient or unit at once –
+  the app lists each rename itself, names that end up the same are merged.
+  An AI answer cut off for length is said in the chat instead of a JSON error
 - **Season**: a holiday dish gets its season – a tag or title like
   *Weihnachten*/*Christmas* adds *Winter*, *Ostern*/*Easter* adds *Spring*,
   at import and on the tile (there without AI); the AI is told that

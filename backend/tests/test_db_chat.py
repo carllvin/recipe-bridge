@@ -180,3 +180,24 @@ def test_named_tags_into_a_new_group(kitchen, monkeypatch):
     assert apply(turn).status == "applied"
     group = next(k for k in kitchen.db["keyword"].values() if k["name"] == "Quelle")
     assert kitchen.db["keyword"][42]["parent"] == group["id"]
+
+
+def test_all_tags_in_small_letters(kitchen, monkeypatch):
+    kitchen.add("keyword", {"id": 22, "name": "fisch"})
+    ai = AI(monkeypatch)
+    ai.actions = [{"type": "change_case", "entity": "tag", "case": "lower"}]
+    turn = say("Alle Tags bitte kleingeschrieben")
+    by_kind = {s["kind"]: s for s in turn["suggestions"]}
+    assert by_kind["merge"]["detail"]["keep_id"] == 22 and by_kind["merge"]["detail"]["remove_ids"] == [20]
+    assert by_kind["rename"]["summary"] == "tag: rename 'Test' -> 'test'"
+    for n in range(len(turn["suggestions"])):
+        assert apply(turn, n).status == "applied"
+    assert sorted(kitchen.names("keyword")) == ["fisch", "test"]
+
+
+def test_an_answer_cut_off_is_said(kitchen, monkeypatch):
+    AI(monkeypatch)
+    monkeypatch.setattr(llm_provider, "complete_tool_text",
+                        lambda *a, **k: ('{"reply": "Ok", "actions": [{"type": "rename", "name": "Fi', None))
+    turn = say("Alles umbenennen")
+    assert turn["suggestions"] == [] and "too long" in turn["problems"][0]

@@ -54,6 +54,9 @@ An empty FILTER {} means every recipe.
 Actions ("entity" is "food" (ingredient), "unit" or "tag"):
 {"type": "rename", "entity": ..., "name": <current name>, "new_name": <new name>}
 {"type": "merge", "entity": ..., "names": [<names that mean the same>], "into": <name to keep>}
+{"type": "change_case", "entity": ..., "case": "lower" | "upper" | "capitalize", "names": [<names>]}
+  (writes names in small letters, capitals, or with a capital first letter;
+  leave out "names" for all of them - the app lists every change itself)
 {"type": "add_tag", "recipes": FILTER, "tag": <tag>}
 {"type": "remove_tag", "recipes": FILTER, "tag": <tag>}
 {"type": "delete_tag", "tag": <tag>} (removes it from every recipe and deletes it)
@@ -70,6 +73,8 @@ Rules:
   actions and say in "reply" what is possible instead
 - for tags and cookbooks use the exact spelling from the lists when one is
   meant; ingredients and units: the cook's words (the app finds them)
+- a change to many names at once that one action covers (e.g. all tags in
+  small letters -> change_case) is that one action, never a long list of renames
 - "history" is the conversation so far ("it", "those" may refer to it)
 - "reply": one or two short sentences, what you are proposing (or the
   answer), no lists - the app shows the details
@@ -257,6 +262,38 @@ def _entity_action(col, action) -> ToolSuggestion:
     return _merge(entity, keep, others, into or keep["name"])
 
 
+CASES = {"lower": str.lower, "upper": str.upper, "capitalize": lambda name: name[:1].upper() + name[1:]}
+
+
+def _change_case(col, action) -> list[ToolSuggestion]:
+    """Every name (or the given ones) in other letters - one rename each;
+    names that end up the same ("Vegan", "VEGAN") are merged."""
+    entity = ENTITY_OF.get(str(action.get("entity", "")).casefold())
+    write = CASES.get(str(action.get("case", "")).casefold())
+    if not entity or not write:
+        raise Problem("unknown kind of entry or spelling")
+    names = _list(action.get("names"))
+    items = [col.find(entity, n) for n in names] if names else col.items(entity)
+    unknown = [n for n, item in zip(names, items) if item is None]
+    if unknown:
+        raise Problem(f"no {LABEL[entity]} called " + ", ".join(repr(n) for n in unknown))
+    by_new: dict[str, list[dict]] = {}
+    for item in {i["id"]: i for i in items if i and i.get("name")}.values():
+        by_new.setdefault(write(item["name"].strip()), []).append(item)
+    out = []
+    for new_name, same in sorted(by_new.items(), key=lambda pair: pair[0].casefold()):
+        keep = next((i for i in same if i["name"] == new_name), same[0])
+        others = [i for i in same if i is not keep]
+        if others:
+            out.append(_merge(entity, keep, others, new_name))
+        elif keep["name"] != new_name:
+            out.append(_suggestion("rename", f"{LABEL[entity]}: rename {keep['name']!r} -> {new_name!r}",
+                                   {"type": "rename", "entity": entity, "id": keep["id"], "new_name": new_name}))
+    if not out:
+        raise Problem(f"every {LABEL[entity]} is written that way already")
+    return out
+
+
 def _merge(entity, keep, others, keep_name) -> ToolSuggestion:
     detail = {"type": "merge", "entity": entity, "keep_id": keep["id"], "keep_name": keep_name,
               "remove_ids": [o["id"] for o in others]}
@@ -276,6 +313,8 @@ def to_suggestions(col, actions) -> tuple[list[ToolSuggestion], list[str], list[
         try:
             if kind in ("rename", "merge"):
                 suggestions.append(_entity_action(col, action))
+            elif kind == "change_case":
+                suggestions += _change_case(col, action)
             elif kind == "find":
                 found = select(col, action.get("recipes"))
                 answers.append({"count": len(found),
@@ -406,16 +445,21 @@ def chat(message: str, job_id: str | None = None) -> dict:
 
         def ask(system_prompt):
             out, usage = llm_provider.complete_tool_text(system_prompt, json.dumps(payload, ensure_ascii=False),
-                                                         max_tokens=2000)
+                                                         max_tokens=4000)
             tokens_in, tokens_out = getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0
             job.token_usage.input_tokens += tokens_in
             job.token_usage.output_tokens += tokens_out
             usage_log.record(TOOL, tokens_in, tokens_out)
             return out, usage
         prompt = PROMPT.replace("{language}", settings.output_language).replace("{manager}", target.name())
-        answer = json_answer.complete(ask, prompt)[0]
+        cut_off = []
+        try:
+            answer = json_answer.complete(ask, prompt)[0]
+        except json.JSONDecodeError:  # cut off - far too many actions for one answer
+            answer, cut_off = {}, ["the AI's answer was too long - ask for a smaller part at a time"]
         answer = answer if isinstance(answer, dict) else {}
         suggestions, problems, answers = to_suggestions(col, answer.get("actions"))
+        problems = cut_off + problems
     for s in suggestions:
         s.detail["turn"] = len(history) // 2
         if s.detail.get("confirm"):
