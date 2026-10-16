@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 
 from . import ignored, json_answer, llm_provider, recipe_scope, tandoor_client, tool_jobs
@@ -245,7 +246,9 @@ them. You will receive a JSON array of recipes, each {"id": integer,
 
 A recipe clearly fits one season if its main ingredients say so (e.g.
 asparagus/strawberries -> Spring, pumpkin/mushrooms -> Autumn, mulled
-wine/cookies -> Winter) or it's mentioned explicitly. Then answer that
+wine/cookies -> Winter), it's a dish of a holiday (Christmas baking like
+stollen, panettone or gingerbread -> Winter, Easter bread -> Spring) or
+it's mentioned explicitly. Then answer that
 season, translated into {language}: one of "{spring}", "{summer}",
 "{autumn}", "{winter}". An everyday dish available year-round with no clear
 seasonal tie (e.g. pasta with tomato sauce) gets null.
@@ -268,6 +271,38 @@ SEASON_LABELS = {
 }
 
 
+# A dish tied to a holiday has its season - "Weihnachten" without "Winter"
+# was left for the season tile. Word starts, so "Weihnachtsplätzchen" counts.
+HOLIDAY_SEASONS = {
+    "weihnacht": 3, "christmas": 3, "xmas": 3, "advent": 3, "noël": 3, "noel": 3, "natale": 3,
+    "natalizi": 3, "navidad": 3, "navideñ": 3, "silvester": 3,
+    "oster": 0, "easter": 0, "pâques": 0, "paques": 0, "pasqua": 0, "pasquale": 0, "pascua": 0,
+}
+
+
+def season_labels():
+    return SEASON_LABELS.get(get_language_code(settings.output_language) or "en", SEASON_LABELS["en"])
+
+
+def holiday_season(texts) -> str | None:
+    """The season of a holiday named in these tags or titles, if any."""
+    for text in texts:
+        for word in re.findall(r"\w+", (text or "").casefold()):
+            for stem, index in HOLIDAY_SEASONS.items():
+                if word.startswith(stem):
+                    return season_labels()[index]
+    return None
+
+
+def with_holiday_season(tags: list[str], title: str = "") -> list[str]:
+    """Tags of a freshly read recipe: a holiday tag or title adds its season
+    when the AI named none."""
+    if any(t.strip().casefold() in SEASON_WORDS for t in tags):
+        return tags
+    season = holiday_season([*tags, title])
+    return [*tags, season] if season else tags
+
+
 def has_season_tag(recipe):
     return any(kw.get("name", "").strip().lower() in SEASON_WORDS for kw in recipe.get("keywords", []))
 
@@ -276,7 +311,7 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
     """Batched season check for the given recipes (callers pass only ones
     without a season tag). Adds token usage to `job`, stops early on cancel.
     Shared by the "Tags: add season" tool and the new-recipes workflow."""
-    labels = SEASON_LABELS.get(get_language_code(settings.output_language) or "en", SEASON_LABELS["en"])
+    labels = season_labels()
     # Plain replace, not str.format(): the prompt's JSON braces would
     # otherwise be read as format fields.
     system_prompt = SEASON_SYSTEM_PROMPT
@@ -285,8 +320,20 @@ def season_suggestions(job, recipes) -> list[ToolSuggestion]:
         system_prompt = system_prompt.replace("{" + key + "}", value)
     labels_by_lower = {label.lower(): label for label in labels}
 
-    by_id = {r["id"]: r for r in recipes}
     suggestions = []
+    asked = []
+    for recipe in recipes:  # a holiday tag or title tells without AI
+        season = holiday_season([*(kw.get("name", "") for kw in recipe.get("keywords", [])), recipe.get("name", "")])
+        if season:
+            suggestions.append(ToolSuggestion(
+                id=uuid.uuid4().hex[:10], kind="season",
+                summary=f"tag {recipe.get('name', '')!r} as {season!r}",
+                detail={"recipe_id": recipe["id"], "season": season},
+            ))
+        else:
+            asked.append(recipe)
+    recipes = asked
+    by_id = {r["id"]: r for r in recipes}
     batches = list(chunked(recipes, SEASON_BATCH_SIZE))
     for i, batch in enumerate(batches, 1):
         if job.cancel_requested:

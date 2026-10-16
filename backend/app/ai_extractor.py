@@ -206,8 +206,10 @@ tags: short, general keywords in {language} (e.g. "vegetarian", "dessert", \
 IMPORTANT - Season tag: additionally add EXACTLY ONE season tag to the tags - one \
 of "Spring", "Summer", "Autumn", or "Winter" (translated into {language}) - if the \
 recipe clearly fits a season (e.g. main ingredients like asparagus/strawberries -> \
-Spring, pumpkin/mushrooms -> Autumn, mulled wine/cookies -> Winter, or an explicit \
-mention in the text). If no season is clearly identifiable (e.g. an everyday dish \
+Spring, pumpkin/mushrooms -> Autumn, mulled wine/cookies -> Winter), it's a dish of a \
+holiday (Christmas baking like stollen, panettone or gingerbread -> Winter, Easter \
+bread -> Spring - also when a tag like "Christmas" is already there), or an explicit \
+mention in the text. If no season is clearly identifiable (e.g. an everyday dish \
 available year-round, like pasta with tomato sauce), omit the season tag. Do NOT \
 count this season tag towards the 5 general tags above (so up to 6 tags total).
 
@@ -659,6 +661,9 @@ def _dedupe_recipes(raw_recipes: list[dict]) -> list[ExtractedRecipe]:
             if isinstance(item, dict):
                 step_amounts.from_extraction(item)
                 _first_alternative(item.get("ingredients"))
+                from .tools_tags import with_holiday_season  # late import: pulls in the Tandoor client
+                item["tags"] = with_holiday_season([t for t in item.get("tags") or [] if isinstance(t, str)],
+                                                   item.get("title") or "")
             recipe = ExtractedRecipe(
                 id=uuid.uuid4().hex[:10],
                 title=item.get("title") or "Untitled recipe",
