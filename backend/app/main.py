@@ -1450,6 +1450,8 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
             tools_new_recipes.mark_processed(imported_ids)
     elif imported_ids:
         health.mark_changed()
+        tags = {t for r in job.recipes if r.tandoor_recipe_id in imported_ids for t in r.tags}
+        threading.Thread(target=_place_tags, args=(tags,), daemon=True).start()  # new tags into their group
         try:
             post_processing_job_id = await asyncio.to_thread(tools_new_recipes.start_after_import, imported_ids)
         except Exception as exc:  # noqa: BLE001
@@ -1457,6 +1459,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
 
     return {"results": results, "cookbook_name": cookbook_name or None, "cookbook_warning": cookbook_warning,
             "post_processing_job_id": post_processing_job_id}
+
+
+def _place_tags(tags) -> None:
+    try:
+        tools_tag_groups.place_imported_tags(tags)
+    except Exception:  # noqa: BLE001 - the tags just stay on the "without a group" tile
+        log.exception("Placing the imported tags in groups failed")
 
 
 @app.post("/api/jobs/{job_id}/recipes/{recipe_id}/undo-import")

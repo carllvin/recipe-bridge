@@ -168,3 +168,65 @@ def apply_suggestion(job_id: str, suggestion_id: str) -> ToolSuggestion:
     finally:
         tool_jobs.save_tool_job(job)
     return suggestion
+
+
+# ---------- after an import: new tags go straight into a fitting group ----------
+
+PLACE_PROMPT = """You sort a few new tags (keywords) of a home cook's recipe
+collection into the tag groups that already exist. You receive JSON:
+{"groups": [{"name": string, "examples": [tags already in it]}], "tags": [string]}
+
+For each tag pick the ONE existing group it clearly belongs to, judging by the
+group's name and examples (e.g. a website, video channel or cookbook author
+goes where other sources are; "vegan" where other diets are). When no group
+clearly fits, give null - never invent a group.
+
+Respond with ONLY a JSON object (no explanation, no markdown fence):
+{"<tag>": "<group name>" | null, ...}
+"""
+EXAMPLES_PER_GROUP = 8
+
+
+def place_imported_tags(tag_names) -> int:
+    """The given tags (an import's) that are in no group yet go into the
+    existing group they fit - one small AI call with the tools model, applied
+    right away; nothing when there are no groups. Returns how many moved."""
+    from . import health, usage_log
+    from .schemas import ToolJob
+    wanted = {str(n).strip().casefold() for n in tag_names if str(n).strip()}
+    if not wanted or not llm_provider.is_configured() or usage_log.budget_status().get("exceeded"):
+        return 0
+    with tandoor_client.get_client() as client:
+        keywords = tandoor_client.fetch_pages(client, "/keyword/")
+        groups = [k for k in keywords if k.get("numchild")]
+        new = [k for k in ungrouped(keywords) if k["name"].strip().casefold() in wanted]
+        if not groups or not new:
+            return 0
+        members = {}
+        for k in keywords:
+            if _parent_id(k):
+                members.setdefault(_parent_id(k), []).append(k["name"])
+        payload = {"groups": [{"name": g["name"], "examples": members.get(g["id"], [])[:EXAMPLES_PER_GROUP]}
+                              for g in groups],
+                   "tags": [k["name"] for k in new]}
+        job = ToolJob(id="after-import", tool="tags_groups")
+        try:
+            answer = tools_tags._complete_json(job, PLACE_PROMPT, payload, max_tokens=40 * len(new) + 100)
+        except Exception as exc:  # noqa: BLE001 - the tags stay on the tile then
+            log.info("Placing imported tags failed: %s", exc)
+            return 0
+        finally:
+            usage_log.record("tags_groups", job.token_usage.input_tokens, job.token_usage.output_tokens)
+        by_group = {g["name"].strip().casefold(): g for g in groups}
+        by_tag = {k["name"].strip().casefold(): k for k in new}
+        moved = 0
+        for tag_name, group_name in (answer.items() if isinstance(answer, dict) else []):
+            tag, group = by_tag.get(str(tag_name).strip().casefold()), by_group.get(str(group_name or "").strip().casefold())
+            if tag and group and group["id"] != tag["id"]:
+                resp = client.put(f"/keyword/{tag['id']}/move/{group['id']}/")
+                if resp.status_code < 400:
+                    moved += 1
+                    log.info("Tag %r put into the group %r after the import", tag["name"], group["name"])
+    if moved:
+        health.mark_changed()
+    return moved

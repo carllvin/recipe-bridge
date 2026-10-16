@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- After an import, its new tags go straight into the fitting existing tag
+  group (Tandoor) – one small AI call with the tools model; a tag that
+  fits no group stays on the *tags without a group* tile
 - **Few tags**: a recipe imported with fewer than five tags, or one the AI
   can't fill up to five on the tile, goes onto the tile's ignore list –
   it found nothing more that fits
