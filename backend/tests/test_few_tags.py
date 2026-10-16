@@ -53,3 +53,27 @@ def test_recipes_the_ai_cannot_fill_leave_the_tile(monkeypatch):
     recipes = [recipe(1, "Lasagne", ["Nudeln"]), recipe(2, "Reis", ["Reis"])]
     tools_tags.suggest_tags_suggestions(ToolJob(id="j", tool="tags_suggest_more"), recipes, [])
     assert ignored.keys("recipes_few_tags") == {"2"}  # 1 of 5: nothing more fits
+
+
+def test_a_holiday_gives_the_season_without_ai(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "output_language", "German")
+    asked = []
+    monkeypatch.setattr(tools_tags, "_complete_json",
+                        lambda job, prompt, payload, max_tokens, cache=False: asked.extend(payload) or [])
+    recipes = [recipe(1, "Panettone", ["Mehl"], ["Weihnachten", "Backen"]), recipe(2, "Osterbrot", ["Mehl"])]
+    out = tools_tags.season_suggestions(ToolJob(id="j", tool="tags_season"), recipes)
+    assert {s.detail["recipe_id"]: s.detail["season"] for s in out} == {1: "Winter", 2: "Frühling"}
+    assert asked == []
+    assert tools_tags.with_holiday_season(["Weihnachtsgebäck"]) == ["Weihnachtsgebäck", "Winter"]
+    assert tools_tags.with_holiday_season(["Weihnachten", "Herbst"]) == ["Weihnachten", "Herbst"]
+    assert tools_tags.with_holiday_season(["Toast", "Kosten"]) == ["Toast", "Kosten"]
+
+
+def test_read_recipes_get_the_season_of_their_holiday(monkeypatch):
+    from app import ai_extractor
+    from app.config import settings
+    monkeypatch.setattr(settings, "output_language", "German")
+    out = ai_extractor._dedupe_recipes([{"title": "Panettone", "tags": ["Weihnachten", "Backen"],
+                                         "ingredients": [{"name": "Mehl"}], "steps": [{"instruction": "Backen."}]}])
+    assert out[0].tags == ["Weihnachten", "Backen", "Winter"]

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Season**: a holiday dish gets its season – a tag or title like
+  *Weihnachten*/*Christmas* adds *Winter*, *Ostern*/*Easter* adds *Spring*,
+  at import and on the tile (there without AI); the AI is told that
+  Christmas baking such as panettone or stollen is winter
 - Source tags (website, channel, cookbook author) go into the group with the
   other source tags – on the *tags without a group* tile and right after an
   import, without AI; a group named like *Quelle* or *Source* is used, else
