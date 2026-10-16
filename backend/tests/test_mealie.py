@@ -100,3 +100,13 @@ def test_status_config_and_duplicates(mealie):
 def test_wrong_token_is_reported(mealie, monkeypatch):
     monkeypatch.setattr(settings, "mealie_token", "wrong")
     assert TestClient(main.app).get("/api/tandoor/status").json()["connected"] is False
+
+
+def test_imported_without_season_leaves_the_season_tile(mealie, tmp_path, monkeypatch):
+    from app import ignored
+    monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: None)
+    job = soup_job(tmp_path)
+    job.recipes[0].tags = ["Suppe"]  # the AI found no season while reading it
+    jobs.save_job(job)
+    TestClient(main.app).post(f"/api/jobs/{job.id}/import", json={"cookbook_name": "Omas Kochbuch"})
+    assert ignored.keys("recipes_without_season") == {"zwiebelsuppe"}

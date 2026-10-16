@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A recipe imported without a season tag – the AI found none while reading
+  it – no longer shows on the *without a season* tile (moved recipes still
+  do; they weren't judged)
 - After an update (or any restart) the collection overview is recounted
   on the first visit to Maintain – the tiles no longer show the old
   version's results
