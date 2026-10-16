@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Few tags**: a recipe imported with fewer than five tags, or one the AI
+  can't fill up to five on the tile, goes onto the tile's ignore list –
+  it found nothing more that fits
 - A recipe imported without a season tag – the AI found none while reading
   it – no longer shows on the *without a season* tile (moved recipes still
   do; they weren't judged)

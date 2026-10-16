@@ -43,3 +43,13 @@ def test_year_round_recipes_leave_the_season_tile(monkeypatch):
     out = tools_tags.season_suggestions(ToolJob(id="j", tool="tags_season"), recipes)
     assert [s.detail["recipe_id"] for s in out] == [1]
     assert ignored.keys("recipes_without_season") == {"2"}
+
+
+def test_recipes_the_ai_cannot_fill_leave_the_tile(monkeypatch):
+    from app import ignored
+    monkeypatch.setattr(tools_tags, "_complete_json", lambda job, prompt, payload, max_tokens, cache=False: [
+        {"id": 1, "tags": ["Hauptgericht", "italienisch", "herzhaft", "schnell", "Ofen"], "diet": []},
+        {"id": 2, "tags": ["Beilage"], "diet": []}])
+    recipes = [recipe(1, "Lasagne", ["Nudeln"]), recipe(2, "Reis", ["Reis"])]
+    tools_tags.suggest_tags_suggestions(ToolJob(id="j", tool="tags_suggest_more"), recipes, [])
+    assert ignored.keys("recipes_few_tags") == {"2"}  # 1 of 5: nothing more fits

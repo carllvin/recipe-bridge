@@ -102,7 +102,7 @@ def test_wrong_token_is_reported(mealie, monkeypatch):
     assert TestClient(main.app).get("/api/tandoor/status").json()["connected"] is False
 
 
-def test_imported_without_season_leaves_the_season_tile(mealie, tmp_path, monkeypatch):
+def test_imported_without_season_or_with_few_tags_leaves_the_tiles(mealie, tmp_path, monkeypatch):
     from app import ignored
     monkeypatch.setattr(tools_new_recipes, "start_after_import", lambda ids: None)
     job = soup_job(tmp_path)
@@ -110,3 +110,4 @@ def test_imported_without_season_leaves_the_season_tile(mealie, tmp_path, monkey
     jobs.save_job(job)
     TestClient(main.app).post(f"/api/jobs/{job.id}/import", json={"cookbook_name": "Omas Kochbuch"})
     assert ignored.keys("recipes_without_season") == {"zwiebelsuppe"}
+    assert ignored.keys("recipes_few_tags") == {"zwiebelsuppe"}  # one tag: the AI found no more

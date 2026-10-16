@@ -1380,10 +1380,13 @@ async def import_selected(job_id: str, body: dict = Body(default={})):
                 try:
                     tandoor_id = api.create_recipe(client, recipe, step_images=step_images, warnings=warnings)
                     recipe.tandoor_recipe_id = tandoor_id
-                    if job.source != "migration" and not any(t.strip().casefold() in tools_tags.SEASON_WORDS
-                                                             for t in recipe.tags):
-                        # the AI found no season while reading it: year-round, not for the season tile
-                        ignored.add("recipes_without_season", [{"key": str(tandoor_id), "name": recipe.title}])
+                    if job.source != "migration":  # the AI judged the tags while reading it
+                        entry = [{"key": str(tandoor_id), "name": recipe.title}]
+                        plain = [t for t in recipe.tags if t.strip().casefold() not in tools_tags.SEASON_WORDS]
+                        if len(plain) == len(recipe.tags):  # no season found: year-round
+                            ignored.add("recipes_without_season", entry)
+                        if len(plain) < tools_tags.MIN_TAGS_DEFAULT:  # fewer than five fitted
+                            ignored.add("recipes_few_tags", entry)
                     if recipe.source_url:
                         source_index.add(recipe.source_url, recipe.title)
 
