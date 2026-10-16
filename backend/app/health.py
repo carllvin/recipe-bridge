@@ -181,6 +181,7 @@ def _compute() -> None:
             } - {None}
             cook_today.save_index(recipes)  # "what can I cook today?" reuses this full read
             source_index.rebuild((r.get("source_url"), r.get("name", "")) for r in recipes)  # duplicates by address
+            source_tag.learn_from(recipes)  # source tags given before they were remembered (tag groups)
             began = time.monotonic()
             weak_photos = photo_quality.problems_of(
                 {str(r["id"]): r["image"] for r in recipes if r.get("image")}, photo_quality.fetcher(client))

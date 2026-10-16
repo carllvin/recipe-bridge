@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Source tags (website, channel, cookbook author) go into the group with the
+  other source tags – on the *tags without a group* tile and right after an
+  import, without AI; a group named like *Quelle* or *Source* is used, else
+  one is created. Source tags given earlier are recognised by the recipe's
+  address
 - After an import, its new tags go straight into the fitting existing tag
   group (Tandoor) – one small AI call with the tools model; a tag that
   fits no group stays on the *tags without a group* tile

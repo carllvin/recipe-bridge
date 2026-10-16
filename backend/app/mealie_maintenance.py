@@ -112,6 +112,8 @@ def compute_full(client) -> tuple[dict, dict, dict, dict]:
     lists = {entity: read[entity] for entity in ENTITY_PATHS}
     from . import source_index
     source_index.rebuild((r.get("orgURL"), r.get("name", "")) for r in recipes)  # duplicates by address
+    from . import source_tag
+    source_tag.learn_from(recipes)
     try:  # "What can I cook today?" reads the same recipes - like health.py does for Tandoor
         from . import cook_today, mealie_plan
         cook_today.save_index([mealie_plan.as_tandoor(r) for r in recipes])
