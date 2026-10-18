@@ -299,12 +299,30 @@ def _client() -> httpx.Client:
 def _process_video(url: str, images_dir: str) -> dict:
     """YouTube / Instagram / TikTok: description or caption plus - for
     YouTube - the subtitles (video_processor)."""
+    from . import llm_provider
     from .config import get_language_code, settings
+    from .schemas import TokenUsage
+    usage = TokenUsage()
+
+    def listen(data, filename):  # the video's sound, when its caption holds no recipe
+        spoken, used = llm_provider.transcribe_audio(data, filename)
+        usage.add(used)
+        return spoken
     with _client() as client:
         try:
-            info = video_processor.read(client, url, get_language_code(settings.output_language))
+            info = video_processor.read(client, url, get_language_code(settings.output_language),
+                                        listen if llm_provider.audio_provider() else None)
         except httpx.HTTPError as exc:
             raise UrlImportError(f"Could not load the video page: {exc}") from exc
+        spoken = len(info.get("transcript") or "") >= 40
+        if info.get("elsewhere") and not spoken:
+            raise UrlImportError(
+                "The video's caption only points elsewhere (e.g. \"recipe in the comments\") - Instagram "
+                "shows comments only when logged in"
+                + ("" if llm_provider.audio_provider() else ", and listening to the video needs an OpenAI or "
+                   "Gemini key")
+                + ". Copy the recipe from the comment and paste it as text, or use the bookmark button "
+                "on the open post.")
         if len((info.get("description") or "") + (info.get("transcript") or "")) < 40:
             raise UrlImportError(
                 "The video's text couldn't be read (the site may want a login or consent). "
@@ -315,7 +333,7 @@ def _process_video(url: str, images_dir: str) -> dict:
             if saved:
                 images[saved.pop("id")] = saved
     return {"pages": [{"page": 1, "text": info["text"]}], "images": images, "page_count": 1,
-            "metadata_title": info.get("title") or "",
+            "metadata_title": info.get("title") or "", "usage": usage,
             "source_tag": source_tag.slug(info.get("author") or "")}  # the channel
 
 

@@ -122,42 +122,100 @@ def tiktok(client, url: str, language: str | None) -> dict:
     return {"title": "", "author": info.get("author_name") or "", "description": caption, "transcript": "", "image": image}
 
 
-def instagram(client, url: str, language: str | None) -> dict:
-    html = client.get(url).text
-    caption = _meta(html, "og:description") or _meta(html, "description")
-    # "123 likes, 4 comments - user on May 1, 2026: "caption"" -> the caption
-    m = re.search(r':\s*["“](.*)["”]\s*\.?\s*$', caption, re.S)
-    if m:
-        caption = m.group(1)
-    if len(caption) < 80:  # the embed page usually carries the whole caption
-        m = re.match(r"^/(?:[\w.]+/)?(p|reel|reels|tv)/([\w-]+)", urlparse(url).path)
-        if m:
-            embed = client.get(f"https://www.instagram.com/p/{m.group(2)}/embed/captioned/").text
-            found = re.search(r'class="Caption"[^>]*>(.*?)</div>', embed, re.S)
-            if found:
-                from bs4 import BeautifulSoup
-                text = BeautifulSoup(found.group(1), "html.parser").get_text("\n", strip=True)
-                caption = text if len(text) > len(caption) else caption
-    return {"title": _meta(html, "og:title"), "author": "", "description": caption, "transcript": "",
-            "image": _meta(html, "og:image")}
+def _instagram_embed(client, code: str) -> dict:
+    """The post as Instagram's embed page carries it (reachable without a
+    login, unlike the post page): caption, creator, cover and video file."""
+    html = client.get(f"https://www.instagram.com/p/{code}/embed/captioned/").text
+    start = html.find('"contextJSON":')
+    media = {}
+    if start >= 0:
+        try:
+            raw = json.JSONDecoder().raw_decode(html[start + len('"contextJSON":'):])[0]
+            media = ((json.loads(raw).get("gql_data") or {}).get("shortcode_media") or {})
+        except (ValueError, TypeError, AttributeError):
+            media = {}
+    edges = (media.get("edge_media_to_caption") or {}).get("edges") or []
+    caption = "\n".join((e.get("node") or {}).get("text") or "" for e in edges).strip()
+    if not caption:  # older embed pages: only the caption block
+        found = re.search(r'class="Caption"[^>]*>(.*?)</div>', html, re.S)
+        if found:
+            from bs4 import BeautifulSoup
+            block = BeautifulSoup(found.group(1), "html.parser")
+            for extra in block.select(".CaptionUsername, .CaptionComments"):
+                extra.decompose()  # the creator's name and "view all 472 comments"
+            caption = block.get_text("\n", strip=True)
+    return {"caption": caption, "author": (media.get("owner") or {}).get("username") or "",
+            "image": media.get("display_url") or "", "video_url": media.get("video_url") or ""}
+
+
+# "recipe in the comments", "Rezept in den Kommentaren", "link in bio" - the
+# recipe is somewhere a reader without a login doesn't get
+ELSEWHERE = re.compile(r"(recipe|rezept|recette|ricetta|receta)\w*\W+(\w+\W+){0,3}"
+                       r"(comment|kommentar|commentaire|commento|comentario)|link\s+in\s+(the\s+)?bio",
+                       re.IGNORECASE)
+MAX_VIDEO_BYTES = 25 * 1024 * 1024  # what the transcription services take
+
+
+def looks_like_recipe(text: str) -> bool:
+    """Several lines with an amount - a caption that holds the recipe."""
+    amounts = re.findall(r"(?m)^\W{0,3}(\d+([.,/]\d+)?|[½¼¾⅓⅔])\s*\w", text or "")
+    return len(amounts) >= 3
+
+
+def instagram(client, url: str, language: str | None, listen=None) -> dict:
+    m = re.match(r"^/(?:[\w.]+/)?(p|reel|reels|tv)/([\w-]+)", urlparse(url).path)
+    embed = _instagram_embed(client, m.group(2)) if m else {}
+    caption, html = embed.get("caption") or "", ""
+    if len(caption) < 80:  # no embed (a story, a profile): the page's own description
+        html = client.get(url).text
+        meta = _meta(html, "og:description") or _meta(html, "description")
+        # "123 likes, 4 comments - user on May 1, 2026: "caption"" -> the caption
+        found = re.search(r':\s*["“](.*)["”]\s*\.?\s*$', meta, re.S)
+        meta = found.group(1) if found else meta
+        caption = meta if len(meta) > len(caption) else caption
+    transcript = ""
+    if listen and embed.get("video_url") and not looks_like_recipe(caption):
+        transcript = _listen(client, embed["video_url"], listen)
+    return {"title": _meta(html, "og:title") if html else "", "author": embed.get("author") or "",
+            "description": caption, "transcript": transcript,
+            "image": embed.get("image") or (_meta(html, "og:image") if html else ""),
+            "elsewhere": bool(ELSEWHERE.search(caption)) and not looks_like_recipe(caption)}
+
+
+def _listen(client, video_url: str, listen) -> str:
+    """What is said in the video - the recipe is often only spoken."""
+    try:
+        with client.stream("GET", video_url, timeout=60) as resp:
+            resp.raise_for_status()
+            data = b""
+            for chunk in resp.iter_bytes():
+                data += chunk
+                if len(data) > MAX_VIDEO_BYTES:
+                    log.info("Video too large to listen to")
+                    return ""
+        return (listen(data, "video.mp4") or "").strip()[:MAX_TRANSCRIPT_CHARS]
+    except Exception as exc:  # noqa: BLE001 - the caption is still there
+        log.info("Listening to the video failed: %s", exc)
+        return ""
 
 
 READERS = {"youtube": youtube, "tiktok": tiktok, "instagram": instagram}
 
 
-def read(client, url: str, language: str | None = None) -> dict:
+def read(client, url: str, language: str | None = None, listen=None) -> dict:
     """{"title", "author", "description", "transcript", "image", "text"} -
-    "text" is what goes to the extraction."""
+    "text" is what goes to the extraction. listen(bytes, filename) -> text:
+    transcribes a video whose caption holds no recipe (Instagram)."""
     kind = platform(url)
-    info = READERS[kind](client, url, language)
+    info = READERS[kind](client, url, language, listen) if kind == "instagram" else READERS[kind](client, url, language)
     parts = [f"Video recipe ({kind}): {info['title']}".rstrip(": "), f"Source: {url}"]
     if info.get("author"):
         parts.append(f"Creator: {info['author']}")
     if info.get("description"):
         parts.append("\nWhat the creator wrote:\n" + info["description"].strip())
     if info.get("transcript"):
-        parts.append("\nWhat is said in the video (subtitles - amounts and steps may only be mentioned here):\n"
-                     + info["transcript"])
+        parts.append("\nWhat is said in the video (subtitles or its sound - amounts and steps may only be "
+                     "mentioned here):\n" + info["transcript"])
     info["text"] = "\n".join(parts)
     info["kind"] = kind
     return info
