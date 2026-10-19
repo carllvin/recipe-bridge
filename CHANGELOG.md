@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Instagram**: the caption, creator and cover are read from the post's
+  embed data – without the creator's name and “view all 472 comments”
+  mixed into the text. When the caption holds no recipe (“recipe in the
+  comments”), the reel's sound is transcribed (with an OpenAI or Gemini
+  key, like voice notes); without that, the import says that the recipe is
+  in the comments – which Instagram only shows when logged in – instead of
+  reading a recipe out of the caption that isn't there
 - **Maintenance chat** – new actions, each shown as a card first:
   - replace a tag on some recipes, or an ingredient in some recipes only
     (“use butter instead of margarine in all cakes”)

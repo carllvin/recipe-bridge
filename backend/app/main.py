@@ -175,6 +175,8 @@ def _run_extraction(job_id: str, source_paths: list[str], doc_type: str, force_o
                 with open(page, encoding="utf-8", errors="replace") as f:
                     html = f.read()
             result = process_url(source_paths[0], images_dir, html=html, given_photos=_given_photos(job.id))
+            if result.get("usage"):  # a video listened to
+                job.token_usage.add(result["usage"])
         elif doc_type == "txt":
             with open(source_paths[0], encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -632,6 +634,8 @@ def _run_link_list(job, links: list[str], images_dir: str, resume: dict | None =
             jobs.save_job(job)
             try:
                 result = process_url(url, images_dir)
+                if result.get("usage"):
+                    job.token_usage.add(result["usage"])
                 for image_id, info in result["images"].items():
                     job.images[image_id] = _image_entry(info, number)
                 if batched:
