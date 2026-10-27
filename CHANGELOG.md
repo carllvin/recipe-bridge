@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.4.0
+
+Docker image `ghcr.io/carllvin/recipe-bridge:1.4.0` (or `:1.4`). No changes
+to the configuration are needed; the new `MATCH_INGREDIENTS` is optional
+(see [docs/configuration.md](docs/configuration.md)). Worth knowing: the
+maintenance chat can do much more now, and Instagram reels without a
+recipe in the caption are transcribed.
+
 - **`MATCH_INGREDIENTS=false`** skips matching ingredients, units and
   tags with the existing ones before the review – the names stay as the
   import extracted them. Default `true` keeps today's behaviour
