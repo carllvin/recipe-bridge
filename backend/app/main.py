@@ -599,9 +599,10 @@ def _finish_extraction(job, step_photos: bool = True) -> None:
     jobs.save_job(job)
     _mark_duplicates(job)
 
-    job.progress_label = "Matching ingredients with Tandoor …"
-    jobs.save_job(job)
-    import_matching.match_job_ingredients(job)
+    if settings.match_ingredients:
+        job.progress_label = "Matching ingredients with Tandoor …"
+        jobs.save_job(job)
+        import_matching.match_job_ingredients(job)
 
     job.status = "ready"
 

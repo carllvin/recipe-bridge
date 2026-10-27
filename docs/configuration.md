@@ -52,6 +52,7 @@ app actually uses.
 | `STEP_PHOTOS_AI` | `true` | *Place photos into the steps* may ask the image AI; `false` = only a recipe page's own step photos, the rest by hand |
 | `CHECK_DUPLICATES` | `true` | Flags recipes already in the collection (by title and by address) |
 | `REUSE_EXISTING_TAGS` | `true` | The AI prefers your existing tags |
+| `MATCH_INGREDIENTS` | `true` | Before the review, ingredients, units and tags are matched with the ones already in Tandoor (“Zwiebeln” becomes your existing “Zwiebel”). `false` skips this: names stay as extracted, no match badges in the review, no AI call for it |
 | `CUSTOM_INSTRUCTIONS` | – | Your own rules for the extraction, see [below](#custom-instructions) |
 
 ### Import

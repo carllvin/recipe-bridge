@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from . import target, tools_tags
+from .config import settings
 from .tools_new_recipes import PICK_SYSTEM_PROMPT, _key, _prompt, _similar_candidates
 
 log = logging.getLogger("recipe-bridge")
@@ -91,7 +92,10 @@ def _outcome(decisions, name) -> tuple[str | None, str]:
 
 def match_job_ingredients(job) -> None:
     """Updates job.recipes' ingredients, units and tags in place. Non-fatal:
-    if Tandoor isn't reachable, the review screen simply shows no badges."""
+    if Tandoor isn't reachable, the review screen simply shows no badges.
+    MATCH_INGREDIENTS=false skips it: names stay as extracted, no badges."""
+    if not settings.match_ingredients:
+        return
     try:
         api = target.client()  # Tandoor or Mealie
         with api.get_client() as client:

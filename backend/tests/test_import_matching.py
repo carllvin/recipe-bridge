@@ -1,5 +1,7 @@
 """Ingredients, units and tags are matched in the import review - so an
 import through the helper leaves nothing for the Review page."""
+import pytest
+
 from app import import_matching, jobs, llm_provider, main, tool_jobs, tools_ingredients, tools_new_recipes, tools_tags
 from app.schemas import ExtractedRecipe, Ingredient, ToolSuggestion
 
@@ -34,6 +36,20 @@ def test_units_and_tags_are_matched(tandoor, monkeypatch):
     assert recipe.tags == ["Vegetarisch", "Suppen", "Schnell", "Ernährung"]
     assert recipe.tag_status == {"Vegetarisch": "matched", "Suppen": "matched", "Schnell": "new", "Ernährung": "new"}
     assert recipe.tag_original == {"Vegetarisch": "vegetarisch", "Suppen": "Suppe"}  # group tags aren't offered
+
+
+def test_matching_can_be_switched_off(tandoor, monkeypatch):
+    kitchen(tandoor)
+    monkeypatch.setattr(import_matching.settings, "match_ingredients", False)
+    monkeypatch.setattr(tools_tags, "_complete_json", lambda *a, **k: pytest.fail("no AI call when matching is off"))
+    recipe = ExtractedRecipe(id="r", title="Zwiebelsuppe", source_page_start=1, source_page_end=1,
+                             tags=["Suppe"], ingredients=[Ingredient(name="Zwiebeln", unit="EL.", amount=2)])
+    job = jobs.create_job("x")
+    job.recipes = [recipe]
+    import_matching.match_job_ingredients(job)
+    onion = recipe.ingredients[0]
+    assert (onion.name, onion.unit, onion.tandoor_match, onion.unit_match) == ("Zwiebeln", "EL.", None, None)
+    assert recipe.tags == ["Suppe"] and recipe.tag_status == {}
 
 
 def test_after_import_only_ingredient_data_is_filled_in(tandoor, monkeypatch):

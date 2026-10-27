@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`MATCH_INGREDIENTS=false`** skips matching ingredients, units and
+  tags with the existing ones before the review – the names stay as the
+  import extracted them. Default `true` keeps today's behaviour
 - **Instagram**: the caption, creator and cover are read from the post's
   embed data – without the creator's name and “view all 472 comments”
   mixed into the text. When the caption holds no recipe (“recipe in the
