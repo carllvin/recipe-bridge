@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     convert_to_metric: bool = True     # convert US/UK units (cups, oz, lb, °F, inch) to metric
     check_duplicates: bool = True      # look up existing Tandoor recipes by title before import and warn on matches
     reuse_existing_tags: bool = True   # fetch existing Tandoor keywords and ask the AI to prefer reusing them
+    match_ingredients: bool = True     # match ingredients, units and tags against existing Tandoor entries before the review (import_matching)
     custom_instructions: str = ""      # extra instructions appended to the extraction prompt (see .env.example)
 
     # Housekeeping
